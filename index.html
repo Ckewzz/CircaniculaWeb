@@ -16,7 +16,7 @@
 
     // ── CONFIG (rellena con tus claves) ──────────────────
 
-    import { initializeApp } from "firebase/app";
+
 
     const firebaseConfig = {
       apiKey:            "AIzaSyB_2POgJsaN6ueZQLQpq8cAIXMBNp0x_rc",
@@ -594,6 +594,56 @@
       letter-spacing:.5px; opacity:.2;
       transition:all .4s; user-select:none;
     }
+    .clase-cell.seleccionada {
+  outline: 2px solid var(--amarillo);
+  transform: scale(1.08);
+  opacity: 1 !important;
+  cursor: pointer;
+  position: relative;
+}
+.clase-cell.seleccionada::after {
+  content: '✓';
+  position: absolute;
+  top: 1px; right: 3px;
+  font-size: .55rem;
+  color: var(--amarillo);
+}
+.calendario-acciones {
+  margin-top: 28px;
+  padding: 20px 24px;
+  background: rgba(255,204,0,0.06);
+  border: 1px solid rgba(255,204,0,0.2);
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+.slots-contador {
+  font-family: 'Cinzel', serif;
+  font-size: .78rem;
+  letter-spacing: 1px;
+}
+.slots-contador span { color: var(--amarillo); font-weight: 600; }
+.btn-confirmar-horario {
+  padding: 12px 32px;
+  background: var(--amarillo);
+  color: var(--negro);
+  font-family: 'Cinzel', serif;
+  font-size: .68rem;
+  letter-spacing: 2px;
+  font-weight: 600;
+  border: none;
+  border-radius: 2px;
+  cursor: pointer;
+  transition: opacity .3s;
+}
+.btn-confirmar-horario:disabled {
+  opacity: .3;
+  cursor: not-allowed;
+}
+.btn-confirmar-horario:not(:disabled):hover { opacity: .85; }
     .clase-cell.disponible { opacity:1; }
     .clase-cell.kids { background:rgba(232,116,0,.25); color:#ffa040; border:1px solid rgba(232,116,0,.3); }
     .clase-cell.flow { background:rgba(255,204,0,.2);  color:#ffcc00; border:1px solid rgba(255,204,0,.3); }
@@ -602,6 +652,26 @@
     .clase-cell.free { background:rgba(160,255,160,.12);color:#90ee90; border:1px solid rgba(160,255,160,.18); }
     .clase-cell.empty { background:transparent; border:1px dashed rgba(255,255,255,.04); color:transparent; opacity:1; }
     .horario-leyenda { display:flex; gap:18px; margin-top:22px; flex-wrap:wrap; }
+    <!-- Acciones del calendario -->
+<div class="calendario-acciones">
+  <p class="slots-contador">
+    Clases seleccionadas: <span id="slots-count">0</span>
+  </p>
+  <button class="btn-confirmar-horario" id="btn-confirmar" disabled
+    onclick="confirmarHorario()">
+    Confirmar y reservar →
+  </button>
+</div>
+
+<!-- Form oculto que envía a Formspree -->
+<form id="form-horario" action="https://formspree.io/f/mwvzdowd"
+  method="POST" style="display:none;">
+  <input type="hidden" name="_subject" value="Nueva reserva de horario">
+  <input type="hidden" name="plan"   id="fh-plan">
+  <input type="hidden" name="clases" id="fh-clases">
+  <input type="hidden" name="nombre" id="fh-nombre">
+  <input type="hidden" name="email"  id="fh-email">
+</form>
     .leyenda-item { display:flex; align-items:center; gap:7px; font-size:.68rem; opacity:.6; }
     .leyenda-dot { width:10px; height:10px; border-radius:2px; }
 
@@ -1312,8 +1382,8 @@
       <button class="opcion-btn" data-opcion="sesion">Sesión personalizada</button>
       <button class="opcion-btn" data-opcion="feedback">Feedback</button>
     </div>
-    <div class="contacto-form">
-      <div class="form-fila">
+<form class="contacto-form" action="https://formspree.io/f/mwvzdowd" method="POST">      <div class="form-fila">
+  <input type="hidden" name="_subject" value="Nuevo mensaje Circanícula">
         <div class="form-group"><label class="form-label">Nombre</label><input type="text" class="form-input" placeholder="Tu nombre"></div>
         <div class="form-group"><label class="form-label">Correo</label><input type="email" class="form-input" placeholder="tu@correo.com"></div>
       </div>
@@ -1322,7 +1392,7 @@
       <div class="form-group"><label class="form-label">Mensaje</label><textarea class="form-textarea" placeholder="Cuéntanos qué necesitas..."></textarea></div>
       <button class="btn-enviar">Enviar mensaje</button>
     </div>
-  </section>
+  </form>
 
   <footer>
     <p>© 2026 Circanícula · Academia de Danza Aérea · Hermosillo, Sonora</p>
@@ -1415,35 +1485,69 @@
   const planNombres = {basico:'Básico', medio:'Medio', avanzado:'Avanzado'};
   const claseNombres = {kids:'Kids', flow:'Flow', fit:'Fit', flex:'Flex', free:'Free'};
 
-  function renderHorario(plan){
-    const n = planHoras[plan];
-    let todas = [];
-    horarioBase.forEach(row => {
-      for(let i=1;i<=6;i++) if(row[i]!=='empty') todas.push(row[0]+'-'+i);
-    });
-    const disp = new Set(todas.slice(0,n));
-    const body = document.getElementById('horario-body');
-    body.innerHTML = '';
-    horarioBase.forEach(row => {
-      const tr = document.createElement('tr');
-      const th = document.createElement('td');
-      th.className = 'hora-col'; th.textContent = row[0];
-      tr.appendChild(th);
-      for(let i=1;i<=6;i++){
-        const td = document.createElement('td');
-        const tipo = row[i];
-        const div = document.createElement('div');
-        if(tipo==='empty'){
-          div.className = 'clase-cell empty'; div.textContent = '—';
-        } else {
-          div.className = 'clase-cell '+tipo;
-          if(disp.has(row[0]+'-'+i)) div.classList.add('disponible');
-          div.textContent = claseNombres[tipo];
+let slotsSeleccionados = new Set();
+
+function renderHorario(plan) {
+  slotsSeleccionados.clear();
+  actualizarContador();
+
+  const n = planHoras[plan];
+  let todas = [];
+  horarioBase.forEach(row => {
+    for(let i=1;i<=6;i++) if(row[i]!=='empty') todas.push(row[0]+'-'+i);
+  });
+  const disp = new Set(todas.slice(0, n));
+  const body = document.getElementById('horario-body');
+  body.innerHTML = '';
+
+  horarioBase.forEach(row => {
+    const tr = document.createElement('tr');
+    const th = document.createElement('td');
+    th.className = 'hora-col';
+    th.textContent = row[0];
+    tr.appendChild(th);
+
+    for(let i=1;i<=6;i++){
+      const td = document.createElement('td');
+      const tipo = row[i];
+      const div = document.createElement('div');
+      const key = row[0]+'-'+i;
+
+      if(tipo === 'empty'){
+        div.className = 'clase-cell empty';
+        div.textContent = '—';
+      } else {
+        div.className = 'clase-cell ' + tipo;
+        if(disp.has(key)){
+          div.classList.add('disponible');
+          div.style.cursor = 'pointer';
+          div.title = 'Click para seleccionar';
+          div.addEventListener('click', () => {
+            if(slotsSeleccionados.has(key)){
+              slotsSeleccionados.delete(key);
+              div.classList.remove('seleccionada');
+            } else {
+              slotsSeleccionados.add(key);
+              div.classList.add('seleccionada');
+            }
+            actualizarContador();
+          });
         }
-        td.appendChild(div); tr.appendChild(td);
+        div.textContent = claseNombres[tipo];
       }
-      body.appendChild(tr);
-    });
+      td.appendChild(div);
+      tr.appendChild(td);
+    }
+    body.appendChild(tr);
+  });
+}
+
+function actualizarContador() {
+  const contador = document.getElementById('slots-count');
+  const btn = document.getElementById('btn-confirmar');
+  if(contador) contador.textContent = slotsSeleccionados.size;
+  if(btn) btn.disabled = slotsSeleccionados.size === 0;
+}
   }
   renderHorario('medio');
   document.querySelectorAll('.plan-btn').forEach(btn => {
@@ -1494,6 +1598,32 @@
   document.getElementById('video-modal').addEventListener('click', e => {
     if(e.target.id === 'video-modal') document.getElementById('modal-close').click();
   });
+
+  function confirmarHorario() {
+  const planActivo = document.querySelector('.plan-btn.activo')?.dataset.plan || 'medio';
+  const slots = Array.from(slotsSeleccionados).join(', ');
+
+  // Si hay usuario logueado, usa sus datos
+  const nombre = document.getElementById('user-name')?.textContent || '';
+  const email  = usuarioActual?.email || '';
+
+  if(!email) {
+    // Sin login: pedir datos mínimos
+    const correo = prompt('¿Cuál es tu correo para confirmar la reserva?');
+    if(!correo) return;
+    document.getElementById('fh-email').value = correo;
+    document.getElementById('fh-nombre').value = prompt('¿Tu nombre?') || 'Sin nombre';
+  } else {
+    document.getElementById('fh-email').value = email;
+    document.getElementById('fh-nombre').value = nombre;
+  }
+
+  document.getElementById('fh-plan').value = planNombres[planActivo];
+  document.getElementById('fh-clases').value = slots;
+  document.getElementById('form-horario').submit();
+
+  alert('¡Reserva enviada! Te contactaremos para confirmar.');
+}
 </script>
 </body>
 </html>
