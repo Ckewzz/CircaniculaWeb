@@ -652,28 +652,9 @@
     .clase-cell.free { background:rgba(160,255,160,.12);color:#90ee90; border:1px solid rgba(160,255,160,.18); }
     .clase-cell.empty { background:transparent; border:1px dashed rgba(255,255,255,.04); color:transparent; opacity:1; }
     .horario-leyenda { display:flex; gap:18px; margin-top:22px; flex-wrap:wrap; }
-    <!-- Acciones del calendario -->
-<div class="calendario-acciones">
-  <p class="slots-contador">
-    Clases seleccionadas: <span id="slots-count">0</span>
-  </p>
-  <button class="btn-confirmar-horario" id="btn-confirmar" disabled
-    onclick="confirmarHorario()">
-    Confirmar y reservar →
-  </button>
-</div>
-
-<!-- Form oculto que envía a Formspree -->
-<form id="form-horario" action="https://formspree.io/f/mwvzdowd"
-  method="POST" style="display:none;">
-  <input type="hidden" name="_subject" value="Nueva reserva de horario">
-  <input type="hidden" name="plan"   id="fh-plan">
-  <input type="hidden" name="clases" id="fh-clases">
-  <input type="hidden" name="nombre" id="fh-nombre">
-  <input type="hidden" name="email"  id="fh-email">
-</form>
     .leyenda-item { display:flex; align-items:center; gap:7px; font-size:.68rem; opacity:.6; }
     .leyenda-dot { width:10px; height:10px; border-radius:2px; }
+
 
     /* ===== PRECIOS ===== */
     #precios { background:rgba(0,0,0,.35); }
@@ -1193,6 +1174,26 @@
       <div class="leyenda-item"><div class="leyenda-dot" style="background:#ff8080;opacity:.7"></div>Aéreo Fit</div>
       <div class="leyenda-item"><div class="leyenda-dot" style="background:#80d8ff;opacity:.7"></div>Flex</div>
       <div class="leyenda-item"><div class="leyenda-dot" style="background:#90ee90;opacity:.7"></div>Free</div>
+      <!-- Acciones del calendario -->
+<div class="calendario-acciones">
+  <p class="slots-contador">
+    Clases seleccionadas: <span id="slots-count">0</span>
+  </p>
+  <button class="btn-confirmar-horario" id="btn-confirmar" disabled
+    onclick="confirmarHorario()">
+    Confirmar y reservar →
+  </button>
+</div>
+
+<!-- Form oculto que envía a Formspree -->
+<form id="form-horario" action="https://formspree.io/f/mwvzdowd"
+  method="POST" style="display:none;">
+  <input type="hidden" name="_subject" value="Nueva reserva de horario">
+  <input type="hidden" name="plan"   id="fh-plan">
+  <input type="hidden" name="clases" id="fh-clases">
+  <input type="hidden" name="nombre" id="fh-nombre">
+  <input type="hidden" name="email"  id="fh-email">
+</form>
     </div>
   </section>
 
@@ -1382,17 +1383,43 @@
       <button class="opcion-btn" data-opcion="sesion">Sesión personalizada</button>
       <button class="opcion-btn" data-opcion="feedback">Feedback</button>
     </div>
-<form class="contacto-form" action="https://formspree.io/f/mwvzdowd" method="POST">      <div class="form-fila">
+  <form class="contacto-form" action="https://formspree.io/f/mwvzdowd" method="POST">
   <input type="hidden" name="_subject" value="Nuevo mensaje Circanícula">
-        <div class="form-group"><label class="form-label">Nombre</label><input type="text" class="form-input" placeholder="Tu nombre"></div>
-        <div class="form-group"><label class="form-label">Correo</label><input type="email" class="form-input" placeholder="tu@correo.com"></div>
-      </div>
-      <div class="form-group" id="campo-taller" style="display:none;"><label class="form-label">¿Para quién es el taller?</label><select class="form-select"><option value="">Selecciona...</option><option>Para mí (individual)</option><option>Para mi grupo / alumnado</option><option>Para una empresa / evento</option></select></div>
-      <div class="form-group" id="campo-sesion" style="display:none;"><label class="form-label">Objetivo de la sesión</label><select class="form-select"><option value="">Selecciona...</option><option>Preparación para competencia</option><option>Corrección técnica</option><option>Coreografía personalizada</option><option>Otro</option></select></div>
-      <div class="form-group"><label class="form-label">Mensaje</label><textarea class="form-textarea" placeholder="Cuéntanos qué necesitas..."></textarea></div>
-      <button class="btn-enviar">Enviar mensaje</button>
+  <div class="form-fila">
+    <div class="form-group">
+      <label class="form-label">Nombre</label>
+      <input type="text" class="form-input" name="nombre" placeholder="Tu nombre">
     </div>
-  </form>
+    <div class="form-group">
+      <label class="form-label">Correo</label>
+      <input type="email" class="form-input" name="correo" placeholder="tu@correo.com">
+    </div>
+  </div>
+  <div class="form-group" id="campo-taller" style="display:none;">
+    <label class="form-label">¿Para quién es el taller?</label>
+    <select class="form-select" name="tipo_taller">
+      <option value="">Selecciona...</option>
+      <option>Para mí (individual)</option>
+      <option>Para mi grupo / alumnado</option>
+      <option>Para una empresa / evento</option>
+    </select>
+  </div>
+  <div class="form-group" id="campo-sesion" style="display:none;">
+    <label class="form-label">Objetivo de la sesión</label>
+    <select class="form-select" name="objetivo_sesion">
+      <option value="">Selecciona...</option>
+      <option>Preparación para competencia</option>
+      <option>Corrección técnica</option>
+      <option>Coreografía personalizada</option>
+      <option>Otro</option>
+    </select>
+  </div>
+  <div class="form-group">
+    <label class="form-label">Mensaje</label>
+    <textarea class="form-textarea" name="mensaje" placeholder="Cuéntanos qué necesitas..."></textarea>
+  </div>
+  <button class="btn-enviar">Enviar mensaje</button>
+</form>
 
   <footer>
     <p>© 2026 Circanícula · Academia de Danza Aérea · Hermosillo, Sonora</p>
@@ -1494,7 +1521,7 @@ function renderHorario(plan) {
   const n = planHoras[plan];
   let todas = [];
   horarioBase.forEach(row => {
-    for(let i=1;i<=6;i++) if(row[i]!=='empty') todas.push(row[0]+'-'+i);
+    for(let i=1;i<=6;i++) if(row[i]!='empty') todas.push(row[0]+'-'+i);
   });
   const disp = new Set(todas.slice(0, n));
   const body = document.getElementById('horario-body');
