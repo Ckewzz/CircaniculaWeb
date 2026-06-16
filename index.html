@@ -3,7 +3,38 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Circanícula | Academia de Danza Aérea</title>
+  <title>Circanícula | Academia de Danza Aérea — Hermosillo, Sonora</title>
+  <meta name="description" content="Academia de Danza Aérea en Hermosillo, Sonora. Clases de acrobacia aérea, flex, kids y más. Horarios Lunes a Viernes. ¡Reserva tu clase hoy!">
+  <meta name="keywords" content="danza aérea hermosillo, clases acrobiacia hermosillo, aerial dance sonora, tela aérea hermosillo, aro aéreo hermosillo, flex hermosillo, circanícula">
+  <meta name="author" content="Circanícula Academia de Danza Aérea">
+  <meta name="robots" content="index, follow">
+  <meta name="theme-color" content="#ffcc00">
+
+  <!-- Open Graph / WhatsApp / Facebook -->
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://circanicula.com/">
+  <meta property="og:title" content="Circanícula | Academia de Danza Aérea — Hermosillo">
+  <meta property="og:description" content="Clases de acrobacia aérea, flex, kids y aro. Lunes a Viernes en Hermosillo, Sonora. ¡Reserva tu clase!">
+  <meta property="og:image" content="https://circanicula.com/Images/BG-01.jpg">
+  <meta property="og:locale" content="es_MX">
+
+  <!-- Twitter Card -->
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Circanícula | Academia de Danza Aérea">
+  <meta name="twitter:description" content="Clases de acrobacia aérea en Hermosillo, Sonora.">
+  <meta name="twitter:image" content="https://circanicula.com/Images/BG-01.jpg">
+
+  <!-- PWA -->
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="Images/Icono_4.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Circanícula">
+  <meta name="mobile-web-app-capable" content="yes">
+
+  <!-- Canonical -->
+  <link rel="canonical" href="https://circanicula.com/">
+
   <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;900&family=Raleway:ital,wght@0,300;0,400;0,600;1,300&display=swap" rel="stylesheet">
 
   <!-- Firebase SDK (módulos ESM) -->
@@ -11,7 +42,7 @@
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
     import { getAuth, signInWithPopup, signOut, onAuthStateChanged, GoogleAuthProvider }
       from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
-    import { getFirestore, doc, setDoc, collection, addDoc, query, where, getDocs, serverTimestamp }
+    import { getFirestore, doc, setDoc, collection, addDoc, query, where, getDocs, updateDoc, serverTimestamp }
       from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
     // ── CONFIG (rellena con tus claves) ──────────────────
@@ -64,6 +95,10 @@
       usuarioActual = user;
       window.usuarioActual = user;
       actualizarUI(user);
+      // Si viene de Stripe con pago exitoso, activar reserva una vez autenticado
+      if (user && new URLSearchParams(window.location.search).get('pago') === 'exitoso') {
+        activarReservaTrasStripe(user.uid);
+      }
     });
 
     function actualizarUI(user) {
@@ -171,7 +206,29 @@
       return { pendiente_pago:'Pendiente', activa:'Activa', cancelada:'Cancelada' }[e] || e;
     }
 
-    // No exponer auth/db globalmente — acceso solo a través de funciones definidas arriba
+    // Stripe success: si regresamos con ?pago=exitoso, marcar reserva como activa
+    async function activarReservaTrasStripe(uid) {
+      try {
+        const q = query(
+          collection(db, "reservas"),
+          where("uid", "==", uid),
+          where("estado", "==", "pendiente_pago")
+        );
+        const snap = await getDocs(q);
+        if (!snap.empty) {
+          const docRef = snap.docs[snap.docs.length - 1].ref;
+          await updateDoc(docRef, { estado: "activa", fechaPago: serverTimestamp() });
+          cargarMisReservas(uid);
+        }
+        const banner = document.getElementById('pago-exitoso-banner');
+        if (banner) {
+          banner.style.display = 'flex';
+          setTimeout(() => banner.style.display = 'none', 8000);
+        }
+        sessionStorage.removeItem('reserva_pendiente');
+        history.replaceState({}, '', '/');
+      } catch(e) { console.error('Error activando reserva:', e); }
+    }
   </script>
 
   <style>
@@ -937,6 +994,39 @@
 </head>
 <body>
 
+<!-- PWA INSTALL BANNER -->
+<div id="pwa-banner" style="display:none;position:fixed;bottom:20px;left:50%;transform:translateX(-50%);z-index:9000;
+  background:rgba(12,12,12,.97);border:1px solid rgba(255,204,0,.4);border-radius:6px;
+  padding:14px 20px;gap:14px;align-items:center;flex-wrap:wrap;max-width:460px;width:90%;
+  box-shadow:0 8px 32px rgba(0,0,0,.6);backdrop-filter:blur(10px);">
+  <div style="flex:1;min-width:200px;">
+    <p style="font-family:'Cinzel',serif;font-size:.72rem;letter-spacing:1px;color:var(--amarillo);margin-bottom:3px;">Instala Circanícula</p>
+    <p style="font-size:.7rem;opacity:.5;">Accede más rápido desde tu pantalla de inicio, sin abrir el navegador.</p>
+  </div>
+  <div style="display:flex;gap:8px;">
+    <button id="pwa-install-btn" style="padding:9px 20px;background:var(--amarillo);color:var(--negro);
+      font-family:'Cinzel',serif;font-size:.6rem;letter-spacing:2px;border:none;border-radius:2px;cursor:pointer;">
+      Instalar
+    </button>
+    <button id="pwa-dismiss-btn" style="padding:9px 14px;background:transparent;color:rgba(240,237,230,.4);
+      font-family:'Cinzel',serif;font-size:.6rem;border:1px solid rgba(255,255,255,.1);border-radius:2px;cursor:pointer;">
+      Ahora no
+    </button>
+  </div>
+</div>
+
+<!-- PAGO EXITOSO BANNER -->
+<div id="pago-exitoso-banner" style="display:none;position:fixed;top:80px;left:50%;transform:translateX(-50%);z-index:9000;
+  background:rgba(8,40,8,.97);border:1px solid rgba(80,200,80,.4);border-radius:6px;
+  padding:16px 28px;align-items:center;gap:14px;
+  box-shadow:0 8px 32px rgba(0,0,0,.6);backdrop-filter:blur(10px);">
+  <span style="font-size:1.3rem;">✅</span>
+  <div>
+    <p style="font-family:'Cinzel',serif;font-size:.78rem;color:#90ee90;letter-spacing:1px;">¡Pago recibido!</p>
+    <p style="font-size:.7rem;opacity:.6;margin-top:3px;">Tu reserva está siendo confirmada. Revisa "Mis Clases" en un momento.</p>
+  </div>
+</div>
+
 <!-- BG CAROUSEL -->
 <div id="bg-carousel">
   <img class="bg-slide active" src="Images/BG-01.jpg" alt="">
@@ -1673,6 +1763,41 @@ function actualizarContador() {
 
   alert('¡Reserva enviada! Te contactaremos para confirmar.');
 }
+</script>
+
+<script>
+  /* ===== PWA: Service Worker + Install Banner ===== */
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('/sw.js').catch(() => {});
+    });
+  }
+
+  let deferredInstall = null;
+  window.addEventListener('beforeinstallprompt', e => {
+    e.preventDefault();
+    deferredInstall = e;
+    document.getElementById('pwa-banner').style.display = 'flex';
+  });
+
+  window.addEventListener('appinstalled', () => {
+    document.getElementById('pwa-banner').style.display = 'none';
+    deferredInstall = null;
+  });
+
+  document.getElementById('pwa-install-btn')?.addEventListener('click', async () => {
+    if (!deferredInstall) return;
+    deferredInstall.prompt();
+    const { outcome } = await deferredInstall.userChoice;
+    if (outcome === 'accepted') document.getElementById('pwa-banner').style.display = 'none';
+    deferredInstall = null;
+  });
+
+  document.getElementById('pwa-dismiss-btn')?.addEventListener('click', () => {
+    document.getElementById('pwa-banner').style.display = 'none';
+  });
+
+  /* Stripe success: manejado en onAuthStateChanged del módulo Firebase */
 </script>
 </body>
 </html>

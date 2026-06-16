@@ -1,0 +1,47 @@
+{
+  "name": "Circanícula — Academia de Danza Aérea",
+  "short_name": "Circanícula",
+  "description": "Academia de Danza Aérea en Hermosillo, Sonora. Reserva tu clase, ve horarios, paga tu mensualidad y más.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#080808",
+  "theme_color": "#ffcc00",
+  "orientation": "portrait-primary",
+  "lang": "es-MX",
+  "categories": ["education", "health", "fitness"],
+  "icons": [
+    {
+      "src": "Images/Icono_4.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "Images/Logo_4.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "Images/BG-01.jpg",
+      "sizes": "1280x720",
+      "type": "image/jpeg",
+      "form_factor": "wide"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Reservar clase",
+      "url": "/#horarios",
+      "description": "Ve directo al calendario de clases"
+    },
+    {
+      "name": "Ver precios",
+      "url": "/#precios",
+      "description": "Planes y mensualidades"
+    }
+  ]
+}
