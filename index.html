@@ -858,6 +858,43 @@
     .video-iframe-wrap { position:relative; padding-bottom:56.25%; height:0; overflow:hidden; border-radius:4px; }
     .video-iframe-wrap iframe { position:absolute; inset:0; width:100%; height:100%; border:none; }
 
+    /* ===== VIDEOS EN CONSTRUCCIÓN ===== */
+    .videos-construccion {
+      text-align:center;
+      padding:60px 20px;
+      background:rgba(20,20,20,.6);
+      border:1px dashed rgba(255,204,0,.2);
+      border-radius:6px;
+      max-width:600px;
+      margin:0 auto;
+    }
+    .construccion-icono { font-size:3rem; margin-bottom:18px; opacity:.5; }
+    .construccion-titulo {
+      font-family:'Cinzel',serif;
+      font-size:1.1rem;
+      font-weight:600;
+      color:var(--amarillo);
+      margin-bottom:14px;
+      letter-spacing:1px;
+    }
+    .construccion-desc {
+      font-size:.82rem;
+      opacity:.5;
+      line-height:1.9;
+      max-width:440px;
+      margin:0 auto 22px;
+    }
+    .construccion-tags { display:flex; gap:8px; flex-wrap:wrap; justify-content:center; }
+    .ctag {
+      padding:5px 14px;
+      border:1px solid rgba(255,204,0,.2);
+      border-radius:20px;
+      font-family:'Cinzel',serif;
+      font-size:.56rem;
+      letter-spacing:2px;
+      color:rgba(255,204,0,.6);
+    }
+
     /* ===== EQUIPO ===== */
     #equipo { background:rgba(0,0,0,.35); }
     .equipo-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:20px; margin-bottom:50px; }
@@ -1377,37 +1414,19 @@
       <div class="titulo-linea"></div>
       <p class="seccion-desc">Inicia sesión para acceder al contenido completo.</p>
     </div>
-    <div class="videos-grid">
-      <div class="video-card" data-yt="dQw4w9WgXcQ">
-        <img src="https://img.youtube.com/vi/dQw4w9WgXcQ/mqdefault.jpg" alt="" class="video-thumb">
-        <div class="video-play-overlay"><div class="play-btn-icon"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></div></div>
-        <div class="video-lock">
-          <span class="video-lock-icon">🔒</span>
-          <span class="video-lock-text">Inicia sesión para ver</span>
-          <button class="btn-login-video" onclick="loginGoogle()">Entrar con Google</button>
-        </div>
-        <div class="video-info"><p class="video-titulo">Introducción al Aéreo Flow</p><p class="video-desc">Primeras secuencias para entender el flujo en tela.</p></div>
+    <!-- ESPACIO EN CONSTRUCCIÓN — videos se agregan cuando estén listos -->
+    <div class="videos-construccion">
+      <div class="construccion-icono">🎬</div>
+      <h3 class="construccion-titulo">Espacio en Construcción</h3>
+      <p class="construccion-desc">Estamos preparando contenido exclusivo: clases grabadas, tips de técnica y rutinas de entrenamiento. Muy pronto disponible para alumnas registradas.</p>
+      <div class="construccion-tags">
+        <span class="ctag">Aéreo Flow</span>
+        <span class="ctag">Flex</span>
+        <span class="ctag">Kids</span>
+        <span class="ctag">Aro</span>
+        <span class="ctag">Tips de técnica</span>
       </div>
-      <div class="video-card" data-yt="dQw4w9WgXcQ">
-        <img src="https://img.youtube.com/vi/dQw4w9WgXcQ/mqdefault.jpg" alt="" class="video-thumb">
-        <div class="video-play-overlay"><div class="play-btn-icon"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></div></div>
-        <div class="video-lock">
-          <span class="video-lock-icon">🔒</span>
-          <span class="video-lock-text">Inicia sesión para ver</span>
-          <button class="btn-login-video" onclick="loginGoogle()">Entrar con Google</button>
-        </div>
-        <div class="video-info"><p class="video-titulo">Tip: Puente activo</p><p class="video-desc">Cómo activar el puente correctamente.</p></div>
-      </div>
-      <div class="video-card" data-yt="dQw4w9WgXcQ">
-        <img src="https://img.youtube.com/vi/dQw4w9WgXcQ/mqdefault.jpg" alt="" class="video-thumb">
-        <div class="video-play-overlay"><div class="play-btn-icon"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></div></div>
-        <div class="video-lock">
-          <span class="video-lock-icon">🔒</span>
-          <span class="video-lock-text">Inicia sesión para ver</span>
-          <button class="btn-login-video" onclick="loginGoogle()">Entrar con Google</button>
-        </div>
-        <div class="video-info"><p class="video-titulo">Aéreo Fit: Core</p><p class="video-desc">Rutina de fortalecimiento para deportes aéreos.</p></div>
-      </div>
+      <a href="#contacto" class="btn-secundario" style="margin-top:28px;display:inline-block;">Avísame cuando esté listo</a>
     </div>
   </section>
 
