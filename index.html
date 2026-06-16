@@ -118,7 +118,7 @@
         estado: "pendiente_pago",
         fechaReserva: serverTimestamp()
       });
-      window.open(`${base}?prefilled_email=${encodeURIComponent(usuarioActual.email)}`, '_blank');
+      window.open(`${base}?prefilled_email=${encodeURIComponent(usuarioActual.email)}`, '_blank', 'noopener,noreferrer');
     };
 
     // ── MIS RESERVAS ──────────────────────────────────────
@@ -137,14 +137,32 @@
         const fecha = r.fechaReserva?.toDate?.()?.toLocaleDateString('es-MX') || '—';
         const el = document.createElement('div');
         el.className = 'reserva-item';
-        el.innerHTML = `
-          <div class="reserva-plan">${r.plan?.toUpperCase() || '—'}</div>
-          <div class="reserva-info">
-            <span class="reserva-estado estado-${r.estado}">${estadoLabel(r.estado)}</span>
-            <span class="reserva-fecha">${fecha}</span>
-          </div>
-          <div class="reserva-dias">${(r.diasSeleccionados||[]).join(', ') || 'Sin días seleccionados'}</div>
-        `;
+
+        const planDiv = document.createElement('div');
+        planDiv.className = 'reserva-plan';
+        planDiv.textContent = (r.plan || '—').toUpperCase();
+
+        const infoDiv = document.createElement('div');
+        infoDiv.className = 'reserva-info';
+
+        const estadoSpan = document.createElement('span');
+        estadoSpan.className = 'reserva-estado estado-' + (r.estado || '');
+        estadoSpan.textContent = estadoLabel(r.estado);
+
+        const fechaSpan = document.createElement('span');
+        fechaSpan.className = 'reserva-fecha';
+        fechaSpan.textContent = fecha;
+
+        infoDiv.appendChild(estadoSpan);
+        infoDiv.appendChild(fechaSpan);
+
+        const diasDiv = document.createElement('div');
+        diasDiv.className = 'reserva-dias';
+        diasDiv.textContent = (r.diasSeleccionados || []).join(', ') || 'Sin días seleccionados';
+
+        el.appendChild(planDiv);
+        el.appendChild(infoDiv);
+        el.appendChild(diasDiv);
         lista.appendChild(el);
       });
     }
@@ -153,8 +171,7 @@
       return { pendiente_pago:'Pendiente', activa:'Activa', cancelada:'Cancelada' }[e] || e;
     }
 
-    window._auth = auth;
-    window._db   = db;
+    // No exponer auth/db globalmente — acceso solo a través de funciones definidas arriba
   </script>
 
   <style>
@@ -649,8 +666,9 @@
     .clase-cell.disponible { opacity:1; }
     .clase-cell.kids { background:rgba(232,116,0,.25); color:#ffa040; border:1px solid rgba(232,116,0,.3); }
     .clase-cell.flow { background:rgba(255,204,0,.2);  color:#ffcc00; border:1px solid rgba(255,204,0,.3); }
-    .clase-cell.fit  { background:rgba(255,80,80,.18);  color:#ff8080; border:1px solid rgba(255,80,80,.25); }
+    .clase-cell.fit  { background:rgba(255,204,0,.2);  color:#ffcc00; border:1px solid rgba(255,204,0,.3); }
     .clase-cell.flex { background:rgba(80,200,255,.15); color:#80d8ff; border:1px solid rgba(80,200,255,.2); }
+    .clase-cell.aro  { background:rgba(200,130,255,.18);color:#d8a0ff; border:1px solid rgba(200,130,255,.3); }
     .clase-cell.free { background:rgba(160,255,160,.12);color:#90ee90; border:1px solid rgba(160,255,160,.18); }
     .clase-cell.empty { background:transparent; border:1px dashed rgba(255,255,255,.04); color:transparent; opacity:1; }
     .horario-leyenda { display:flex; gap:18px; margin-top:22px; flex-wrap:wrap; }
@@ -996,7 +1014,7 @@
     <h1 class="hero-titulo">Circa<span class="acento">nícula</span></h1>
     <p class="hero-desc">Donde el cuerpo aprende a desafiar la gravedad. Clases de acrobacia aérea, flex y más — diseñadas para tu ritmo.</p>
     <div class="hero-btns">
-      <a href="https://calendar.app.google/ryLFrBeakHMMPRBMA" target="_blank" class="btn-primario">Reserva tu clase</a>
+      <a href="https://calendar.app.google/ryLFrBeakHMMPRBMA" target="_blank" rel="noopener noreferrer" class="btn-primario">Reserva tu clase</a>
       <a href="#precios" class="btn-secundario">Ver planes</a>
     </div>
     <div class="hero-scroll">
@@ -1151,31 +1169,30 @@
       <span class="seccion-eyebrow">Organiza tu semana</span>
       <h2 class="seccion-titulo">Horarios</h2>
       <div class="titulo-linea"></div>
-      <p class="seccion-desc">Selecciona tu plan para ver las horas disponibles.</p>
+      <p class="seccion-desc">Lunes a Viernes · Kids 4:30–6 pm · Adultos 6–8 pm · Clases especiales Flex y Aro Mar & Jue.</p>
     </div>
     <div class="plan-selector">
       <button class="plan-btn" data-plan="basico">Plan Básico</button>
       <button class="plan-btn activo" data-plan="medio">Plan Medio</button>
       <button class="plan-btn" data-plan="avanzado">Plan Avanzado</button>
     </div>
-    <p class="plan-info-badge" id="plan-info">Plan seleccionado: <strong>Medio</strong> — <strong>5 horas semanales</strong></p>
+    <p class="plan-info-badge" id="plan-info">Plan seleccionado: <strong>Medio</strong> — <strong>4 clases semanales</strong></p>
     <div style="overflow-x:auto;">
       <table class="horario-grid">
         <thead>
           <tr>
-            <th style="width:65px">Hora</th>
-            <th>Lunes</th><th>Martes</th><th>Miércoles</th><th>Jueves</th><th>Viernes</th><th>Sábado</th>
+            <th style="width:100px">Hora</th>
+            <th>Lunes</th><th>Martes</th><th>Miércoles</th><th>Jueves</th><th>Viernes</th>
           </tr>
         </thead>
         <tbody id="horario-body"></tbody>
       </table>
     </div>
     <div class="horario-leyenda">
-      <div class="leyenda-item"><div class="leyenda-dot" style="background:#e87400;opacity:.7"></div>Kids</div>
-      <div class="leyenda-item"><div class="leyenda-dot" style="background:#ffcc00;opacity:.7"></div>Aéreo Flow</div>
-      <div class="leyenda-item"><div class="leyenda-dot" style="background:#ff8080;opacity:.7"></div>Aéreo Fit</div>
-      <div class="leyenda-item"><div class="leyenda-dot" style="background:#80d8ff;opacity:.7"></div>Flex</div>
-      <div class="leyenda-item"><div class="leyenda-dot" style="background:#90ee90;opacity:.7"></div>Free</div>
+      <div class="leyenda-item"><div class="leyenda-dot" style="background:#e87400;opacity:.7"></div>Kids (4:30–6 pm)</div>
+      <div class="leyenda-item"><div class="leyenda-dot" style="background:#ffcc00;opacity:.7"></div>Adultos (6–7 pm / 7–8 pm)</div>
+      <div class="leyenda-item"><div class="leyenda-dot" style="background:#80d8ff;opacity:.7"></div>Flex — Mar & Jue 6–7 pm</div>
+      <div class="leyenda-item"><div class="leyenda-dot" style="background:#d8a0ff;opacity:.7"></div>Aro — Mar & Jue 7–8 pm</div>
     </div><!-- /horario-leyenda -->
       <!-- Acciones del calendario -->
 <div class="calendario-acciones">
@@ -1219,7 +1236,7 @@
         <p class="precio-plan-nombre">Plan Básico</p>
         <p class="precio-monto">$800</p>
         <p class="precio-periodo">al mes</p>
-        <p class="precio-horas"><strong>2 horas</strong> semanales</p>
+        <p class="precio-horas"><strong>2 clases</strong> semanales</p>
         <button class="btn-plan" onclick="irAPagar('basico')">Elegir Básico</button>
       </div>
       <div class="precio-card destacado">
@@ -1227,14 +1244,14 @@
         <p class="precio-plan-nombre">Plan Medio</p>
         <p class="precio-monto">$1,200</p>
         <p class="precio-periodo">al mes</p>
-        <p class="precio-horas"><strong>5 horas</strong> semanales</p>
+        <p class="precio-horas"><strong>4 clases</strong> semanales</p>
         <button class="btn-plan" onclick="irAPagar('medio')">Elegir Medio</button>
       </div>
       <div class="precio-card">
         <p class="precio-plan-nombre">Plan Avanzado</p>
         <p class="precio-monto">$1,600</p>
         <p class="precio-periodo">al mes</p>
-        <p class="precio-horas"><strong>7 horas</strong> semanales</p>
+        <p class="precio-horas"><strong>6 clases</strong> semanales</p>
         <button class="btn-plan" onclick="irAPagar('avanzado')">Elegir Avanzado</button>
       </div>
     </div>
@@ -1437,7 +1454,8 @@
   <div class="video-modal-inner">
     <button class="video-modal-close" id="modal-close">✕ Cerrar</button>
     <div class="video-iframe-wrap">
-      <iframe id="modal-iframe" src="" allowfullscreen></iframe>
+      <iframe id="modal-iframe" src="" allowfullscreen
+        sandbox="allow-scripts allow-same-origin allow-presentation"></iframe>
     </div>
   </div>
 </div>
@@ -1503,18 +1521,16 @@
   });
 
   /* HORARIO */
+  // Horario real Circanícula — Lun-Vie
+  // Columnas: Lunes, Martes, Miércoles, Jueves, Viernes
   const horarioBase = [
-    ['9:00',  'kids','empty','kids','empty','kids','kids'],
-    ['10:00', 'flow','empty','flow','empty','flow','flow'],
-    ['11:00', 'fit', 'empty','fit', 'empty','fit', 'free'],
-    ['17:00', 'flex','flow', 'flex','flow', 'flex','empty'],
-    ['18:00', 'flow','fit',  'flow','fit',  'flow','empty'],
-    ['19:00', 'fit', 'flex', 'fit', 'flex', 'fit', 'empty'],
-    ['20:00', 'flex','free', 'flex','free', 'flex','empty'],
+    ['4:30 – 6:00', 'kids', 'kids',  'kids', 'kids',  'kids' ],
+    ['6:00 – 7:00', 'flow', 'flex',  'flow', 'flex',  'flow' ],
+    ['7:00 – 8:00', 'fit',  'aro',   'fit',  'aro',   'fit'  ],
   ];
-  const planHoras = {basico:2, medio:5, avanzado:7};
+  const planHoras = {basico:2, medio:4, avanzado:6};
   const planNombres = {basico:'Básico', medio:'Medio', avanzado:'Avanzado'};
-  const claseNombres = {kids:'Kids', flow:'Flow', fit:'Fit', flex:'Flex', free:'Free'};
+  const claseNombres = {kids:'Kids', flow:'Adultos', fit:'Adultos', flex:'Flex', aro:'Aro'};
 
 let slotsSeleccionados = new Set();
 
@@ -1525,7 +1541,7 @@ function renderHorario(plan) {
   const n = planHoras[plan];
   let todas = [];
   horarioBase.forEach(row => {
-    for(let i=1;i<=6;i++) if(row[i]!='empty') todas.push(row[0]+'-'+i);
+    for(let i=1;i<=5;i++) if(row[i]!='empty') todas.push(row[0]+'-'+i);
   });
   const disp = new Set(todas.slice(0, n));
   const body = document.getElementById('horario-body');
@@ -1538,7 +1554,7 @@ function renderHorario(plan) {
     th.textContent = row[0];
     tr.appendChild(th);
 
-    for(let i=1;i<=6;i++){
+    for(let i=1;i<=5;i++){
       const td = document.createElement('td');
       const tipo = row[i];
       const div = document.createElement('div');
@@ -1588,7 +1604,7 @@ function actualizarContador() {
       const p = btn.dataset.plan;
       renderHorario(p);
       document.getElementById('plan-info').innerHTML =
-        `Plan seleccionado: <strong>${planNombres[p]}</strong> — <strong>${planHoras[p]} horas semanales</strong>`;
+        `Plan seleccionado: <strong>${planNombres[p]}</strong> — <strong>${planHoras[p]} clases semanales</strong>`;
     });
   });
 
@@ -1617,8 +1633,10 @@ function actualizarContador() {
   document.querySelectorAll('.video-card').forEach(card => {
     card.addEventListener('click', () => {
       const yt = card.dataset.yt;
-      if(!yt) return;
-      document.getElementById('modal-iframe').src = 'https://www.youtube.com/embed/'+yt+'?autoplay=1';
+      if(!yt || !/^[a-zA-Z0-9_-]{11}$/.test(yt)) return;
+      const url = new URL('https://www.youtube.com/embed/' + yt);
+      url.searchParams.set('autoplay', '1');
+      document.getElementById('modal-iframe').src = url.toString();
       document.getElementById('video-modal').classList.add('visible');
     });
   });
