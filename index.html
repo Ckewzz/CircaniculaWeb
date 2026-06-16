@@ -358,7 +358,13 @@
     .collab-slot:hover { border-color:rgba(255,204,0,.5); }
 
     /* ===== LAYOUT ===== */
-    .main-wrap { margin-left:var(--pendon-w); margin-right:var(--pendon-w); }
+    .main-wrap {
+      margin-left:var(--pendon-w);
+      margin-right:var(--pendon-w);
+      /* Breathing room extra para que el pendón no tape contenido */
+      padding-left:12px;
+      padding-right:12px;
+    }
 
     /* ===== HEADER ===== */
     header {
@@ -634,6 +640,13 @@
     }
     .evento-hallway-nombre { font-family:'Cinzel',serif; font-size:.82rem; color:var(--amarillo); margin-bottom:3px; }
     .evento-hallway-fecha { font-size:.68rem; opacity:.45; }
+    .hallway-zoom-hint {
+      position:absolute; top:10px; right:10px;
+      font-size:1rem; opacity:0; transition:opacity .3s;
+      background:rgba(0,0,0,.6); border-radius:50%;
+      width:32px; height:32px; display:flex; align-items:center; justify-content:center;
+    }
+    .evento-hallway-item:hover .hallway-zoom-hint { opacity:1; }
 
     /* ===== HORARIOS ===== */
     #horarios { background:rgba(0,0,0,.25); }
@@ -670,20 +683,37 @@
       letter-spacing:.5px; opacity:.2;
       transition:all .4s; user-select:none;
     }
+    .clase-cell {
+      border-radius:4px; padding:12px 6px;
+      font-size:.68rem; font-family:'Cinzel',serif;
+      letter-spacing:.5px; opacity:.25;
+      transition:all .3s; user-select:none;
+      min-height:52px; display:flex;
+      align-items:center; justify-content:center;
+    }
+    .clase-nombre { pointer-events:none; }
+    .clase-cell.disponible { opacity:1; cursor:pointer; }
+    .clase-cell.disponible:hover { transform:scale(1.05); filter:brightness(1.2); }
     .clase-cell.seleccionada {
-  outline: 2px solid var(--amarillo);
-  transform: scale(1.08);
-  opacity: 1 !important;
-  cursor: pointer;
-  position: relative;
-}
-.clase-cell.seleccionada::after {
-  content: '✓';
-  position: absolute;
-  top: 1px; right: 3px;
-  font-size: .55rem;
-  color: var(--amarillo);
-}
+      outline: 2px solid var(--amarillo);
+      transform: scale(1.06);
+      opacity: 1 !important;
+      position: relative;
+    }
+    .clase-cell.seleccionada::after {
+      content: '✓';
+      position: absolute;
+      top: 3px; right: 5px;
+      font-size: .6rem;
+      color: var(--amarillo);
+    }
+    @keyframes shake {
+      0%,100%{transform:translateX(0)}
+      20%{transform:translateX(-5px)}
+      40%{transform:translateX(5px)}
+      60%{transform:translateX(-4px)}
+      80%{transform:translateX(4px)}
+    }
 .calendario-acciones {
   margin-top: 28px;
   padding: 20px 24px;
@@ -1110,8 +1140,7 @@
         <li><a href="#proximos-eventos">Eventos</a></li>
         <li><a href="#horarios">Horarios</a></li>
         <li><a href="#precios">Precios</a></li>
-        <li><a href="#videos">Videos</a></li>
-        <li><a href="#equipo">Equipo</a></li>
+        <li><a href="#labor-social">Nosotros</a></li>
         <li><a href="#contacto" class="nav-cta">Contacto</a></li>
         <li id="user-info">
           <img id="user-foto" src="" alt="foto">
@@ -1169,27 +1198,36 @@
     </div>
     <div class="noticias-grid">
       <div class="noticia-card">
-        <img src="https://picsum.photos/seed/news1/400/250" alt="" class="noticia-img">
-        <div class="noticia-body">
-          <p class="noticia-fecha">Mayo 2025</p>
-          <h3 class="noticia-titulo">Nuevas clases de Aéreo Flow para el verano</h3>
-          <p class="noticia-texto">Programa especial de verano con nuevas secuencias para todos los niveles.</p>
+        <div class="noticia-body" style="padding:30px;">
+          <p class="noticia-fecha">Próximamente · 2025</p>
+          <h3 class="noticia-titulo">¡Próximas Capacitaciones!</h3>
+          <p class="noticia-texto" style="opacity:.7;line-height:1.85;">
+            Ponte en contacto con nosotros para tener información y acceder a costos especiales.
+            Los temas que veremos serán: <strong style="color:var(--amarillo);font-weight:600;">Introducción al Aéreo · Bases para enseñar (herramientas, material y división) · Clases prácticas de formación.</strong>
+            Tendremos más información iniciando Agosto.
+          </p>
+          <p style="margin-top:16px;font-size:.78rem;color:var(--naranja);font-family:'Cinzel',serif;letter-spacing:1px;">
+            🎯 ¡Accede hoy y pide tu descuento del <strong>10%</strong> sobre el costo total!
+          </p>
+          <button class="btn-evento" style="margin-top:18px;" onclick="document.getElementById('contacto').scrollIntoView({behavior:'smooth'})">
+            Quiero información
+          </button>
         </div>
       </div>
       <div class="noticia-card">
-        <img src="https://picsum.photos/seed/news2/400/250" alt="" class="noticia-img">
-        <div class="noticia-body">
-          <p class="noticia-fecha">Abril 2025</p>
-          <h3 class="noticia-titulo">Resultados de la Muestra de Primavera</h3>
-          <p class="noticia-texto">Nuestras alumnas demostraron semanas de trabajo en una presentación increíble.</p>
-        </div>
-      </div>
-      <div class="noticia-card">
-        <img src="https://picsum.photos/seed/news3/400/250" alt="" class="noticia-img">
-        <div class="noticia-body">
-          <p class="noticia-fecha">Marzo 2025</p>
-          <h3 class="noticia-titulo">Sistema de reservas actualizado</h3>
-          <p class="noticia-texto">Ya puedes reservar y cancelar tus clases desde el nuevo portal. 24h de anticipación.</p>
+        <div class="noticia-body" style="padding:30px;">
+          <p class="noticia-fecha">Noviembre 2025</p>
+          <h3 class="noticia-titulo">¡Colaboraciones!</h3>
+          <p class="noticia-texto" style="opacity:.7;line-height:1.85;">
+            Estamos siempre dispuestos a colaborar y trabajar con el talento emergente de nuestra ciudad.
+            Mándanos un mensaje a redes, un correo o a nuestra bandeja de contacto para planear tu participación en nuestro siguiente evento.
+          </p>
+          <p style="margin-top:14px;font-size:.78rem;color:var(--amarillo);font-family:'Cinzel',serif;letter-spacing:1px;">
+            ✨ Nuestro próximo evento será en Noviembre. ¡Anímate a participar!
+          </p>
+          <button class="btn-evento" style="margin-top:18px;" onclick="document.getElementById('contacto').scrollIntoView({behavior:'smooth'})">
+            Quiero colaborar
+          </button>
         </div>
       </div>
     </div>
@@ -1221,40 +1259,40 @@
     <div id="tab-verano" class="tab-panel active">
       <div class="eventos-lista">
         <div class="evento-proximo-card">
-          <span class="evento-fecha-badge">Junio – Agosto 2025</span>
-          <h3 class="evento-proximo-titulo">Curso de Verano Intensivo</h3>
-          <p class="evento-proximo-desc">Tres semanas de inmersión total en técnica aérea, flex y acrobacia. Disponible para todos los niveles.</p>
-          <button class="btn-evento" onclick="document.getElementById('contacto').scrollIntoView({behavior:'smooth'})">Quiero inscribirme</button>
+          <span class="evento-fecha-badge">Julio – Agosto 2025</span>
+          <h3 class="evento-proximo-titulo">Curso de Verano</h3>
+          <p class="evento-proximo-desc">¡Sigue viendo nuestra página para tener acceso a la información sobre el curso de verano! Nuestras clases continuarán igual en Julio y Agosto — te esperamos.</p>
+          <button class="btn-evento" onclick="document.getElementById('contacto').scrollIntoView({behavior:'smooth'})">Más información</button>
         </div>
       </div>
     </div>
     <div id="tab-talleres" class="tab-panel">
       <div class="eventos-lista">
         <div class="evento-proximo-card">
-          <span class="evento-fecha-badge">Próximamente</span>
-          <h3 class="evento-proximo-titulo">Taller de Tela Aérea</h3>
-          <p class="evento-proximo-desc">Una jornada de un día centrada exclusivamente en tela.</p>
-          <button class="btn-evento" onclick="document.getElementById('contacto').scrollIntoView({behavior:'smooth'})">Más información</button>
+          <span class="evento-fecha-badge">Próximamente · 2025</span>
+          <h3 class="evento-proximo-titulo">Capacitaciones para Maestros de Aéreo</h3>
+          <p class="evento-proximo-desc">Participa en nuestras próximas capacitaciones para aprender a enseñar — ideal para quienes tienen nociones básicas de Aéreo y quieren compartir su conocimiento de manera organizada. Aprende con Iván, maestro de Aéreo con más de 12 años de experiencia.</p>
+          <button class="btn-evento" onclick="document.getElementById('contacto').scrollIntoView({behavior:'smooth'})">Quiero participar</button>
         </div>
       </div>
     </div>
     <div id="tab-presentaciones" class="tab-panel">
       <div class="eventos-lista">
         <div class="evento-proximo-card">
-          <span class="evento-fecha-badge">Diciembre 2025</span>
-          <h3 class="evento-proximo-titulo">Gala de Fin de Año</h3>
-          <p class="evento-proximo-desc">La presentación más grande del año. Boletos próximamente.</p>
-          <button class="btn-evento">Ver boletos</button>
+          <span class="evento-fecha-badge">Noviembre 2025</span>
+          <h3 class="evento-proximo-titulo">Próxima Presentación</h3>
+          <p class="evento-proximo-desc">Si quieres participar o asistir a nuestro próximo evento de noviembre, ¡estamos abiertos y encantados de trabajar con todo el talento de nuestra ciudad! Mándanos un mensaje si cantas, bailas, o eres artista plástico o escénico.</p>
+          <button class="btn-evento" onclick="document.getElementById('contacto').scrollIntoView({behavior:'smooth'})">Quiero participar</button>
         </div>
       </div>
     </div>
     <div id="tab-competencias" class="tab-panel">
       <div class="eventos-lista">
         <div class="evento-proximo-card">
-          <span class="evento-fecha-badge">Por confirmar</span>
-          <h3 class="evento-proximo-titulo">Competencia Regional de Aéreo</h3>
-          <p class="evento-proximo-desc">Contáctanos si quieres prepararte para competir.</p>
-          <button class="btn-evento" onclick="document.getElementById('contacto').scrollIntoView({behavior:'smooth'})">Contáctanos</button>
+          <span class="evento-fecha-badge">Próximamente</span>
+          <h3 class="evento-proximo-titulo">Competencia Interna Circanícula</h3>
+          <p class="evento-proximo-desc">Próximamente armaremos una competencia interna para alumnas pequeñas de Circanícula. Si no compites, puedes acompañarnos como público — ¡será un espectáculo increíble!</p>
+          <button class="btn-evento" onclick="document.getElementById('contacto').scrollIntoView({behavior:'smooth'})">Más adelantos pronto</button>
         </div>
       </div>
     </div>
@@ -1269,16 +1307,29 @@
       <p class="seccion-desc">Un recorrido por lo que hemos construido juntas.</p>
     </div>
     <div class="hallway-scroll">
-      <div class="evento-hallway-item"><img src="Images/HW01.jpeg" alt=""><div class="evento-hallway-base"><p class="evento-hallway-nombre">Aéreo Menti 2024</p><p class="evento-hallway-fecha">Noviembre 2024</p></div></div>
-      <div class="evento-hallway-item"><img src="Images/HW02.jpg" alt=""><div class="evento-hallway-base"><p class="evento-hallway-nombre">Vouge Inspo</p><p class="evento-hallway-fecha">Mayo 2025</p></div></div>
-      <div class="evento-hallway-item"><img src="Images/HW03.jpg" alt=""><div class="evento-hallway-base"><p class="evento-hallway-nombre">Arte Aéreo</p><p class="evento-hallway-fecha">Mayo 2025</p></div></div>
-      <div class="evento-hallway-item"><img src="Images/HW04.jpeg" alt=""><div class="evento-hallway-base"><p class="evento-hallway-nombre">Kids Aéreo</p><p class="evento-hallway-fecha">Octubre 2025</p></div></div>
-      <div class="evento-hallway-item"><img src="Images/HW05.jpg" alt=""><div class="evento-hallway-base"><p class="evento-hallway-nombre">Aerial Haditas</p><p class="evento-hallway-fecha">Abril 2025</p></div></div>
-      <div class="evento-hallway-item"><img src="Images/HW06.jpg" alt=""><div class="evento-hallway-base"><p class="evento-hallway-nombre">Dúo Aéreo</p><p class="evento-hallway-fecha">Octubre 2025</p></div></div>
-      <div class="evento-hallway-item"><img src="Images/HW07.jpg" alt=""><div class="evento-hallway-base"><p class="evento-hallway-nombre">Aerial & Flex</p><p class="evento-hallway-fecha">Octubre 2025</p></div></div>
-      <div class="evento-hallway-item"><img src="Images/HW08.jpg" alt=""><div class="evento-hallway-base"><p class="evento-hallway-nombre">Aerial Fairy</p><p class="evento-hallway-fecha">Abril 2025</p></div></div>
+      <div class="evento-hallway-item" data-img="Images/HW01.jpeg" data-nombre="Aéreo Menti 2024" data-fecha="Noviembre 2024"><img src="Images/HW01.jpeg" alt="Aéreo Menti 2024"><div class="evento-hallway-base"><p class="evento-hallway-nombre">Aéreo Menti 2024</p><p class="evento-hallway-fecha">Noviembre 2024</p></div><div class="hallway-zoom-hint">🔍</div></div>
+      <div class="evento-hallway-item" data-img="Images/HW02.jpg" data-nombre="Vogue Inspo" data-fecha="Mayo 2025"><img src="Images/HW02.jpg" alt="Vogue Inspo"><div class="evento-hallway-base"><p class="evento-hallway-nombre">Vogue Inspo</p><p class="evento-hallway-fecha">Mayo 2025</p></div><div class="hallway-zoom-hint">🔍</div></div>
+      <div class="evento-hallway-item" data-img="Images/HW03.jpg" data-nombre="Arte Aéreo" data-fecha="Mayo 2025"><img src="Images/HW03.jpg" alt="Arte Aéreo"><div class="evento-hallway-base"><p class="evento-hallway-nombre">Arte Aéreo</p><p class="evento-hallway-fecha">Mayo 2025</p></div><div class="hallway-zoom-hint">🔍</div></div>
+      <div class="evento-hallway-item" data-img="Images/HW04.jpeg" data-nombre="Kids Aéreo" data-fecha="Octubre 2024"><img src="Images/HW04.jpeg" alt="Kids Aéreo"><div class="evento-hallway-base"><p class="evento-hallway-nombre">Kids Aéreo</p><p class="evento-hallway-fecha">Octubre 2024</p></div><div class="hallway-zoom-hint">🔍</div></div>
+      <div class="evento-hallway-item" data-img="Images/HW05.jpg" data-nombre="Aerial Haditas" data-fecha="Abril 2025"><img src="Images/HW05.jpg" alt="Aerial Haditas"><div class="evento-hallway-base"><p class="evento-hallway-nombre">Aerial Haditas</p><p class="evento-hallway-fecha">Abril 2025</p></div><div class="hallway-zoom-hint">🔍</div></div>
+      <div class="evento-hallway-item" data-img="Images/HW06.jpg" data-nombre="Dúo Aéreo" data-fecha="Octubre 2024"><img src="Images/HW06.jpg" alt="Dúo Aéreo"><div class="evento-hallway-base"><p class="evento-hallway-nombre">Dúo Aéreo</p><p class="evento-hallway-fecha">Octubre 2024</p></div><div class="hallway-zoom-hint">🔍</div></div>
+      <div class="evento-hallway-item" data-img="Images/HW07.jpg" data-nombre="Aerial & Flex" data-fecha="Octubre 2024"><img src="Images/HW07.jpg" alt="Aerial & Flex"><div class="evento-hallway-base"><p class="evento-hallway-nombre">Aerial & Flex</p><p class="evento-hallway-fecha">Octubre 2024</p></div><div class="hallway-zoom-hint">🔍</div></div>
+      <div class="evento-hallway-item" data-img="Images/HW08.jpg" data-nombre="Aerial Fairy" data-fecha="Abril 2025"><img src="Images/HW08.jpg" alt="Aerial Fairy"><div class="evento-hallway-base"><p class="evento-hallway-nombre">Aerial Fairy</p><p class="evento-hallway-fecha">Abril 2025</p></div><div class="hallway-zoom-hint">🔍</div></div>
     </div>
   </section>
+
+  <!-- LIGHTBOX HALLWAY -->
+  <div id="lightbox-bg" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.95);z-index:9998;
+    align-items:center;justify-content:center;flex-direction:column;gap:16px;">
+    <button id="lightbox-close" style="position:absolute;top:20px;right:28px;background:none;border:none;
+      color:var(--blanco);font-size:1.8rem;cursor:pointer;opacity:.6;transition:opacity .2s;z-index:1;"
+      onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=.6">✕</button>
+    <img id="lightbox-img" src="" alt="" style="max-width:90vw;max-height:82vh;object-fit:contain;border-radius:3px;">
+    <div style="text-align:center;">
+      <p id="lightbox-nombre" style="font-family:'Cinzel',serif;font-size:.88rem;color:var(--amarillo);letter-spacing:2px;"></p>
+      <p id="lightbox-fecha" style="font-size:.7rem;opacity:.4;margin-top:4px;"></p>
+    </div>
+  </div>
 
   <!-- SEPARADOR VISUAL 3 -->
   <div class="section-divider">
@@ -1299,11 +1350,12 @@
       <p class="seccion-desc">Lunes a Viernes · Kids 4:30–6 pm · Adultos 6–8 pm · Clases especiales Flex y Aro Mar & Jue.</p>
     </div>
     <div class="plan-selector">
+      <button class="plan-btn" data-plan="individual">Clase Individual</button>
       <button class="plan-btn" data-plan="basico">Plan Básico</button>
       <button class="plan-btn activo" data-plan="medio">Plan Medio</button>
       <button class="plan-btn" data-plan="avanzado">Plan Avanzado</button>
     </div>
-    <p class="plan-info-badge" id="plan-info">Plan seleccionado: <strong>Medio</strong> — <strong>4 clases semanales</strong></p>
+    <p class="plan-info-badge" id="plan-info">Plan seleccionado: <strong>Medio</strong> — Selecciona hasta <strong>5 clases</strong> por semana</p>
     <div style="overflow-x:auto;">
       <table class="horario-grid">
         <thead>
@@ -1406,8 +1458,8 @@
     </div>
   </div>
 
-  <!-- VIDEOS -->
-  <section id="videos" class="seccion">
+  <!-- VIDEOS — oculto hasta tener contenido real -->
+  <section id="videos" class="seccion" style="display:none;" data-nav-skip="true">
     <div class="seccion-header">
       <span class="seccion-eyebrow">Aprende & Explora</span>
       <h2 class="seccion-titulo">Clases & Tips</h2>
@@ -1430,8 +1482,8 @@
     </div>
   </section>
 
-  <!-- EQUIPO -->
-  <section id="equipo" class="seccion">
+  <!-- EQUIPO — oculto, en construcción -->
+  <section id="equipo" class="seccion" style="display:none;" data-nav-skip="true">
     <div class="seccion-header">
       <span class="seccion-eyebrow">Quiénes somos</span>
       <h2 class="seccion-titulo">Nuestro Equipo</h2>
@@ -1472,13 +1524,8 @@
       <div class="titulo-linea"></div>
     </div>
     <div class="labor-wrap">
-      <p class="labor-texto">Creemos que el arte aéreo debe ser accesible para todas. Con cada donación abrimos lugares y organizamos talleres comunitarios gratuitos. Tu apoyo hace posible que niñas y jóvenes que no pueden pagar accedan a estas disciplinas.</p>
-      <div class="donacion-meta">
-        <div class="meta-item"><p class="meta-valor">12</p><p class="meta-label">Talleres comunitarios</p></div>
-        <div class="meta-item"><p class="meta-valor">80+</p><p class="meta-label">Participantes beneficiadas</p></div>
-        <div class="meta-item"><p class="meta-valor">3</p><p class="meta-label">Colonias alcanzadas</p></div>
-      </div>
-      <a href="#contacto" class="btn-donar">Quiero donar</a>
+      <p class="labor-texto">Nos importa comenzar a participar activamente en nuestra sociedad. Si tienes alguna petición de espectáculo para tu comunidad, déjanos un mensaje y con gusto nos ponemos en contacto contigo para planearlo juntos.</p>
+      <a href="#contacto" class="btn-donar">Mándanos un mensaje</a>
     </div>
   </section>
 
@@ -1554,6 +1601,12 @@
   <footer>
     <p>© 2026 Circanícula · Academia de Danza Aérea · Hermosillo, Sonora</p>
     <p style="margin-top:7px;opacity:.5;">Al tomar clases con nosotros apoyas nuestro crecimiento y el arte local.</p>
+    <p style="margin-top:10px;">
+      <a href="/privacidad.html" style="color:rgba(255,204,0,.4);font-size:.52rem;letter-spacing:2px;text-decoration:none;"
+        onmouseover="this.style.color='rgba(255,204,0,.8)'" onmouseout="this.style.color='rgba(255,204,0,.4)'">
+        Aviso de Privacidad
+      </a>
+    </p>
   </footer>
 
 </div><!-- /main-wrap -->
@@ -1579,8 +1632,9 @@
     slides[cur].classList.add('active');
   }, 5500);
 
-  /* NAV DOTS */
-  const secs = document.querySelectorAll('section[id]');
+  /* NAV DOTS — excluir secciones ocultas */
+  const secs = Array.from(document.querySelectorAll('section[id]'))
+    .filter(s => s.style.display !== 'none' && !s.dataset.navSkip);
   const dotsWrap = document.getElementById('nav-dots');
   const labels = {
     inicio:'Inicio', noticias:'Noticias',
@@ -1637,74 +1691,73 @@
     ['6:00 – 7:00', 'flow', 'flex',  'flow', 'flex',  'flow' ],
     ['7:00 – 8:00', 'fit',  'aro',   'fit',  'aro',   'fit'  ],
   ];
-  const planHoras = {basico:2, medio:4, avanzado:6};
-  const planNombres = {basico:'Básico', medio:'Medio', avanzado:'Avanzado'};
+  const planHoras = {individual:1, basico:2, medio:5, avanzado:7};
+  const planNombres = {individual:'Individual', basico:'Básico', medio:'Medio', avanzado:'Avanzado'};
   const claseNombres = {kids:'Kids', flow:'Adultos', fit:'Adultos', flex:'Flex', aro:'Aro'};
 
-let slotsSeleccionados = new Set();
+  let slotsSeleccionados = new Set();
+  let planActual = 'medio';
 
-function renderHorario(plan) {
-  slotsSeleccionados.clear();
-  actualizarContador();
+  function renderHorario(plan) {
+    planActual = plan;
+    slotsSeleccionados.clear();
+    actualizarContador();
+    const maxSlots = planHoras[plan];
+    const body = document.getElementById('horario-body');
+    body.innerHTML = '';
 
-  const n = planHoras[plan];
-  let todas = [];
-  horarioBase.forEach(row => {
-    for(let i=1;i<=5;i++) if(row[i]!='empty') todas.push(row[0]+'-'+i);
-  });
-  const disp = new Set(todas.slice(0, n));
-  const body = document.getElementById('horario-body');
-  body.innerHTML = '';
+    horarioBase.forEach(row => {
+      const tr = document.createElement('tr');
+      const tdHora = document.createElement('td');
+      tdHora.className = 'hora-col';
+      tdHora.textContent = row[0];
+      tr.appendChild(tdHora);
 
-  horarioBase.forEach(row => {
-    const tr = document.createElement('tr');
-    const th = document.createElement('td');
-    th.className = 'hora-col';
-    th.textContent = row[0];
-    tr.appendChild(th);
+      for(let i=1;i<=5;i++){
+        const td = document.createElement('td');
+        const tipo = row[i];
+        const div = document.createElement('div');
+        const key = row[0]+'-'+i;
 
-    for(let i=1;i<=5;i++){
-      const td = document.createElement('td');
-      const tipo = row[i];
-      const div = document.createElement('div');
-      const key = row[0]+'-'+i;
+        if(tipo === 'empty'){
+          div.className = 'clase-cell empty';
+        } else {
+          div.className = 'clase-cell ' + tipo + ' disponible';
+          div.title = 'Click para seleccionar / deseleccionar';
+          const span = document.createElement('span');
+          span.className = 'clase-nombre';
+          span.textContent = claseNombres[tipo];
+          div.appendChild(span);
 
-      if(tipo === 'empty'){
-        div.className = 'clase-cell empty';
-        div.textContent = '—';
-      } else {
-        div.className = 'clase-cell ' + tipo;
-        if(disp.has(key)){
-          div.classList.add('disponible');
-          div.style.cursor = 'pointer';
-          div.title = 'Click para seleccionar';
           div.addEventListener('click', () => {
             if(slotsSeleccionados.has(key)){
               slotsSeleccionados.delete(key);
               div.classList.remove('seleccionada');
-            } else {
+            } else if(slotsSeleccionados.size < maxSlots){
               slotsSeleccionados.add(key);
               div.classList.add('seleccionada');
+            } else {
+              div.style.animation = 'shake .4s';
+              setTimeout(() => div.style.animation='', 400);
             }
             actualizarContador();
           });
         }
-        div.textContent = claseNombres[tipo];
+        td.appendChild(div);
+        tr.appendChild(td);
       }
-      td.appendChild(div);
-      tr.appendChild(td);
-    }
-    body.appendChild(tr);
-  });
-}
+      body.appendChild(tr);
+    });
+  }
 
-function actualizarContador() {
-  const contador = document.getElementById('slots-count');
-  const btn = document.getElementById('btn-confirmar');
-  if(contador) contador.textContent = slotsSeleccionados.size;
-  if(btn) btn.disabled = slotsSeleccionados.size === 0;
-}
-  
+  function actualizarContador() {
+    const max = planHoras[planActual] || 5;
+    const contador = document.getElementById('slots-count');
+    const btn = document.getElementById('btn-confirmar');
+    if(contador) contador.textContent = slotsSeleccionados.size + ' / ' + max;
+    if(btn) btn.disabled = slotsSeleccionados.size === 0;
+  }
+
   renderHorario('medio');
   document.querySelectorAll('.plan-btn').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -1712,8 +1765,10 @@ function actualizarContador() {
       btn.classList.add('activo');
       const p = btn.dataset.plan;
       renderHorario(p);
-      document.getElementById('plan-info').innerHTML =
-        `Plan seleccionado: <strong>${planNombres[p]}</strong> — <strong>${planHoras[p]} clases semanales</strong>`;
+      const esInd = p === 'individual';
+      document.getElementById('plan-info').innerHTML = esInd
+        ? 'Plan seleccionado: <strong>Individual</strong> — Selecciona <strong>1 clase</strong> suelta (pago único $250 MXN)'
+        : `Plan seleccionado: <strong>${planNombres[p]}</strong> — Selecciona hasta <strong>${planHoras[p]} clases</strong> por semana`;
     });
   });
 
@@ -1759,6 +1814,8 @@ function actualizarContador() {
 
   function confirmarHorario() {
   const planActivo = document.querySelector('.plan-btn.activo')?.dataset.plan || 'medio';
+  // Si es individual, ir directo a Stripe
+  if(planActivo === 'individual') { irAPagar('individual'); return; }
   const slots = Array.from(slotsSeleccionados).join(', ');
 
   // Si hay usuario logueado, usa sus datos
@@ -1817,6 +1874,32 @@ function actualizarContador() {
   });
 
   /* Stripe success: manejado en onAuthStateChanged del módulo Firebase */
+
+  /* LIGHTBOX HALLWAY */
+  const lb = document.getElementById('lightbox-bg');
+  const lbImg = document.getElementById('lightbox-img');
+  const lbNombre = document.getElementById('lightbox-nombre');
+  const lbFecha = document.getElementById('lightbox-fecha');
+
+  document.querySelectorAll('.evento-hallway-item').forEach(item => {
+    item.addEventListener('click', () => {
+      lbImg.src = item.dataset.img || '';
+      lbNombre.textContent = item.dataset.nombre || '';
+      lbFecha.textContent = item.dataset.fecha || '';
+      lb.style.display = 'flex';
+      document.body.style.overflow = 'hidden';
+    });
+  });
+
+  function cerrarLightbox() {
+    lb.style.display = 'none';
+    lbImg.src = '';
+    document.body.style.overflow = '';
+  }
+
+  document.getElementById('lightbox-close').addEventListener('click', cerrarLightbox);
+  lb.addEventListener('click', e => { if(e.target === lb) cerrarLightbox(); });
+  document.addEventListener('keydown', e => { if(e.key === 'Escape') cerrarLightbox(); });
 </script>
 </body>
 </html>
