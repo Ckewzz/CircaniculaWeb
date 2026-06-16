@@ -40,7 +40,8 @@
     const db       = getFirestore(app);
     const provider = new GoogleAuthProvider();
 
-    let usuarioActual = null;
+   let usuarioActual = null;
+   window.usuarioActual = null;
 
     // ── LOGIN ─────────────────────────────────────────────
     window.loginGoogle = async () => {
@@ -61,6 +62,7 @@
     // ── AUTH STATE ────────────────────────────────────────
     onAuthStateChanged(auth, user => {
       usuarioActual = user;
+      window.usuarioActual = user;
       actualizarUI(user);
     });
 
@@ -919,16 +921,16 @@
 
 <!-- BG CAROUSEL -->
 <div id="bg-carousel">
-  <img class="bg-slide active" src="Images\BG-01.jpg" alt="">
-  <img class="bg-slide" src="Images\BG-02.jpg" alt="">
-  <img class="bg-slide" src="Images\BG-03.jpeg" alt="">
-  <img class="bg-slide" src="Images\BG-04.jpg" alt="">
-  <img class="bg-slide" src="Images\BG-05.jpg" alt="">
-  <img class="bg-slide" src="Images\BG-06.jpg" alt="">
-  <img class="bg-slide" src="Images\BG-07.jpg" alt="">
-  <img class="bg-slide" src="Images\BG-08.jpg" alt="">
-  <img class="bg-slide" src="Images\BG-09.jpeg" alt="">
-  <img class="bg-slide" src="Images\BG-10.jpg" alt="">
+  <img class="bg-slide active" src="Images/BG-01.jpg" alt="">
+  <img class="bg-slide" src="Images/BG-02.jpg" alt="">
+  <img class="bg-slide" src="Images/BG-03.jpeg" alt="">
+  <img class="bg-slide" src="Images/BG-04.jpg" alt="">
+  <img class="bg-slide" src="Images/BG-05.jpg" alt="">
+  <img class="bg-slide" src="Images/BG-06.jpg" alt="">
+  <img class="bg-slide" src="Images/BG-07.jpg" alt="">
+  <img class="bg-slide" src="Images/BG-08.jpg" alt="">
+  <img class="bg-slide" src="Images/BG-09.jpeg" alt="">
+  <img class="bg-slide" src="Images/BG-10.jpg" alt="">
 </div>
 <div id="bg-overlay"></div>
 
@@ -1122,14 +1124,14 @@
       <p class="seccion-desc">Un recorrido por lo que hemos construido juntas.</p>
     </div>
     <div class="hallway-scroll">
-      <div class="evento-hallway-item"><img src="Images\HW01.jpeg" alt=""><div class="evento-hallway-base"><p class="evento-hallway-nombre">Aéreo Menti 2024</p><p class="evento-hallway-fecha">Noviembre 2024</p></div></div>
-      <div class="evento-hallway-item"><img src="Images\HW02.jpg" alt=""><div class="evento-hallway-base"><p class="evento-hallway-nombre">Vouge Inspo</p><p class="evento-hallway-fecha">Mayo 2025</p></div></div>
-      <div class="evento-hallway-item"><img src="Images\HW03.jpg" alt=""><div class="evento-hallway-base"><p class="evento-hallway-nombre">Arte Aéreo</p><p class="evento-hallway-fecha">Mayo 2025</p></div></div>
-      <div class="evento-hallway-item"><img src="Images\HW04.jpeg" alt=""><div class="evento-hallway-base"><p class="evento-hallway-nombre">Kids Aéreo</p><p class="evento-hallway-fecha">Octubre 2025</p></div></div>
-      <div class="evento-hallway-item"><img src="Images\HW05.jpg" alt=""><div class="evento-hallway-base"><p class="evento-hallway-nombre">Aerial Haditas</p><p class="evento-hallway-fecha">Abril 2025</p></div></div>
-      <div class="evento-hallway-item"><img src="Images\HW06.jpg" alt=""><div class="evento-hallway-base"><p class="evento-hallway-nombre">Dúo Aéreo</p><p class="evento-hallway-fecha">Octubre 2025</p></div></div>
-      <div class="evento-hallway-item"><img src="Images\HW07.jpg" alt=""><div class="evento-hallway-base"><p class="evento-hallway-nombre">Aerial & Flex</p><p class="evento-hallway-fecha">Octubre 2025</p></div></div>
-      <div class="evento-hallway-item"><img src="Images\HW08.jpg" alt=""><div class="evento-hallway-base"><p class="evento-hallway-nombre">Aerial Fairy</p><p class="evento-hallway-fecha">Abril 2025</p></div></div>
+      <div class="evento-hallway-item"><img src="Images/HW01.jpeg" alt=""><div class="evento-hallway-base"><p class="evento-hallway-nombre">Aéreo Menti 2024</p><p class="evento-hallway-fecha">Noviembre 2024</p></div></div>
+      <div class="evento-hallway-item"><img src="Images/HW02.jpg" alt=""><div class="evento-hallway-base"><p class="evento-hallway-nombre">Vouge Inspo</p><p class="evento-hallway-fecha">Mayo 2025</p></div></div>
+      <div class="evento-hallway-item"><img src="Images/HW03.jpg" alt=""><div class="evento-hallway-base"><p class="evento-hallway-nombre">Arte Aéreo</p><p class="evento-hallway-fecha">Mayo 2025</p></div></div>
+      <div class="evento-hallway-item"><img src="Images/HW04.jpeg" alt=""><div class="evento-hallway-base"><p class="evento-hallway-nombre">Kids Aéreo</p><p class="evento-hallway-fecha">Octubre 2025</p></div></div>
+      <div class="evento-hallway-item"><img src="Images/HW05.jpg" alt=""><div class="evento-hallway-base"><p class="evento-hallway-nombre">Aerial Haditas</p><p class="evento-hallway-fecha">Abril 2025</p></div></div>
+      <div class="evento-hallway-item"><img src="Images/HW06.jpg" alt=""><div class="evento-hallway-base"><p class="evento-hallway-nombre">Dúo Aéreo</p><p class="evento-hallway-fecha">Octubre 2025</p></div></div>
+      <div class="evento-hallway-item"><img src="Images/HW07.jpg" alt=""><div class="evento-hallway-base"><p class="evento-hallway-nombre">Aerial & Flex</p><p class="evento-hallway-fecha">Octubre 2025</p></div></div>
+      <div class="evento-hallway-item"><img src="Images/HW08.jpg" alt=""><div class="evento-hallway-base"><p class="evento-hallway-nombre">Aerial Fairy</p><p class="evento-hallway-fecha">Abril 2025</p></div></div>
     </div>
   </section>
 
@@ -1174,6 +1176,7 @@
       <div class="leyenda-item"><div class="leyenda-dot" style="background:#ff8080;opacity:.7"></div>Aéreo Fit</div>
       <div class="leyenda-item"><div class="leyenda-dot" style="background:#80d8ff;opacity:.7"></div>Flex</div>
       <div class="leyenda-item"><div class="leyenda-dot" style="background:#90ee90;opacity:.7"></div>Free</div>
+    </div><!-- /horario-leyenda -->
       <!-- Acciones del calendario -->
 <div class="calendario-acciones">
   <p class="slots-contador">
@@ -1420,6 +1423,7 @@
   </div>
   <button class="btn-enviar">Enviar mensaje</button>
 </form>
+  </section><!-- /contacto -->
 
   <footer>
     <p>© 2026 Circanícula · Academia de Danza Aérea · Hermosillo, Sonora</p>
@@ -1575,7 +1579,7 @@ function actualizarContador() {
   if(contador) contador.textContent = slotsSeleccionados.size;
   if(btn) btn.disabled = slotsSeleccionados.size === 0;
 }
-  }
+  
   renderHorario('medio');
   document.querySelectorAll('.plan-btn').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -1632,7 +1636,7 @@ function actualizarContador() {
 
   // Si hay usuario logueado, usa sus datos
   const nombre = document.getElementById('user-name')?.textContent || '';
-  const email  = usuarioActual?.email || '';
+  const email  = window.usuarioActual?.email || '';
 
   if(!email) {
     // Sin login: pedir datos mínimos
