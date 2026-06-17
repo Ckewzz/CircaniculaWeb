@@ -67,6 +67,21 @@
       medio:      "https://buy.stripe.com/28E9AS43X3C06tQ1auao803",
       avanzado:   "https://buy.stripe.com/28EeVceIB3C07xU1auao804"
     };
+
+    // ── CONFIG EVENTO ESPECIAL ────────────────────────────
+    // ✏️  EDITA AQUÍ cuando tengas los datos del evento
+    const EVENTO_CONFIG = {
+      activo:       false,                     // ← cambiar a true para mostrar la sección
+      titulo:       "Gran Presentación Circanícula",
+      subtitulo:    "Una noche de danza aérea, aro y tela. ¡No te la pierdas!",
+      fecha:        "Noviembre 2025",          // texto libre, ej: "Sábado 15 Nov · 7:00 PM"
+      lugar:        "Hermosillo, Sonora",
+      capacidad:    75,                        // total de boletos disponibles
+      precio:       "$200 MXN",               // texto para mostrar
+      stripeLink:   "",                        // ← pegar link de Stripe para boletos
+      flyer:        "",                        // ← URL o ruta local de imagen del flyer
+    };
+    window.EVENTO_CONFIG = EVENTO_CONFIG;
     // ─────────────────────────────────────────────────────
 
     const app      = initializeApp(firebaseConfig);
@@ -215,6 +230,81 @@
 
     function estadoLabel(e) {
       return { pendiente_pago:'Pendiente', activa:'Activa', cancelada:'Cancelada' }[e] || e;
+    }
+
+    // ── EVENTO ESPECIAL — leer contador de boletos ────────
+    async function cargarContadorBoletos() {
+      try {
+        const ref = doc(db, "config", "evento_proximo");
+        const snap = await getDocs(query(collection(db, "boletos"), where("estado", "==", "pagado")));
+        const vendidos = snap.size;
+        const cap = EVENTO_CONFIG.capacidad;
+        const restantes = Math.max(cap - vendidos, 0);
+        const el = document.getElementById('evento-contador');
+        const barEl = document.getElementById('evento-barra');
+        const restEl = document.getElementById('evento-restantes');
+        if (el) el.textContent = `${vendidos} / ${cap}`;
+        if (barEl) barEl.style.width = `${Math.min((vendidos/cap)*100, 100)}%`;
+        if (restEl) {
+          restEl.textContent = restantes > 0 ? `¡Solo quedan ${restantes} lugares!` : '¡Agotado!';
+          restEl.style.color = restantes < 10 ? 'var(--naranja)' : 'var(--amarillo)';
+        }
+      } catch(e) { console.warn('contador boletos:', e); }
+    }
+
+    window.comprarBoleto = () => {
+      const link = EVENTO_CONFIG.stripeLink;
+      if (!link) { alert('Link de pago no disponible aún.'); return; }
+      const email = window.usuarioActual?.email || '';
+      const url = email ? `${link}?prefilled_email=${encodeURIComponent(email)}` : link;
+      const a = document.createElement('a');
+      a.href = url; a.rel = 'noopener noreferrer'; a.target = '_blank';
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    };
+
+    // Activar contador si la sección existe
+    document.addEventListener('DOMContentLoaded', () => {
+      const sec = document.getElementById('evento-especial');
+      if (sec && EVENTO_CONFIG.activo) {
+        sec.style.display = '';
+        cargarContadorBoletos();
+        // Flyer
+        const img = document.getElementById('evento-flyer-img');
+        if (img && EVENTO_CONFIG.flyer) { img.src = EVENTO_CONFIG.flyer; img.style.display = 'block'; }
+        // Precio
+        const precioEl = document.getElementById('evento-precio-label');
+        if (precioEl) precioEl.textContent = EVENTO_CONFIG.precio;
+        // Fecha
+        const fechaEl = document.getElementById('evento-fecha-display');
+        if (fechaEl) fechaEl.textContent = EVENTO_CONFIG.fecha;
+        // Lugar
+        const lugarEl = document.getElementById('evento-lugar-display');
+        if (lugarEl) lugarEl.textContent = EVENTO_CONFIG.lugar;
+        // Título y subtítulo
+        const titEl = document.getElementById('evento-titulo-display');
+        if (titEl) titEl.textContent = EVENTO_CONFIG.titulo;
+        const subEl = document.getElementById('evento-subtitulo-display');
+        if (subEl) subEl.textContent = EVENTO_CONFIG.subtitulo;
+      }
+      // Si regresamos con ?boleto=exitoso, registrar boleto
+      if (new URLSearchParams(window.location.search).get('boleto') === 'exitoso') {
+        registrarBoletoTrasStripe();
+      }
+    });
+
+    async function registrarBoletoTrasStripe() {
+      try {
+        await addDoc(collection(db, "boletos"), {
+          uid: window.usuarioActual?.uid || 'anonimo',
+          email: window.usuarioActual?.email || '',
+          estado: "pagado",
+          fechaPago: serverTimestamp()
+        });
+        cargarContadorBoletos();
+        const banner = document.getElementById('boleto-exitoso-banner');
+        if (banner) { banner.style.display = 'flex'; setTimeout(() => banner.style.display = 'none', 8000); }
+        history.replaceState({}, '', '/');
+      } catch(e) { console.error('Error registrando boleto:', e); }
     }
 
     // Stripe success: si regresamos con ?pago=exitoso, marcar reserva como activa
@@ -966,6 +1056,42 @@
     }
     .colab-card:hover { border-color:rgba(255,204,0,.3); }
 
+    /* ===== EVENTO ESPECIAL ===== */
+    .evento-especial-wrap {
+      display:flex; gap:48px; align-items:flex-start; flex-wrap:wrap;
+      max-width:960px; margin:0 auto;
+    }
+    .evento-flyer-col { flex:0 0 auto; width:min(420px,100%); }
+    .evento-flyer-placeholder {
+      width:100%; aspect-ratio:3/4; max-width:420px;
+      background:var(--gris-medio); border-radius:8px;
+      display:flex; flex-direction:column; align-items:center; justify-content:center;
+      border:1px dashed rgba(255,204,0,.2);
+    }
+    .evento-info-col { flex:1; min-width:260px; display:flex; flex-direction:column; gap:32px; }
+    .evento-meta { display:flex; flex-direction:column; gap:10px; }
+    .evento-meta-item { display:flex; align-items:center; gap:10px; }
+    .evento-meta-icon { font-size:1.1rem; }
+    .evento-meta-texto { font-size:.9rem; opacity:.75; font-family:'Cinzel',serif; letter-spacing:1px; }
+    .evento-contador-wrap { background:var(--gris-medio); border-radius:8px; padding:20px 24px; }
+    .evento-contador-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; }
+    .evento-contador-label { font-size:.72rem; letter-spacing:2px; opacity:.5; text-transform:uppercase; }
+    .evento-contador-num { font-family:'Cinzel',serif; font-size:1.3rem; font-weight:900; color:var(--amarillo); }
+    .evento-barra-bg { width:100%; height:6px; background:rgba(255,255,255,.1); border-radius:3px; overflow:hidden; }
+    .evento-barra-fill { height:100%; background:var(--amarillo); border-radius:3px; transition:width .8s ease; }
+    .evento-restantes-txt { margin-top:10px; font-size:.78rem; letter-spacing:1px; font-weight:600; }
+    .evento-compra-wrap { display:flex; flex-direction:column; gap:12px; }
+    .evento-precio-row { font-size:.82rem; opacity:.6; letter-spacing:1px; }
+    .evento-precio-val { color:var(--amarillo); font-size:1.4rem; }
+    .btn-boleto {
+      background:var(--amarillo); color:var(--negro); border:none; cursor:pointer;
+      font-family:'Cinzel',serif; font-size:.82rem; font-weight:900;
+      letter-spacing:3px; text-transform:uppercase; padding:16px 32px; border-radius:3px;
+      transition:background .3s, transform .2s; align-self:flex-start;
+    }
+    .btn-boleto:hover { background:#fff; transform:translateY(-2px); }
+    .evento-compra-nota { font-size:.68rem; opacity:.35; letter-spacing:1px; }
+
     /* ===== LABOR SOCIAL ===== */
     #labor-social { background:rgba(0,0,0,.2); }
     .labor-wrap { max-width:660px; }
@@ -1308,6 +1434,82 @@
       </div>
     </div>
   </section>
+
+  <!-- ══════════════════════════════════════════════════
+       EVENTO ESPECIAL — oculto hasta que EVENTO_CONFIG.activo = true
+       ══════════════════════════════════════════════════ -->
+  <section id="evento-especial" class="seccion" style="display:none;" data-nav-skip="true">
+    <div class="seccion-header">
+      <span class="seccion-eyebrow">Próximo Evento</span>
+      <h2 class="seccion-titulo" id="evento-titulo-display">Gran Presentación Circanícula</h2>
+      <div class="titulo-linea"></div>
+      <p class="seccion-desc" id="evento-subtitulo-display">Reserva tu lugar y asegura tu asistencia.</p>
+    </div>
+
+    <div class="evento-especial-wrap">
+
+      <!-- FLYER -->
+      <div class="evento-flyer-col">
+        <img id="evento-flyer-img" src="" alt="Flyer del evento"
+             style="display:none; width:100%; max-width:420px; border-radius:8px;
+                    box-shadow:0 8px 40px rgba(0,0,0,.6); object-fit:cover;">
+        <div id="evento-flyer-placeholder" class="evento-flyer-placeholder">
+          <span style="font-size:2rem;">🎭</span>
+          <p style="margin-top:10px;opacity:.5;font-size:.8rem;letter-spacing:1px;">FLYER PRÓXIMAMENTE</p>
+        </div>
+      </div>
+
+      <!-- INFO + COMPRA -->
+      <div class="evento-info-col">
+
+        <!-- Fecha y lugar -->
+        <div class="evento-meta">
+          <div class="evento-meta-item">
+            <span class="evento-meta-icon">📅</span>
+            <span id="evento-fecha-display" class="evento-meta-texto">—</span>
+          </div>
+          <div class="evento-meta-item">
+            <span class="evento-meta-icon">📍</span>
+            <span id="evento-lugar-display" class="evento-meta-texto">Hermosillo, Sonora</span>
+          </div>
+        </div>
+
+        <!-- Contador de lugares -->
+        <div class="evento-contador-wrap">
+          <div class="evento-contador-header">
+            <span class="evento-contador-label">Lugares vendidos</span>
+            <span id="evento-contador" class="evento-contador-num">— / —</span>
+          </div>
+          <div class="evento-barra-bg">
+            <div id="evento-barra" class="evento-barra-fill" style="width:0%"></div>
+          </div>
+          <p id="evento-restantes" class="evento-restantes-txt"></p>
+        </div>
+
+        <!-- Precio + botón de compra -->
+        <div class="evento-compra-wrap">
+          <p class="evento-precio-row">
+            Boleto: <strong id="evento-precio-label" class="evento-precio-val">—</strong>
+          </p>
+          <button class="btn-boleto" onclick="comprarBoleto()">
+            🎟 Comprar mi boleto
+          </button>
+          <p class="evento-compra-nota">
+            Al completar el pago tu lugar queda reservado automáticamente.
+          </p>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- Banner boleto exitoso -->
+  <div id="boleto-exitoso-banner" style="display:none; position:fixed; bottom:24px; left:50%;
+       transform:translateX(-50%); background:var(--amarillo); color:var(--negro);
+       padding:14px 28px; border-radius:6px; font-family:'Cinzel',serif;
+       font-size:.78rem; letter-spacing:2px; z-index:9999; box-shadow:0 4px 20px rgba(0,0,0,.4);">
+    🎟 ¡Boleto confirmado! Nos vemos en el evento.
+  </div>
 
   <!-- HALLWAY EVENTOS PASADOS -->
   <section id="eventos-pasados" class="seccion">
