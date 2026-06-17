@@ -146,7 +146,7 @@
       sessionStorage.setItem('reserva_pendiente', JSON.stringify({
         plan, dias: diasSel, email: usuarioActual.email, uid: usuarioActual.uid
       }));
-      // Guardar reserva como pendiente
+      // Guardar reserva como pendiente (no bloqueante)
       addDoc(collection(db, "reservas"), {
         uid: usuarioActual.uid,
         nombre: usuarioActual.displayName,
@@ -156,7 +156,15 @@
         estado: "pendiente_pago",
         fechaReserva: serverTimestamp()
       });
-      window.open(`${base}?prefilled_email=${encodeURIComponent(usuarioActual.email)}`, '_blank', 'noopener,noreferrer');
+      // Navegar directo a Stripe (evita bloqueo de popups en navegadores modernos)
+      const stripeUrl = `${base}?prefilled_email=${encodeURIComponent(usuarioActual.email)}`;
+      const a = document.createElement('a');
+      a.href = stripeUrl;
+      a.rel = 'noopener noreferrer';
+      a.target = '_blank';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
     };
 
     // ── MIS RESERVAS ──────────────────────────────────────
