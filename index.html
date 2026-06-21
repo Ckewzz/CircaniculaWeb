@@ -45,7 +45,7 @@
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
     import { getAuth, signInWithPopup, signOut, onAuthStateChanged, GoogleAuthProvider }
       from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
-    import { getFirestore, doc, setDoc, collection, addDoc, query, where, getDocs, updateDoc, serverTimestamp }
+    import { getFirestore, doc, getDoc, setDoc, collection, addDoc, query, where, getDocs, updateDoc, serverTimestamp }
       from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
     // ── CONFIG (rellena con tus claves) ──────────────────
@@ -108,6 +108,85 @@
 
     window.logout = async () => { await signOut(auth); };
 
+    // ── PERFIL DE USUARIO ─────────────────────────────────
+    // ID corto determinista a partir del uid (estable para un mismo usuario)
+    function generarIdCorto(uid) {
+      let h = 0;
+      for (let i = 0; i < uid.length; i++) {
+        h = (h * 31 + uid.charCodeAt(i)) >>> 0;
+      }
+      const base36 = h.toString(36).toUpperCase().padStart(5, '0').slice(0, 5);
+      return `CIRCA-${base36}`;
+    }
+
+    // Crea/parchea el documento de perfil con los campos faltantes.
+    // NOTA: creditos y nivel son SOLO de lectura desde el cliente. Antes de
+    // poner créditos en producción, las reglas de Firestore deben hacer estos
+    // campos admin-only para evitar trampas.
+    async function bootstrapPerfil(user) {
+      const ref  = doc(db, "usuarios", user.uid);
+      const snap = await getDoc(ref);
+      const data = snap.exists() ? snap.data() : {};
+      const patch = {};
+      if (!data.userIdCorto)  patch.userIdCorto  = generarIdCorto(user.uid);
+      if (!data.nombreVisible) patch.nombreVisible = user.displayName || 'Alumno';
+      if (data.creditos === undefined) patch.creditos = 0;
+      if (!data.nivel) patch.nivel = { flexibilidad:0, fuerza:0, resistencia:0, tecnica:0 };
+      if (!data.eventos) patch.eventos = [];
+      if (!data.creadoEn) patch.creadoEn = serverTimestamp();
+      if (Object.keys(patch).length) {
+        await setDoc(ref, patch, { merge: true });
+      }
+      return { ...data, ...patch };
+    }
+
+    // Pinta el panel de perfil con los datos del usuario.
+    async function cargarPerfil(uid) {
+      try {
+        const snap = await getDoc(doc(db, "usuarios", uid));
+        if (!snap.exists()) return;
+        const d = snap.data();
+        const set = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+        set('perfil-nombre', d.nombreVisible || d.nombre || 'Alumno');
+        set('perfil-id', d.userIdCorto || '—');
+        set('perfil-creditos', d.creditos ?? 0);
+        const fotoEl = document.getElementById('perfil-foto');
+        if (fotoEl && (d.foto || (usuarioActual && usuarioActual.photoURL))) {
+          fotoEl.src = d.foto || usuarioActual.photoURL;
+        }
+        const nivel = d.nivel || {};
+        const stats = ['flexibilidad','fuerza','resistencia','tecnica'];
+        const MAX = 10;
+        stats.forEach(s => {
+          const val = nivel[s] || 0;
+          const bar = document.getElementById(`stat-${s}-bar`);
+          const num = document.getElementById(`stat-${s}-val`);
+          if (bar) bar.style.width = `${Math.min(100, (val / MAX) * 100)}%`;
+          if (num) num.textContent = `Nv ${val}`;
+        });
+        const eventosEl = document.getElementById('perfil-eventos');
+        if (eventosEl) eventosEl.textContent = (d.eventos || []).length;
+      } catch (e) { console.error('cargarPerfil:', e); }
+    }
+
+    // Editar nombre visible
+    window.abrirEditarNombre = () => {
+      const actual = document.getElementById('perfil-nombre').textContent;
+      const nuevo = prompt('Tu nombre visible:', actual);
+      if (nuevo === null) return;
+      const limpio = nuevo.trim().slice(0, 40);
+      if (!limpio) return;
+      guardarNombreVisible(limpio);
+    };
+    async function guardarNombreVisible(nombreVisible) {
+      if (!usuarioActual) return;
+      try {
+        await updateDoc(doc(db, "usuarios", usuarioActual.uid), { nombreVisible });
+        const el = document.getElementById('perfil-nombre');
+        if (el) el.textContent = nombreVisible;
+      } catch (e) { console.error('guardarNombreVisible:', e); alert('No se pudo guardar el nombre.'); }
+    }
+
     // ── AUTH STATE ────────────────────────────────────────
     onAuthStateChanged(auth, user => {
       usuarioActual = user;
@@ -140,6 +219,7 @@
         videosLock.forEach(l => l.style.display = 'none');
         videoCards.forEach(c => c.style.pointerEvents = 'auto');
         cargarMisReservas(user.uid);
+        bootstrapPerfil(user).then(() => cargarPerfil(user.uid)).catch(e => console.error('perfil:', e));
       } else {
         if(btnLogin)  btnLogin.style.display  = 'inline-flex';
         if(btnLogout) btnLogout.style.display = 'none';
@@ -920,6 +1000,47 @@
 
     /* ===== MIS CLASES ===== */
     #seccion-mis-clases { display:none; background:rgba(0,0,0,.45); }
+
+    /* ===== PERFIL ===== */
+    .perfil-panel {
+      max-width:760px; margin:0 auto 1rem;
+      background:rgba(20,20,20,.85);
+      border:1px solid rgba(255,204,0,.18);
+      border-radius:8px; padding:22px 24px;
+    }
+    .perfil-head { display:flex; align-items:center; gap:16px; flex-wrap:wrap; }
+    .perfil-foto {
+      width:64px; height:64px; border-radius:50%;
+      object-fit:cover; border:2px solid #ffcc00; background:#111;
+    }
+    .perfil-head-info { flex:1; min-width:140px; }
+    .perfil-nombre-row { display:flex; align-items:center; gap:8px; }
+    .perfil-nombre { font-size:1.25rem; font-weight:700; color:#fff; }
+    .perfil-edit-btn {
+      background:none; border:none; color:#ffcc00; cursor:pointer;
+      font-size:.95rem; padding:2px 4px; line-height:1;
+    }
+    .perfil-id-tag { display:inline-block; margin-top:4px; font-size:.72rem;
+      letter-spacing:.06em; color:rgba(255,255,255,.45); }
+    .perfil-creditos-box {
+      text-align:center; padding:10px 18px; border-radius:8px;
+      background:rgba(255,204,0,.1); border:1px solid rgba(255,204,0,.3);
+    }
+    .perfil-creditos-num { display:block; font-size:1.6rem; font-weight:800; color:#ffcc00; line-height:1; }
+    .perfil-creditos-lbl { font-size:.65rem; text-transform:uppercase; letter-spacing:.08em; color:rgba(255,255,255,.55); }
+    .perfil-progreso { margin-top:20px; }
+    .perfil-sub { font-size:.95rem; color:#ffcc00; margin:0 0 12px; text-align:center; }
+    .stat-row { display:flex; align-items:center; gap:12px; margin-bottom:10px; }
+    .stat-name { width:92px; font-size:.78rem; color:rgba(255,255,255,.8); }
+    .stat-track { flex:1; height:8px; border-radius:4px; background:rgba(255,255,255,.08); overflow:hidden; }
+    .stat-bar { height:100%; width:0; border-radius:4px;
+      background:linear-gradient(90deg,#ff9d00,#ffcc00); transition:width .6s ease; }
+    .stat-val { width:42px; text-align:right; font-size:.72rem; color:rgba(255,255,255,.6); }
+    .perfil-eventos-line { margin-top:14px; text-align:center; font-size:.78rem; color:rgba(255,255,255,.55); }
+    @media(max-width:560px){
+      .perfil-creditos-box { margin-top:6px; }
+      .stat-name { width:78px; }
+    }
     .reserva-item {
       background:rgba(20,20,20,.8);
       border:1px solid rgba(255,204,0,.1);
@@ -1712,6 +1833,50 @@
       <h2 class="seccion-titulo">Mis Clases</h2>
       <div class="titulo-linea"></div>
     </div>
+    <!-- PANEL DE PERFIL -->
+    <div class="perfil-panel">
+      <div class="perfil-head">
+        <img id="perfil-foto" class="perfil-foto" src="" alt="Foto de perfil">
+        <div class="perfil-head-info">
+          <div class="perfil-nombre-row">
+            <span id="perfil-nombre" class="perfil-nombre">Alumno</span>
+            <button class="perfil-edit-btn" onclick="abrirEditarNombre()" title="Editar nombre">✎</button>
+          </div>
+          <span class="perfil-id-tag">ID: <span id="perfil-id">—</span></span>
+        </div>
+        <div class="perfil-creditos-box">
+          <span id="perfil-creditos" class="perfil-creditos-num">0</span>
+          <span class="perfil-creditos-lbl">créditos</span>
+        </div>
+      </div>
+
+      <div class="perfil-progreso">
+        <h3 class="perfil-sub">Tu progreso</h3>
+        <div class="stat-row">
+          <span class="stat-name">Flexibilidad</span>
+          <div class="stat-track"><div id="stat-flexibilidad-bar" class="stat-bar"></div></div>
+          <span id="stat-flexibilidad-val" class="stat-val">Nv 0</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-name">Fuerza</span>
+          <div class="stat-track"><div id="stat-fuerza-bar" class="stat-bar"></div></div>
+          <span id="stat-fuerza-val" class="stat-val">Nv 0</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-name">Resistencia</span>
+          <div class="stat-track"><div id="stat-resistencia-bar" class="stat-bar"></div></div>
+          <span id="stat-resistencia-val" class="stat-val">Nv 0</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-name">Técnica</span>
+          <div class="stat-track"><div id="stat-tecnica-bar" class="stat-bar"></div></div>
+          <span id="stat-tecnica-val" class="stat-val">Nv 0</span>
+        </div>
+        <p class="perfil-eventos-line">Eventos participados: <span id="perfil-eventos">0</span></p>
+      </div>
+    </div>
+
+    <h3 class="perfil-sub" style="margin-top:1.4rem;">Tus reservas</h3>
     <div id="mis-reservas-lista">
       <p style="opacity:.4;font-size:.8rem;">Cargando tus reservas...</p>
     </div>
