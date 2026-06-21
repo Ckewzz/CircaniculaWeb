@@ -342,7 +342,7 @@
       --gris: #141414;
       --gris-medio: #242424;
       --overlay: rgba(0,0,0,0.70);
-      --pendon-w: 80px;
+      --pendon-w: 0px;
     }
 
     * { margin:0; padding:0; box-sizing:border-box; }
@@ -379,25 +379,15 @@
       z-index: -1;
     }
 
-    /* ===== PENDONES ===== */
-    .pendon {
-      position: fixed;
-      top: 0;
-      width: var(--pendon-w);
-      height: 100vh;
-      z-index: 300;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      gap: 16px;
-      background: rgba(5,5,5,0.55);
-      backdrop-filter: blur(6px);
+    /* ===== NAV DOTS FLOTANTES (pendones removidos) ===== */
+    .nav-dots-float {
+      position:fixed;
+      right:16px; top:50%;
+      transform:translateY(-50%);
+      z-index:150;
+      display:flex; flex-direction:column; align-items:center; gap:14px;
     }
-    .pendon-izq { left:0; border-right:1px solid rgba(255,204,0,0.18); }
-    .pendon-der { right:0; border-left:1px solid rgba(255,204,0,0.18); }
-
-    .nav-dots { display:flex; flex-direction:column; align-items:center; gap:14px; }
+    @media (max-width:900px){ .nav-dots-float { display:none; } }
     .nav-dot {
       width:7px; height:7px;
       border-radius:50%;
@@ -413,7 +403,7 @@
     }
     .nav-dot-label {
       position:absolute;
-      left:18px; top:50%;
+      right:18px; top:50%;
       transform:translateY(-50%);
       background:rgba(0,0,0,.85);
       color:var(--amarillo);
@@ -1246,23 +1236,8 @@
 </div>
 <div id="bg-overlay"></div>
 
-<!-- PENDÓN IZQ -->
-<div class="pendon pendon-izq">
-  <div class="nav-dots" id="nav-dots"></div>
-</div>
-
-<!-- PENDÓN DER -->
-<div class="pendon pendon-der">
-  <div class="pendon-der-inner">
-    <span class="pendon-etiqueta">Próximo Evento</span>
-    <div class="pendon-divider"></div>
-    <div class="collab-slot">Logo Colab</div>
-    <div class="collab-slot">Logo Colab</div>
-    <div class="collab-slot">Logo Colab</div>
-    <div class="pendon-divider"></div>
-    <span class="pendon-etiqueta">Colaboradores</span>
-  </div>
-</div>
+<!-- Banners laterales (pendones) removidos — contenido a ancho completo -->
+<div class="nav-dots-float" id="nav-dots"></div>
 
 <!-- MAIN -->
 <div class="main-wrap">
@@ -1909,6 +1884,23 @@
   const planNombres = {individual:'Individual', basico:'Básico', medio:'Medio', avanzado:'Avanzado'};
   const claseNombres = {kids:'Kids', flow:'Adultos', fit:'Adultos', flex:'Flex', aro:'Aro'};
 
+  // Días por índice de columna (1=Lunes ... 5=Viernes)
+  const DIAS_NOMBRE = {1:'Lun', 2:'Mar', 3:'Mié', 4:'Jue', 5:'Vie'};
+  // Convierte clave de slot "6:00 – 7:00-2" → "Mar 6-7"
+  function formatSlot(key) {
+    const idx = key.lastIndexOf('-');
+    const horaRaw = key.slice(0, idx).trim();   // "6:00 – 7:00"
+    const dia = key.slice(idx + 1);             // "2"
+    const m = horaRaw.match(/(\d+):\d+\s*[–-]\s*(\d+):\d+/);
+    const horaCorta = m ? `${m[1]}-${m[2]}` : horaRaw;
+    return `${DIAS_NOMBRE[dia] || '?'} ${horaCorta}`;
+  }
+  // Lista de slots seleccionados ya formateada: "Lun 6-7, Mar 7-8"
+  function slotsFormateados() {
+    return Array.from(slotsSeleccionados).map(formatSlot).join(', ');
+  }
+  window.slotsFormateados = slotsFormateados;
+
   let slotsSeleccionados = new Set();
   let planActual = 'medio';
 
@@ -2030,7 +2022,7 @@
   const planActivo = document.querySelector('.plan-btn.activo')?.dataset.plan || 'medio';
   // Si es individual, ir directo a Stripe
   if(planActivo === 'individual') { irAPagar('individual'); return; }
-  const slots = Array.from(slotsSeleccionados).join(', ');
+  const slots = slotsFormateados();
 
   // Si hay usuario logueado, usa sus datos
   const nombre = document.getElementById('user-name')?.textContent || '';
