@@ -1269,29 +1269,6 @@
       50%{transform:translateX(-50%) translateY(6px)}
     }
 
-    /* ===== SEPARADORES DE SECCIÓN (mini-carruseles) ===== */
-    .section-divider {
-      width:100%;
-      height:220px;
-      overflow:hidden;
-      position:relative;
-    }
-    .divider-strip {
-      display:flex;
-      height:100%;
-      gap:6px;
-    }
-    .divider-strip img {
-      flex:0 0 auto;
-      width:calc(25% - 5px);
-      height:100%;
-      object-fit:cover;
-      opacity:.35;
-      filter:saturate(.7);
-      transition:opacity .4s;
-    }
-    .divider-strip img:hover { opacity:.6; }
-
     /* ===== NOTICIAS ===== */
     #noticias { background:rgba(0,0,0,.3); backdrop-filter:blur(3px); }
     .noticias-grid {
@@ -1361,7 +1338,7 @@
       display:flex; gap:16px;
       overflow-x:auto;
       padding:8px 0 20px;
-      scroll-snap-type:x mandatory;
+      scroll-snap-type:x proximity;
       scrollbar-width:thin;
       scrollbar-color:var(--amarillo) rgba(255,255,255,.06);
     }
@@ -1373,8 +1350,8 @@
       position:relative; border-radius:3px;
       overflow:hidden; scroll-snap-align:start; cursor:pointer;
     }
-    .evento-hallway-item img { width:100%; height:100%; object-fit:cover; transition:transform .7s; display:block; }
-    .evento-hallway-item:hover img { transform:scale(1.07); }
+    .evento-hallway-item img { width:100%; height:100%; object-fit:cover; transition:transform .7s, opacity .4s; display:block; opacity:.78; }
+    .evento-hallway-item:hover img { transform:scale(1.07); opacity:1; }
     .evento-hallway-base {
       position:absolute; bottom:0; left:0; right:0;
       background:linear-gradient(transparent,rgba(0,0,0,.88));
@@ -2023,7 +2000,6 @@
       .seccion { padding:65px 18px; }
       #inicio { padding:100px 18px 60px; }
       .form-fila { grid-template-columns:1fr; }
-      .section-divider { height:140px; }
     }
     /* PWA / móvil: logo arriba, navegación y cuenta DEBAJO del logo */
     @media (max-width:680px) {
@@ -2159,16 +2135,6 @@
     </div>
   </section>
 
-  <!-- SEPARADOR VISUAL 1 -->
-  <div class="section-divider">
-    <div class="divider-strip">
-      <img src="Images/CIRCANIC FORMAL 01--34.jpg" alt="Circanícula" loading="lazy">
-      <img src="Images/CIRCANIC FORMAL 01--81.jpg" alt="Circanícula" loading="lazy">
-      <img src="Images/CIRCANIC FORMAL 01--105.jpg" alt="Circanícula" loading="lazy">
-      <img src="Images/CIRCANIC FORMAL 01--111.jpg" alt="Circanícula" loading="lazy">
-    </div>
-  </div>
-
   <!-- NOTICIAS -->
   <section id="noticias" class="seccion">
     <div class="seccion-header">
@@ -2212,16 +2178,6 @@
       </div>
     </div>
   </section>
-
-  <!-- SEPARADOR VISUAL 2 -->
-  <div class="section-divider">
-    <div class="divider-strip">
-      <img src="Images/CIRCANIC FORMAL 01--147.jpg" alt="Circanícula" loading="lazy">
-      <img src="Images/CIRCANIC FORMAL 01--150.jpg" alt="Circanícula" loading="lazy">
-      <img src="Images/CIRCANIC FORMAL 01--179.jpg" alt="Circanícula" loading="lazy">
-      <img src="Images/CIRCANIC FORMAL 01--208.jpg" alt="Circanícula" loading="lazy">
-    </div>
-  </div>
 
   <!-- PRÓXIMOS EVENTOS -->
   <section id="proximos-eventos" class="seccion">
@@ -2363,14 +2319,14 @@
       <p class="seccion-desc">Un recorrido por lo que hemos construido juntas.</p>
     </div>
     <div class="hallway-scroll">
-      <div class="evento-hallway-item" data-img="Images/HW01.jpeg" data-nombre="Aéreo Menti 2024" data-fecha="Noviembre 2024"><img src="Images/HW01.jpeg" alt="Aéreo Menti 2024"><div class="evento-hallway-base"><p class="evento-hallway-nombre">Aéreo Menti 2024</p><p class="evento-hallway-fecha">Noviembre 2024</p></div><div class="hallway-zoom-hint">🔍</div></div>
-      <div class="evento-hallway-item" data-img="Images/HW02.jpg" data-nombre="Vogue Inspo" data-fecha="Mayo 2025"><img src="Images/HW02.jpg" alt="Vogue Inspo"><div class="evento-hallway-base"><p class="evento-hallway-nombre">Vogue Inspo</p><p class="evento-hallway-fecha">Mayo 2025</p></div><div class="hallway-zoom-hint">🔍</div></div>
-      <div class="evento-hallway-item" data-img="Images/HW03.jpg" data-nombre="Arte Aéreo" data-fecha="Mayo 2025"><img src="Images/HW03.jpg" alt="Arte Aéreo"><div class="evento-hallway-base"><p class="evento-hallway-nombre">Arte Aéreo</p><p class="evento-hallway-fecha">Mayo 2025</p></div><div class="hallway-zoom-hint">🔍</div></div>
-      <div class="evento-hallway-item" data-img="Images/HW04.jpeg" data-nombre="Kids Aéreo" data-fecha="Octubre 2024"><img src="Images/HW04.jpeg" alt="Kids Aéreo"><div class="evento-hallway-base"><p class="evento-hallway-nombre">Kids Aéreo</p><p class="evento-hallway-fecha">Octubre 2024</p></div><div class="hallway-zoom-hint">🔍</div></div>
-      <div class="evento-hallway-item" data-img="Images/HW05.jpg" data-nombre="Aerial Haditas" data-fecha="Abril 2025"><img src="Images/HW05.jpg" alt="Aerial Haditas"><div class="evento-hallway-base"><p class="evento-hallway-nombre">Aerial Haditas</p><p class="evento-hallway-fecha">Abril 2025</p></div><div class="hallway-zoom-hint">🔍</div></div>
-      <div class="evento-hallway-item" data-img="Images/HW06.jpg" data-nombre="Dúo Aéreo" data-fecha="Octubre 2024"><img src="Images/HW06.jpg" alt="Dúo Aéreo"><div class="evento-hallway-base"><p class="evento-hallway-nombre">Dúo Aéreo</p><p class="evento-hallway-fecha">Octubre 2024</p></div><div class="hallway-zoom-hint">🔍</div></div>
-      <div class="evento-hallway-item" data-img="Images/HW07.jpg" data-nombre="Aerial & Flex" data-fecha="Octubre 2024"><img src="Images/HW07.jpg" alt="Aerial & Flex"><div class="evento-hallway-base"><p class="evento-hallway-nombre">Aerial & Flex</p><p class="evento-hallway-fecha">Octubre 2024</p></div><div class="hallway-zoom-hint">🔍</div></div>
-      <div class="evento-hallway-item" data-img="Images/HW08.jpg" data-nombre="Aerial Fairy" data-fecha="Abril 2025"><img src="Images/HW08.jpg" alt="Aerial Fairy"><div class="evento-hallway-base"><p class="evento-hallway-nombre">Aerial Fairy</p><p class="evento-hallway-fecha">Abril 2025</p></div><div class="hallway-zoom-hint">🔍</div></div>
+      <div class="evento-hallway-item" data-img="Images/HW01.jpeg" data-nombre="Aéreo Menti 2024" data-fecha="Noviembre 2024"><img src="Images/HW01.jpeg" alt="Aéreo Menti 2024" loading="lazy"><div class="evento-hallway-base"><p class="evento-hallway-nombre">Aéreo Menti 2024</p><p class="evento-hallway-fecha">Noviembre 2024</p></div><div class="hallway-zoom-hint">🔍</div></div>
+      <div class="evento-hallway-item" data-img="Images/HW02.jpg" data-nombre="Vogue Inspo" data-fecha="Mayo 2025"><img src="Images/HW02.jpg" alt="Vogue Inspo" loading="lazy"><div class="evento-hallway-base"><p class="evento-hallway-nombre">Vogue Inspo</p><p class="evento-hallway-fecha">Mayo 2025</p></div><div class="hallway-zoom-hint">🔍</div></div>
+      <div class="evento-hallway-item" data-img="Images/HW03.jpg" data-nombre="Arte Aéreo" data-fecha="Mayo 2025"><img src="Images/HW03.jpg" alt="Arte Aéreo" loading="lazy"><div class="evento-hallway-base"><p class="evento-hallway-nombre">Arte Aéreo</p><p class="evento-hallway-fecha">Mayo 2025</p></div><div class="hallway-zoom-hint">🔍</div></div>
+      <div class="evento-hallway-item" data-img="Images/HW04.jpeg" data-nombre="Kids Aéreo" data-fecha="Octubre 2024"><img src="Images/HW04.jpeg" alt="Kids Aéreo" loading="lazy"><div class="evento-hallway-base"><p class="evento-hallway-nombre">Kids Aéreo</p><p class="evento-hallway-fecha">Octubre 2024</p></div><div class="hallway-zoom-hint">🔍</div></div>
+      <div class="evento-hallway-item" data-img="Images/HW05.jpg" data-nombre="Aerial Haditas" data-fecha="Abril 2025"><img src="Images/HW05.jpg" alt="Aerial Haditas" loading="lazy"><div class="evento-hallway-base"><p class="evento-hallway-nombre">Aerial Haditas</p><p class="evento-hallway-fecha">Abril 2025</p></div><div class="hallway-zoom-hint">🔍</div></div>
+      <div class="evento-hallway-item" data-img="Images/HW06.jpg" data-nombre="Dúo Aéreo" data-fecha="Octubre 2024"><img src="Images/HW06.jpg" alt="Dúo Aéreo" loading="lazy"><div class="evento-hallway-base"><p class="evento-hallway-nombre">Dúo Aéreo</p><p class="evento-hallway-fecha">Octubre 2024</p></div><div class="hallway-zoom-hint">🔍</div></div>
+      <div class="evento-hallway-item" data-img="Images/HW07.jpg" data-nombre="Aerial & Flex" data-fecha="Octubre 2024"><img src="Images/HW07.jpg" alt="Aerial & Flex" loading="lazy"><div class="evento-hallway-base"><p class="evento-hallway-nombre">Aerial & Flex</p><p class="evento-hallway-fecha">Octubre 2024</p></div><div class="hallway-zoom-hint">🔍</div></div>
+      <div class="evento-hallway-item" data-img="Images/HW08.jpg" data-nombre="Aerial Fairy" data-fecha="Abril 2025"><img src="Images/HW08.jpg" alt="Aerial Fairy" loading="lazy"><div class="evento-hallway-base"><p class="evento-hallway-nombre">Aerial Fairy</p><p class="evento-hallway-fecha">Abril 2025</p></div><div class="hallway-zoom-hint">🔍</div></div>
     </div>
   </section>
 
@@ -2384,16 +2340,6 @@
     <div style="text-align:center;">
       <p id="lightbox-nombre" style="font-family:'Cinzel',serif;font-size:.88rem;color:var(--amarillo);letter-spacing:2px;"></p>
       <p id="lightbox-fecha" style="font-size:.7rem;opacity:.4;margin-top:4px;"></p>
-    </div>
-  </div>
-
-  <!-- SEPARADOR VISUAL 3 -->
-  <div class="section-divider">
-    <div class="divider-strip">
-      <img src="Images/cirxa 01--70.jpg" alt="Circanícula" loading="lazy">
-      <img src="Images/055--3.jpg" alt="Circanícula" loading="lazy">
-      <img src="Images/055--7.jpg" alt="Circanícula" loading="lazy">
-      <img src="Images/4-DSC05478.jpg" alt="Circanícula" loading="lazy">
     </div>
   </div>
 
@@ -2634,15 +2580,6 @@
     </div>
   </div>
 
-  <!-- SEPARADOR VISUAL 4 -->
-  <div class="section-divider">
-    <div class="divider-strip">
-      <img src="Images/circanicula-34.jpg" alt="Circanícula" loading="lazy">
-      <img src="Images/IMG-20250828-WA0020.jpg" alt="Circanícula" loading="lazy">
-      <img src="Images/05--28.jpg" alt="Circanícula" loading="lazy">
-      <img src="Images/IMG_6873.jpeg" alt="Circanícula" loading="lazy">
-    </div>
-  </div>
 
   <!-- VIDEOS — oculto hasta tener contenido real -->
   <section id="videos" class="seccion" style="display:none;" data-nav-skip="true">
@@ -2692,15 +2629,26 @@
     </div>
   </section>
 
-  <!-- SEPARADOR VISUAL 5 -->
-  <div class="section-divider">
-    <div class="divider-strip">
-      <img src="Images/IMG_7129.jpeg" alt="Circanícula" loading="lazy">
-      <img src="Images/IMG_7102.jpeg" alt="Circanícula" loading="lazy">
-      <img src="Images/IMG_7380.jpeg" alt="Circanícula" loading="lazy">
-      <img src="Images/IMG_7335.jpeg" alt="Circanícula" loading="lazy">
+  <!-- HALLWAY #2 — GALERÍA (antes de Labor Social) -->
+  <section class="seccion" data-nav-skip="true">
+    <div class="seccion-header">
+      <span class="seccion-eyebrow">Momentos</span>
+      <h2 class="seccion-titulo">Galería</h2>
+      <div class="titulo-linea"></div>
+      <p class="seccion-desc">Sesiones, clases y comunidad Circanícula.</p>
     </div>
-  </div>
+    <div class="hallway-scroll">
+      <div class="evento-hallway-item" data-img="Images/CIRCANIC FORMAL 01--34.jpg" data-nombre="Sesión Circanícula" data-fecha="Estudio"><img src="Images/CIRCANIC FORMAL 01--34.jpg" alt="Sesión Circanícula" loading="lazy"><div class="evento-hallway-base"><p class="evento-hallway-nombre">Sesión Circanícula</p><p class="evento-hallway-fecha">Estudio</p></div><div class="hallway-zoom-hint">🔍</div></div>
+      <div class="evento-hallway-item" data-img="Images/CIRCANIC FORMAL 01--81.jpg" data-nombre="Sesión Circanícula" data-fecha="Estudio"><img src="Images/CIRCANIC FORMAL 01--81.jpg" alt="Sesión Circanícula" loading="lazy"><div class="evento-hallway-base"><p class="evento-hallway-nombre">Sesión Circanícula</p><p class="evento-hallway-fecha">Estudio</p></div><div class="hallway-zoom-hint">🔍</div></div>
+      <div class="evento-hallway-item" data-img="Images/CIRCANIC FORMAL 01--105.jpg" data-nombre="Sesión Circanícula" data-fecha="Estudio"><img src="Images/CIRCANIC FORMAL 01--105.jpg" alt="Sesión Circanícula" loading="lazy"><div class="evento-hallway-base"><p class="evento-hallway-nombre">Sesión Circanícula</p><p class="evento-hallway-fecha">Estudio</p></div><div class="hallway-zoom-hint">🔍</div></div>
+      <div class="evento-hallway-item" data-img="Images/CIRCANIC FORMAL 01--147.jpg" data-nombre="Sesión Circanícula" data-fecha="Estudio"><img src="Images/CIRCANIC FORMAL 01--147.jpg" alt="Sesión Circanícula" loading="lazy"><div class="evento-hallway-base"><p class="evento-hallway-nombre">Sesión Circanícula</p><p class="evento-hallway-fecha">Estudio</p></div><div class="hallway-zoom-hint">🔍</div></div>
+      <div class="evento-hallway-item" data-img="Images/cirxa 01--70.jpg" data-nombre="Comunidad" data-fecha="Circanícula"><img src="Images/cirxa 01--70.jpg" alt="Comunidad Circanícula" loading="lazy"><div class="evento-hallway-base"><p class="evento-hallway-nombre">Comunidad</p><p class="evento-hallway-fecha">Circanícula</p></div><div class="hallway-zoom-hint">🔍</div></div>
+      <div class="evento-hallway-item" data-img="Images/circanicula-34.jpg" data-nombre="Comunidad" data-fecha="Circanícula"><img src="Images/circanicula-34.jpg" alt="Comunidad Circanícula" loading="lazy"><div class="evento-hallway-base"><p class="evento-hallway-nombre">Comunidad</p><p class="evento-hallway-fecha">Circanícula</p></div><div class="hallway-zoom-hint">🔍</div></div>
+      <div class="evento-hallway-item" data-img="Images/IMG_6873.jpeg" data-nombre="En clase" data-fecha="Entrenamiento"><img src="Images/IMG_6873.jpeg" alt="En clase" loading="lazy"><div class="evento-hallway-base"><p class="evento-hallway-nombre">En clase</p><p class="evento-hallway-fecha">Entrenamiento</p></div><div class="hallway-zoom-hint">🔍</div></div>
+      <div class="evento-hallway-item" data-img="Images/IMG_7129.jpeg" data-nombre="En clase" data-fecha="Entrenamiento"><img src="Images/IMG_7129.jpeg" alt="En clase" loading="lazy"><div class="evento-hallway-base"><p class="evento-hallway-nombre">En clase</p><p class="evento-hallway-fecha">Entrenamiento</p></div><div class="hallway-zoom-hint">🔍</div></div>
+      <div class="evento-hallway-item" data-img="Images/IMG_7335.jpeg" data-nombre="En clase" data-fecha="Entrenamiento"><img src="Images/IMG_7335.jpeg" alt="En clase" loading="lazy"><div class="evento-hallway-base"><p class="evento-hallway-nombre">En clase</p><p class="evento-hallway-fecha">Entrenamiento</p></div><div class="hallway-zoom-hint">🔍</div></div>
+    </div>
+  </section>
 
   <!-- LABOR SOCIAL -->
   <section id="labor-social" class="seccion">
@@ -3111,14 +3059,36 @@
   const lbNombre = document.getElementById('lightbox-nombre');
   const lbFecha = document.getElementById('lightbox-fecha');
 
-  document.querySelectorAll('.evento-hallway-item').forEach(item => {
-    item.addEventListener('click', () => {
-      lbImg.src = item.dataset.img || '';
-      lbNombre.textContent = item.dataset.nombre || '';
-      lbFecha.textContent = item.dataset.fecha || '';
-      lb.style.display = 'flex';
-      document.body.style.overflow = 'hidden';
-    });
+  /* Hallway en LOOP infinito: clonamos los ítems una vez y envolvemos el
+     scroll. Al llegar al final reaparece el principio (y viceversa) sin tope. */
+  document.querySelectorAll('.hallway-scroll').forEach(track => {
+    const items = Array.from(track.children);
+    if (!items.length) return;
+    items.forEach(it => track.appendChild(it.cloneNode(true)));
+    const setW = () => track.scrollWidth / 2;
+    track.scrollLeft = 1; // pequeño offset para permitir el wrap hacia atrás
+    let ticking = false;
+    track.addEventListener('scroll', () => {
+      if (ticking) return;
+      ticking = true;
+      requestAnimationFrame(() => {
+        const w = setW();
+        if (track.scrollLeft >= w) track.scrollLeft -= w;
+        else if (track.scrollLeft <= 0) track.scrollLeft += w;
+        ticking = false;
+      });
+    }, { passive: true });
+  });
+
+  /* Lightbox por DELEGACIÓN (cubre también los ítems clonados del loop). */
+  document.addEventListener('click', e => {
+    const item = e.target.closest('.evento-hallway-item');
+    if (!item) return;
+    lbImg.src = item.dataset.img || '';
+    lbNombre.textContent = item.dataset.nombre || '';
+    lbFecha.textContent = item.dataset.fecha || '';
+    lb.style.display = 'flex';
+    document.body.style.overflow = 'hidden';
   });
 
   function cerrarLightbox() {
