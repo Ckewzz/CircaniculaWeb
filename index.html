@@ -84,6 +84,54 @@
     window.EVENTO_CONFIG = EVENTO_CONFIG;
     // ─────────────────────────────────────────────────────
 
+    // ── CONFIG RANKS / ESTRELLAS ──────────────────────────
+    // Sistema de roles. Por defecto todo usuario nuevo es Rank 3 (Alumno).
+    // Para asignar Creador (0), Instructora (1) o Asistente (2), agrega el
+    // correo de Google de la persona aquí abajo. ✏️ EDITA SOLO ESTO:
+    const OVERRIDE_RANGOS = {
+      // "tu-correo@gmail.com": 0,     // ← Iván (Creador + Instructora)
+      // "miss-ejemplo@gmail.com": 1,  // ← Instructora
+      // "asistente@gmail.com": 2,     // ← Asistente
+    };
+
+    // Definición de cada rank (nombre, distintivo, créditos mensuales de regalo)
+    const RANKS = {
+      0: { nombre:'Creador',    clase:'rank-creador',    regaloMes:4, marco:true,  puedeApodo:true  },
+      1: { nombre:'Instructora',clase:'rank-instructora',regaloMes:4, marco:true,  puedeApodo:true  },
+      2: { nombre:'Asistente',  clase:'rank-asistente',  regaloMes:1, marco:false, puedeApodo:true  },
+      3: { nombre:'Alumno',     clase:'rank-alumno',     regaloMes:0, marco:false, puedeApodo:false },
+      4: { nombre:'Lector',     clase:'rank-lector',     regaloMes:0, marco:false, puedeApodo:false },
+    };
+
+    // Stats del radar (orden = vértices del polígono). Escala 0–10.
+    const STATS_DEF = [
+      { key:'flexibilidad',  label:'Flexibilidad'  },
+      { key:'fuerza',        label:'Fuerza'        },
+      { key:'resistencia',   label:'Resistencia'   },
+      { key:'tecnica',       label:'Técnica'       },
+      { key:'caida',         label:'Caída'         },
+      { key:'interpretacion',label:'Interpretación'},
+    ];
+
+    // Títulos por combinación de stats (umbral alto = 7+). Se irán ampliando.
+    const TITULOS_DEF = [
+      { id:'aerialista_riesgo', nombre:'Aerialista de Riesgo',
+        test:n => n.tecnica>=7 && n.caida>=7 && n.fuerza>=7 },
+      { id:'contorsionista', nombre:'Contorsionista',
+        test:n => n.flexibilidad>=7 && n.tecnica>=7 },
+      { id:'dotado', nombre:'Dotado',
+        test:n => n.flexibilidad>=7 && n.fuerza>=7 && n.caida>=7 && n.tecnica<7 },
+    ];
+
+    // ESTRELLAS (créditos) — DESACTIVADAS hasta Agosto. Solo lectura/visual.
+    const ESTRELLAS_ACTIVAS = false;
+
+    function rankDeUsuario(user) {
+      const r = OVERRIDE_RANGOS[(user.email || '').toLowerCase()];
+      return (r === undefined) ? 3 : r;
+    }
+    // ─────────────────────────────────────────────────────
+
     const app      = initializeApp(firebaseConfig);
     const auth     = getAuth(app);
     const db       = getFirestore(app);
@@ -128,16 +176,65 @@
       const snap = await getDoc(ref);
       const data = snap.exists() ? snap.data() : {};
       const patch = {};
-      if (!data.userIdCorto)  patch.userIdCorto  = generarIdCorto(user.uid);
+      if (!data.userIdCorto)   patch.userIdCorto   = generarIdCorto(user.uid);
       if (!data.nombreVisible) patch.nombreVisible = user.displayName || 'Alumno';
       if (data.creditos === undefined) patch.creditos = 0;
-      if (!data.nivel) patch.nivel = { flexibilidad:0, fuerza:0, resistencia:0, tecnica:0 };
-      if (!data.eventos) patch.eventos = [];
+      // Stats completos (6). Conserva los existentes, agrega los faltantes.
+      const nivelBase = { flexibilidad:0, fuerza:0, resistencia:0, tecnica:0, caida:0, interpretacion:0 };
+      const nivelMerge = { ...nivelBase, ...(data.nivel || {}) };
+      if (JSON.stringify(nivelMerge) !== JSON.stringify(data.nivel || {})) patch.nivel = nivelMerge;
+      if (!data.eventos)  patch.eventos = [];
+      if (!data.titulos)  patch.titulos = [];
+      if (!data.apodo)    patch.apodo = '';
+      if (!data.especialidad) patch.especialidad = '';
+      // RANK: el override por correo manda; si no, default 3. No se escribe
+      // un rank manual existente más alto a la baja (respeta ascensos en DB).
+      const rankCalc = rankDeUsuario(user);
+      if (data.rank === undefined) patch.rank = rankCalc;
+      else if (rankCalc < data.rank) patch.rank = rankCalc; // override puede ascender
       if (!data.creadoEn) patch.creadoEn = serverTimestamp();
       if (Object.keys(patch).length) {
         await setDoc(ref, patch, { merge: true });
       }
       return { ...data, ...patch };
+    }
+
+    // Genera el SVG de radar (polígono) a partir de los stats. Escala 0–10.
+    function construirRadar(nivel) {
+      const N = STATS_DEF.length, MAX = 10;
+      const cx = 130, cy = 120, R = 88;
+      const ang = i => (-Math.PI/2) + (i * 2*Math.PI / N);
+      const pt = (i, r) => [cx + r*Math.cos(ang(i)), cy + r*Math.sin(ang(i))];
+      // Mallas concéntricas
+      let grid = '';
+      for (let g = 1; g <= 4; g++) {
+        const rr = R * g/4;
+        const pts = STATS_DEF.map((_,i)=>pt(i,rr).map(n=>n.toFixed(1)).join(',')).join(' ');
+        grid += `<polygon points="${pts}" class="radar-grid"/>`;
+      }
+      // Ejes + etiquetas
+      let ejes = '', labels = '';
+      STATS_DEF.forEach((s,i) => {
+        const [x,y] = pt(i,R);
+        ejes += `<line x1="${cx}" y1="${cy}" x2="${x.toFixed(1)}" y2="${y.toFixed(1)}" class="radar-axis"/>`;
+        const [lx,ly] = pt(i,R+16);
+        const anchor = Math.abs(lx-cx)<6 ? 'middle' : (lx<cx ? 'end' : 'start');
+        labels += `<text x="${lx.toFixed(1)}" y="${(ly+3).toFixed(1)}" text-anchor="${anchor}" class="radar-label">${s.label}</text>`;
+      });
+      // Polígono de valores
+      const valPts = STATS_DEF.map((s,i) => {
+        const v = Math.max(0, Math.min(MAX, nivel[s.key]||0));
+        return pt(i, R * v/MAX).map(n=>n.toFixed(1)).join(',');
+      }).join(' ');
+      return `<svg viewBox="0 0 260 250" class="radar-svg" aria-label="Radar de stats">
+        ${grid}${ejes}
+        <polygon points="${valPts}" class="radar-area"/>
+        ${labels}
+      </svg>`;
+    }
+
+    function calcularTitulos(nivel) {
+      return TITULOS_DEF.filter(t => t.test(nivel)).map(t => t.nombre);
     }
 
     // Pinta el panel de perfil con los datos del usuario.
@@ -146,28 +243,82 @@
         const snap = await getDoc(doc(db, "usuarios", uid));
         if (!snap.exists()) return;
         const d = snap.data();
+        const rank = d.rank ?? 3;
+        const rk = RANKS[rank] || RANKS[3];
         const set = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+
         set('perfil-nombre', d.nombreVisible || d.nombre || 'Alumno');
         set('perfil-id', d.userIdCorto || '—');
         set('perfil-creditos', d.creditos ?? 0);
+
+        // Rank badge
+        const badge = document.getElementById('perfil-rank-badge');
+        if (badge) { badge.textContent = rk.nombre; badge.className = `perfil-rank-badge ${rk.clase}`; }
+
+        // Marco animado (instructora/creador)
+        const fotoWrap = document.getElementById('perfil-foto-wrap');
+        if (fotoWrap) fotoWrap.classList.toggle('foto-marco', !!rk.marco);
+
+        // Apodo (solo rank<=2). Visible si existe.
+        const apodoEl = document.getElementById('perfil-apodo');
+        const apodoBtn = document.getElementById('perfil-apodo-btn');
+        if (apodoEl) {
+          apodoEl.textContent = d.apodo ? `«${d.apodo}»` : '';
+          apodoEl.style.display = d.apodo ? 'inline' : 'none';
+        }
+        if (apodoBtn) apodoBtn.style.display = rk.puedeApodo ? 'inline' : 'none';
+
         const fotoEl = document.getElementById('perfil-foto');
         if (fotoEl && (d.foto || (usuarioActual && usuarioActual.photoURL))) {
           fotoEl.src = d.foto || usuarioActual.photoURL;
         }
-        const nivel = d.nivel || {};
-        const stats = ['flexibilidad','fuerza','resistencia','tecnica'];
-        const MAX = 10;
-        stats.forEach(s => {
-          const val = nivel[s] || 0;
-          const bar = document.getElementById(`stat-${s}-bar`);
-          const num = document.getElementById(`stat-${s}-val`);
-          if (bar) bar.style.width = `${Math.min(100, (val / MAX) * 100)}%`;
-          if (num) num.textContent = `Nv ${val}`;
-        });
+
+        // Radar de stats
+        const nivel = { flexibilidad:0,fuerza:0,resistencia:0,tecnica:0,caida:0,interpretacion:0, ...(d.nivel||{}) };
+        const radarEl = document.getElementById('perfil-radar');
+        if (radarEl) radarEl.innerHTML = construirRadar(nivel);
+
+        // Títulos (combos calculados + los desbloqueados en DB)
+        const titulos = Array.from(new Set([ ...(d.titulos||[]), ...calcularTitulos(nivel) ]));
+        const titEl = document.getElementById('perfil-titulos');
+        if (titEl) {
+          titEl.innerHTML = titulos.length
+            ? titulos.map(t => `<span class="titulo-chip">🏅 ${t}</span>`).join('')
+            : '<span class="titulo-vacio">Sin títulos aún — ¡sigue entrenando!</span>';
+        }
+
         const eventosEl = document.getElementById('perfil-eventos');
         if (eventosEl) eventosEl.textContent = (d.eventos || []).length;
       } catch (e) { console.error('cargarPerfil:', e); }
     }
+
+    // Editar apodo (solo rank<=2). Validado de nuevo contra DB en escritura.
+    window.abrirEditarApodo = async () => {
+      if (!usuarioActual) return;
+      const snap = await getDoc(doc(db, "usuarios", usuarioActual.uid));
+      const rank = snap.exists() ? (snap.data().rank ?? 3) : 3;
+      if (!(RANKS[rank] && RANKS[rank].puedeApodo)) {
+        alert('Los apodos son exclusivos de Instructoras y Asistentes.');
+        return;
+      }
+      const actual = snap.data().apodo || '';
+      const nuevo = prompt('Tu apodo (máx. 24):', actual);
+      if (nuevo === null) return;
+      const limpio = nuevo.trim().slice(0, 24);
+      try {
+        await updateDoc(doc(db, "usuarios", usuarioActual.uid), { apodo: limpio });
+        cargarPerfil(usuarioActual.uid);
+      } catch (e) { console.error('apodo:', e); alert('No se pudo guardar el apodo.'); }
+    };
+
+    // Candado de Estrellas (créditos) — activo hasta Agosto.
+    window.accionEstrellas = () => {
+      if (!ESTRELLAS_ACTIVAS) {
+        alert('⭐ Las Estrellas estarán disponibles a partir de Agosto. ¡Muy pronto podrás comprarlas y canjearlas!');
+        return;
+      }
+      // (Futuro) abrir sección/compra de Estrellas
+    };
 
     // Editar nombre visible
     window.abrirEditarNombre = () => {
@@ -1009,37 +1160,64 @@
       border-radius:8px; padding:22px 24px;
     }
     .perfil-head { display:flex; align-items:center; gap:16px; flex-wrap:wrap; }
+    .perfil-foto-wrap { position:relative; width:72px; height:72px; flex:0 0 auto; border-radius:50%; padding:3px; }
     .perfil-foto {
-      width:64px; height:64px; border-radius:50%;
-      object-fit:cover; border:2px solid #ffcc00; background:#111;
+      width:100%; height:100%; border-radius:50%;
+      object-fit:cover; border:2px solid #ffcc00; background:#111; display:block;
     }
+    /* Marco animado para Instructora / Creador */
+    .perfil-foto-wrap.foto-marco {
+      background:conic-gradient(from 0deg,#ff9d00,#ffcc00,#ff5ea8,#a855f7,#ff9d00);
+      animation:marcoGira 4s linear infinite;
+    }
+    .perfil-foto-wrap.foto-marco .perfil-foto { border-color:#111; }
+    @keyframes marcoGira { to { transform:rotate(360deg); } }
     .perfil-head-info { flex:1; min-width:140px; }
-    .perfil-nombre-row { display:flex; align-items:center; gap:8px; }
+    .perfil-nombre-row { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
     .perfil-nombre { font-size:1.25rem; font-weight:700; color:#fff; }
     .perfil-edit-btn {
       background:none; border:none; color:#ffcc00; cursor:pointer;
       font-size:.95rem; padding:2px 4px; line-height:1;
     }
+    .perfil-rank-badge {
+      font-size:.62rem; font-weight:800; text-transform:uppercase; letter-spacing:.07em;
+      padding:3px 9px; border-radius:20px; color:#111;
+    }
+    .rank-creador     { background:linear-gradient(90deg,#ffd700,#ff9d00); }
+    .rank-instructora { background:linear-gradient(90deg,#ff5ea8,#a855f7); color:#fff; }
+    .rank-asistente   { background:linear-gradient(90deg,#4fd1c5,#3182ce); color:#fff; }
+    .rank-alumno      { background:rgba(255,255,255,.18); color:#fff; }
+    .rank-lector      { background:rgba(255,255,255,.1); color:rgba(255,255,255,.6); }
+    .perfil-apodo-row { margin-top:2px; }
+    .perfil-apodo { font-style:italic; color:#ffcc00; font-size:.85rem; }
+    .perfil-apodo-btn { background:none; border:1px dashed rgba(255,204,0,.4);
+      color:rgba(255,204,0,.7); border-radius:12px; font-size:.66rem; cursor:pointer; padding:1px 8px; margin-left:6px; }
     .perfil-id-tag { display:inline-block; margin-top:4px; font-size:.72rem;
       letter-spacing:.06em; color:rgba(255,255,255,.45); }
     .perfil-creditos-box {
-      text-align:center; padding:10px 18px; border-radius:8px;
-      background:rgba(255,204,0,.1); border:1px solid rgba(255,204,0,.3);
+      position:relative; text-align:center; padding:10px 16px; border-radius:8px; cursor:pointer;
+      background:rgba(255,204,0,.07); border:1px solid rgba(255,204,0,.25);
     }
-    .perfil-creditos-num { display:block; font-size:1.6rem; font-weight:800; color:#ffcc00; line-height:1; }
+    .perfil-creditos-candado { position:absolute; top:5px; right:7px; font-size:.7rem; opacity:.7; }
+    .perfil-creditos-num { display:block; font-size:1.6rem; font-weight:800; color:#ffcc00; line-height:1; opacity:.6; }
     .perfil-creditos-lbl { font-size:.65rem; text-transform:uppercase; letter-spacing:.08em; color:rgba(255,255,255,.55); }
+    .perfil-creditos-soon { display:block; margin-top:3px; font-size:.6rem; color:#ff9d00; font-weight:700; }
     .perfil-progreso { margin-top:20px; }
-    .perfil-sub { font-size:.95rem; color:#ffcc00; margin:0 0 12px; text-align:center; }
-    .stat-row { display:flex; align-items:center; gap:12px; margin-bottom:10px; }
-    .stat-name { width:92px; font-size:.78rem; color:rgba(255,255,255,.8); }
-    .stat-track { flex:1; height:8px; border-radius:4px; background:rgba(255,255,255,.08); overflow:hidden; }
-    .stat-bar { height:100%; width:0; border-radius:4px;
-      background:linear-gradient(90deg,#ff9d00,#ffcc00); transition:width .6s ease; }
-    .stat-val { width:42px; text-align:right; font-size:.72rem; color:rgba(255,255,255,.6); }
+    .perfil-sub { font-size:.95rem; color:#ffcc00; margin:0 0 8px; text-align:center; }
+    .perfil-radar { display:flex; justify-content:center; }
+    .radar-svg { width:100%; max-width:300px; height:auto; }
+    .radar-grid { fill:none; stroke:rgba(255,255,255,.08); stroke-width:1; }
+    .radar-axis { stroke:rgba(255,255,255,.12); stroke-width:1; }
+    .radar-area { fill:rgba(255,204,0,.28); stroke:#ffcc00; stroke-width:2; }
+    .radar-label { fill:rgba(255,255,255,.75); font-size:10px; font-weight:600; }
+    .perfil-titulos { display:flex; flex-wrap:wrap; gap:8px; justify-content:center; margin-top:8px; }
+    .titulo-chip { background:linear-gradient(90deg,rgba(255,94,168,.2),rgba(168,85,247,.2));
+      border:1px solid rgba(255,94,168,.4); color:#fff; font-size:.72rem; font-weight:600;
+      padding:4px 11px; border-radius:14px; }
+    .titulo-vacio { font-size:.74rem; color:rgba(255,255,255,.4); }
     .perfil-eventos-line { margin-top:14px; text-align:center; font-size:.78rem; color:rgba(255,255,255,.55); }
     @media(max-width:560px){
       .perfil-creditos-box { margin-top:6px; }
-      .stat-name { width:78px; }
     }
     .reserva-item {
       background:rgba(20,20,20,.8);
@@ -1836,42 +2014,33 @@
     <!-- PANEL DE PERFIL -->
     <div class="perfil-panel">
       <div class="perfil-head">
-        <img id="perfil-foto" class="perfil-foto" src="" alt="Foto de perfil">
+        <div id="perfil-foto-wrap" class="perfil-foto-wrap">
+          <img id="perfil-foto" class="perfil-foto" src="" alt="Foto de perfil">
+        </div>
         <div class="perfil-head-info">
           <div class="perfil-nombre-row">
             <span id="perfil-nombre" class="perfil-nombre">Alumno</span>
             <button class="perfil-edit-btn" onclick="abrirEditarNombre()" title="Editar nombre">✎</button>
+            <span id="perfil-rank-badge" class="perfil-rank-badge rank-alumno">Alumno</span>
+          </div>
+          <div class="perfil-apodo-row">
+            <span id="perfil-apodo" class="perfil-apodo" style="display:none;"></span>
+            <button id="perfil-apodo-btn" class="perfil-apodo-btn" onclick="abrirEditarApodo()" style="display:none;">+ apodo</button>
           </div>
           <span class="perfil-id-tag">ID: <span id="perfil-id">—</span></span>
         </div>
-        <div class="perfil-creditos-box">
+        <div class="perfil-creditos-box" onclick="accionEstrellas()" title="Disponible en Agosto">
+          <span class="perfil-creditos-candado">🔒</span>
           <span id="perfil-creditos" class="perfil-creditos-num">0</span>
-          <span class="perfil-creditos-lbl">créditos</span>
+          <span class="perfil-creditos-lbl">⭐ Estrellas</span>
+          <span class="perfil-creditos-soon">Disponible en Agosto</span>
         </div>
       </div>
 
       <div class="perfil-progreso">
         <h3 class="perfil-sub">Tu progreso</h3>
-        <div class="stat-row">
-          <span class="stat-name">Flexibilidad</span>
-          <div class="stat-track"><div id="stat-flexibilidad-bar" class="stat-bar"></div></div>
-          <span id="stat-flexibilidad-val" class="stat-val">Nv 0</span>
-        </div>
-        <div class="stat-row">
-          <span class="stat-name">Fuerza</span>
-          <div class="stat-track"><div id="stat-fuerza-bar" class="stat-bar"></div></div>
-          <span id="stat-fuerza-val" class="stat-val">Nv 0</span>
-        </div>
-        <div class="stat-row">
-          <span class="stat-name">Resistencia</span>
-          <div class="stat-track"><div id="stat-resistencia-bar" class="stat-bar"></div></div>
-          <span id="stat-resistencia-val" class="stat-val">Nv 0</span>
-        </div>
-        <div class="stat-row">
-          <span class="stat-name">Técnica</span>
-          <div class="stat-track"><div id="stat-tecnica-bar" class="stat-bar"></div></div>
-          <span id="stat-tecnica-val" class="stat-val">Nv 0</span>
-        </div>
+        <div id="perfil-radar" class="perfil-radar"></div>
+        <div id="perfil-titulos" class="perfil-titulos"></div>
         <p class="perfil-eventos-line">Eventos participados: <span id="perfil-eventos">0</span></p>
       </div>
     </div>
