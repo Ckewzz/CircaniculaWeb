@@ -151,36 +151,56 @@
       }
     }
 
-    // ── PAGAR CON STRIPE ─────────────────────────────────
-    window.irAPagar = (plan) => {
+    // ── FLUJO UNIFICADO: RESERVA → PAGO ──────────────────
+    // Llamado desde confirmarHorario() tras seleccionar plan + horas + nombre.
+    // Guarda la reserva pendiente (Firestore + localStorage) y redirige a Stripe
+    // en el MISMO tab, para que el success vuelva aquí con ?pago=exitoso.
+    window.procesarPagoReserva = async ({ plan, clases, nombre }) => {
       if (!usuarioActual) { loginGoogle(); return; }
       const base = STRIPE_LINKS[plan];
-      if (!base) return;
-      const diasSel = Array.from(document.querySelectorAll('.horario-check:checked'))
-                           .map(c => c.dataset.slot);
-      sessionStorage.setItem('reserva_pendiente', JSON.stringify({
-        plan, dias: diasSel, email: usuarioActual.email, uid: usuarioActual.uid
+      if (!base) { alert('Plan no válido.'); return; }
+
+      // Persistir selección completa (sobrevive el redirect de Stripe)
+      localStorage.setItem('reserva_pendiente_full', JSON.stringify({
+        plan, clases, nombre,
+        email: usuarioActual.email, uid: usuarioActual.uid, ts: Date.now()
       }));
-      // Guardar reserva como pendiente (no bloqueante)
-      addDoc(collection(db, "reservas"), {
-        uid: usuarioActual.uid,
-        nombre: usuarioActual.displayName,
-        email: usuarioActual.email,
-        plan,
-        diasSeleccionados: diasSel,
-        estado: "pendiente_pago",
-        fechaReserva: serverTimestamp()
-      });
-      // Navegar directo a Stripe (evita bloqueo de popups en navegadores modernos)
-      const stripeUrl = `${base}?prefilled_email=${encodeURIComponent(usuarioActual.email)}`;
-      const a = document.createElement('a');
-      a.href = stripeUrl;
-      a.rel = 'noopener noreferrer';
-      a.target = '_blank';
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
+
+      // Guardar reserva pendiente en Firestore (no bloqueante para el redirect)
+      try {
+        await addDoc(collection(db, "reservas"), {
+          uid: usuarioActual.uid,
+          nombre,
+          email: usuarioActual.email,
+          plan,
+          clases,
+          estado: "pendiente_pago",
+          fechaReserva: serverTimestamp()
+        });
+      } catch (e) { console.error('Firestore reserva:', e); }
+
+      // Redirigir MISMO tab a Stripe
+      window.location.href = `${base}?prefilled_email=${encodeURIComponent(usuarioActual.email)}`;
     };
+
+    // Envía el correo a Formspree (vía AJAX, sin abandonar la página)
+    async function enviarReservaFormspree(data) {
+      try {
+        await fetch('https://formspree.io/f/mwvzdowd', {
+          method: 'POST',
+          headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            _subject: '🎟 Reserva PAGADA — Circanícula',
+            estado:  'PAGADO ✅',
+            plan:    data.plan,
+            nombre:  data.nombre,
+            email:   data.email,
+            clases:  data.clases
+          })
+        });
+      } catch (e) { console.error('Formspree:', e); }
+    }
+    window.enviarReservaFormspree = enviarReservaFormspree;
 
     // ── MIS RESERVAS ──────────────────────────────────────
     async function cargarMisReservas(uid) {
@@ -219,7 +239,7 @@
 
         const diasDiv = document.createElement('div');
         diasDiv.className = 'reserva-dias';
-        diasDiv.textContent = (r.diasSeleccionados || []).join(', ') || 'Sin días seleccionados';
+        diasDiv.textContent = r.clases || (r.diasSeleccionados || []).join(', ') || 'Sin clases seleccionadas';
 
         el.appendChild(planDiv);
         el.appendChild(infoDiv);
@@ -321,11 +341,19 @@
           await updateDoc(docRef, { estado: "activa", fechaPago: serverTimestamp() });
           cargarMisReservas(uid);
         }
+
+        // Enviar el correo de confirmación a Formspree SOLO ahora (pago confirmado)
+        const pend = JSON.parse(localStorage.getItem('reserva_pendiente_full') || 'null');
+        if (pend && (Date.now() - (pend.ts || 0) < 2 * 60 * 60 * 1000)) {
+          await enviarReservaFormspree(pend);
+        }
+
         const banner = document.getElementById('pago-exitoso-banner');
         if (banner) {
           banner.style.display = 'flex';
-          setTimeout(() => banner.style.display = 'none', 8000);
+          setTimeout(() => banner.style.display = 'none', 9000);
         }
+        localStorage.removeItem('reserva_pendiente_full');
         sessionStorage.removeItem('reserva_pendiente');
         history.replaceState({}, '', '/');
       } catch(e) { console.error('Error activando reserva:', e); }
@@ -1046,6 +1074,52 @@
     }
     .colab-card:hover { border-color:rgba(255,204,0,.3); }
 
+    /* ===== MODAL CONFIRMAR NOMBRE ===== */
+    .nombre-modal-bg {
+      display:none; position:fixed; inset:0; z-index:9500;
+      background:rgba(0,0,0,.8); backdrop-filter:blur(6px);
+      align-items:center; justify-content:center; padding:24px;
+    }
+    .nombre-modal {
+      background:var(--gris); border:1px solid rgba(255,204,0,.25);
+      border-radius:10px; padding:34px 30px; max-width:420px; width:100%;
+      box-shadow:0 20px 60px rgba(0,0,0,.7); text-align:center;
+    }
+    .nombre-modal-titulo {
+      font-family:'Cinzel',serif; font-size:1.2rem; color:var(--amarillo);
+      margin-bottom:14px; letter-spacing:1px;
+    }
+    .nombre-modal-sub { font-size:.78rem; opacity:.55; margin-bottom:6px; }
+    .nombre-modal-resumen {
+      font-family:'Cinzel',serif; font-size:.92rem; color:var(--blanco);
+      background:var(--gris-medio); border-radius:6px; padding:12px 14px;
+      margin-bottom:22px; letter-spacing:.5px;
+    }
+    .nombre-modal-label {
+      display:block; text-align:left; font-size:.7rem; letter-spacing:2px;
+      text-transform:uppercase; opacity:.5; margin-bottom:8px;
+    }
+    .nombre-modal-input {
+      width:100%; padding:13px 14px; border-radius:5px;
+      background:var(--negro); border:1px solid rgba(255,204,0,.3);
+      color:var(--blanco); font-family:'Raleway',sans-serif; font-size:.95rem;
+      margin-bottom:14px; outline:none; transition:border-color .3s;
+    }
+    .nombre-modal-input:focus { border-color:var(--amarillo); }
+    .nombre-modal-nota { font-size:.66rem; opacity:.4; margin-bottom:22px; line-height:1.6; }
+    .nombre-modal-btns { display:flex; gap:12px; }
+    .nombre-modal-cancel, .nombre-modal-ok {
+      flex:1; padding:13px; border-radius:4px; cursor:pointer;
+      font-family:'Cinzel',serif; font-size:.74rem; letter-spacing:1.5px;
+      transition:all .3s; border:1px solid transparent;
+    }
+    .nombre-modal-cancel {
+      background:transparent; border-color:rgba(255,255,255,.2); color:rgba(240,237,230,.6);
+    }
+    .nombre-modal-cancel:hover { border-color:rgba(255,255,255,.5); color:var(--blanco); }
+    .nombre-modal-ok { background:var(--amarillo); color:var(--negro); font-weight:900; border:none; }
+    .nombre-modal-ok:hover { background:#fff; }
+
     /* ===== EVENTO ESPECIAL ===== */
     .evento-especial-wrap {
       display:flex; gap:48px; align-items:flex-start; flex-wrap:wrap;
@@ -1568,19 +1642,26 @@
   </p>
   <button class="btn-confirmar-horario" id="btn-confirmar" disabled
     onclick="confirmarHorario()">
-    Confirmar y reservar →
+    Confirmar y continuar al pago →
   </button>
 </div>
 
-<!-- Form oculto que envía a Formspree -->
-<form id="form-horario" action="https://formspree.io/f/mwvzdowd"
-  method="POST" style="display:none;">
-  <input type="hidden" name="_subject" value="Nueva reserva de horario">
-  <input type="hidden" name="plan"   id="fh-plan">
-  <input type="hidden" name="clases" id="fh-clases">
-  <input type="hidden" name="nombre" id="fh-nombre">
-  <input type="hidden" name="email"  id="fh-email">
-</form>
+<!-- Modal: confirmar nombre antes de pagar -->
+<div id="nombre-modal" class="nombre-modal-bg">
+  <div class="nombre-modal">
+    <h3 class="nombre-modal-titulo">Confirma tu reserva</h3>
+    <p class="nombre-modal-sub">Estás a punto de reservar:</p>
+    <p id="nombre-modal-resumen" class="nombre-modal-resumen">—</p>
+    <label class="nombre-modal-label" for="nombre-modal-input">Tu nombre completo</label>
+    <input id="nombre-modal-input" type="text" class="nombre-modal-input"
+           placeholder="Nombre y apellido" autocomplete="name">
+    <p class="nombre-modal-nota">Al continuar serás redirigido a Stripe para completar el pago de forma segura.</p>
+    <div class="nombre-modal-btns">
+      <button class="nombre-modal-cancel" onclick="cerrarNombreModal()">Cancelar</button>
+      <button class="nombre-modal-ok" onclick="continuarAlPago()">Continuar al pago →</button>
+    </div>
+  </div>
+</div>
     </div>
   </section>
 
@@ -1597,14 +1678,14 @@
         <p class="precio-monto">$250</p>
         <p class="precio-periodo">por clase</p>
         <p class="precio-horas"><strong>1 clase</strong> a tu elección</p>
-        <button class="btn-plan" onclick="irAPagar('individual')">Pagar con Stripe</button>
+        <button class="btn-plan" onclick="elegirPlanScroll('individual')">Elegir Individual</button>
       </div>
       <div class="precio-card">
         <p class="precio-plan-nombre">Plan Básico</p>
         <p class="precio-monto">$800</p>
         <p class="precio-periodo">al mes</p>
         <p class="precio-horas"><strong>2 clases</strong> semanales</p>
-        <button class="btn-plan" onclick="irAPagar('basico')">Elegir Básico</button>
+        <button class="btn-plan" onclick="elegirPlanScroll('basico')">Elegir Básico</button>
       </div>
       <div class="precio-card destacado">
         <span class="precio-badge">Más Popular</span>
@@ -1612,14 +1693,14 @@
         <p class="precio-monto">$1,200</p>
         <p class="precio-periodo">al mes</p>
         <p class="precio-horas"><strong>5 clases</strong> semanales</p>
-        <button class="btn-plan" onclick="irAPagar('medio')">Elegir Medio</button>
+        <button class="btn-plan" onclick="elegirPlanScroll('medio')">Elegir Medio</button>
       </div>
       <div class="precio-card">
         <p class="precio-plan-nombre">Plan Avanzado</p>
         <p class="precio-monto">$1,600</p>
         <p class="precio-periodo">al mes</p>
         <p class="precio-horas"><strong>7 clases</strong> semanales</p>
-        <button class="btn-plan" onclick="irAPagar('avanzado')">Elegir Avanzado</button>
+        <button class="btn-plan" onclick="elegirPlanScroll('avanzado')">Elegir Avanzado</button>
       </div>
     </div>
   </section>
@@ -2018,33 +2099,60 @@
     if(e.target.id === 'video-modal') document.getElementById('modal-close').click();
   });
 
+  /* ===== FLUJO UNIFICADO: seleccionar → autenticar → confirmar nombre → pagar ===== */
+  let _reservaPendiente = null;
+
   function confirmarHorario() {
-  const planActivo = document.querySelector('.plan-btn.activo')?.dataset.plan || 'medio';
-  // Si es individual, ir directo a Stripe
-  if(planActivo === 'individual') { irAPagar('individual'); return; }
-  const slots = slotsFormateados();
+    const plan = document.querySelector('.plan-btn.activo')?.dataset.plan || 'medio';
 
-  // Si hay usuario logueado, usa sus datos
-  const nombre = document.getElementById('user-name')?.textContent || '';
-  const email  = window.usuarioActual?.email || '';
+    // 1) Validar que haya al menos una clase seleccionada
+    if (slotsSeleccionados.size === 0) {
+      alert('Selecciona al menos una clase en el calendario.');
+      return;
+    }
 
-  if(!email) {
-    // Sin login: pedir datos mínimos
-    const correo = prompt('¿Cuál es tu correo para confirmar la reserva?');
-    if(!correo) return;
-    document.getElementById('fh-email').value = correo;
-    document.getElementById('fh-nombre').value = prompt('¿Tu nombre?') || 'Sin nombre';
-  } else {
-    document.getElementById('fh-email').value = email;
-    document.getElementById('fh-nombre').value = nombre;
+    // 2) Exigir autenticación (viewer puede negarse pero no podrá pagar)
+    if (!window.usuarioActual) {
+      alert('Inicia sesión con Google para reservar y asegurar tu lugar.');
+      if (window.loginGoogle) window.loginGoogle();
+      return;
+    }
+
+    // 3) Guardar selección y abrir modal para confirmar el nombre
+    const clases = slotsFormateados();
+    _reservaPendiente = { plan, clases };
+
+    document.getElementById('nombre-modal-resumen').textContent =
+      `${planNombres[plan]} · ${clases}`;
+    const input = document.getElementById('nombre-modal-input');
+    input.value = window.usuarioActual.displayName || '';
+    document.getElementById('nombre-modal').style.display = 'flex';
+    input.focus();
   }
 
-  document.getElementById('fh-plan').value = planNombres[planActivo];
-  document.getElementById('fh-clases').value = slots;
-  document.getElementById('form-horario').submit();
+  function cerrarNombreModal() {
+    document.getElementById('nombre-modal').style.display = 'none';
+  }
+  window.cerrarNombreModal = cerrarNombreModal;
 
-  alert('¡Reserva enviada! Te contactaremos para confirmar.');
-}
+  function continuarAlPago() {
+    const nombre = document.getElementById('nombre-modal-input').value.trim();
+    if (!nombre) { alert('Por favor escribe tu nombre completo.'); return; }
+    if (!_reservaPendiente) { cerrarNombreModal(); return; }
+    cerrarNombreModal();
+    // Entrega al módulo Firebase: guarda pendiente + redirige a Stripe
+    window.procesarPagoReserva({ ...(_reservaPendiente), nombre });
+  }
+  window.continuarAlPago = continuarAlPago;
+
+  // Desde las tarjetas de Precios: preselecciona el plan y baja al calendario
+  function elegirPlanScroll(plan) {
+    const btn = document.querySelector(`.plan-btn[data-plan="${plan}"]`);
+    if (btn) btn.click();
+    const sec = document.getElementById('horarios');
+    if (sec) sec.scrollIntoView({ behavior: 'smooth' });
+  }
+  window.elegirPlanScroll = elegirPlanScroll;
 </script>
 
 <script>
