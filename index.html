@@ -53,25 +53,81 @@
     import { getFirestore, doc, getDoc, setDoc, collection, addDoc, query, where, getDocs, updateDoc, serverTimestamp }
       from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
-    // ── CONFIG (rellena con tus claves) ──────────────────
-
-
-
-    const firebaseConfig = {
-      apiKey:            "AIzaSyB_2POgJsaN6ueZQLQpq8cAIXMBNp0x_rc",
-      authDomain:        "circanicula-267.firebaseapp.com",
-      projectId:         "circanicula-267",
-      storageBucket:     "circanicula-267.firebasestorage.app",
-      messagingSenderId: "465761059184",
-      appId:             "1:465761059184:web:8623539f525f8ec6aecfb5"
+    // ════════════════════════════════════════════════════════════════════
+    //  CONFIGURACIÓN POR TENANT (multi-academia)
+    //  Cada academia = una entrada en TENANTS, identificada por su dominio.
+    //  Para dar de alta una academia nueva: copia el bloque, cambia dominio,
+    //  marca, contacto, firebase y stripe. NADA más se toca en el código.
+    //  resolverTenant() elige el tenant según el hostname actual.
+    // ════════════════════════════════════════════════════════════════════
+    const TENANTS = {
+      circanicula: {
+        id: 'circanicula',
+        marca: {
+          nombre:         'Circanícula',
+          dominio:        'circanicula.com',
+          colorPrimario:  '#ffcc00',
+          colorFondo:     '#080808',
+          logo:           'Images/Logo_4.png',
+          icono:          'Images/Icono_4.png'
+        },
+        contacto: {
+          calendarioPrueba: 'https://calendar.app.google/ryLFrBeakHMMPRBMA',
+          formspree:        'https://formspree.io/f/mwvzdowd'
+        },
+        firebase: {
+          apiKey:            "AIzaSyB_2POgJsaN6ueZQLQpq8cAIXMBNp0x_rc",
+          authDomain:        "circanicula-267.firebaseapp.com",
+          projectId:         "circanicula-267",
+          storageBucket:     "circanicula-267.firebasestorage.app",
+          messagingSenderId: "465761059184",
+          appId:             "1:465761059184:web:8623539f525f8ec6aecfb5"
+        },
+        stripe: {
+          individual: "https://buy.stripe.com/14A00i2ZT4G4dWi2eyao801",
+          basico:     "https://buy.stripe.com/5kQ00i2ZTc8w19w06qao802",
+          medio:      "https://buy.stripe.com/28E9AS43X3C06tQ1auao803",
+          avanzado:   "https://buy.stripe.com/28EeVceIB3C07xU1auao804"
+        },
+        superAdminEmail: "treseenicos@gmail.com"
+      }
+      // ──> Para agregar Fressvia u otra academia, añade aquí otra entrada.
     };
 
-    const STRIPE_LINKS = {
-      individual: "https://buy.stripe.com/14A00i2ZT4G4dWi2eyao801",
-      basico:     "https://buy.stripe.com/5kQ00i2ZTc8w19w06qao802",
-      medio:      "https://buy.stripe.com/28E9AS43X3C06tQ1auao803",
-      avanzado:   "https://buy.stripe.com/28EeVceIB3C07xU1auao804"
-    };
+    // Resuelve el tenant por dominio. Para previews locales / *.github.io usa
+    // 'circanicula' como predeterminado mientras no haya más academias.
+    function resolverTenant() {
+      const host = (location.hostname || '').replace(/^www\./, '');
+      for (const t of Object.values(TENANTS)) {
+        if (t.marca.dominio === host) return t;
+      }
+      return TENANTS.circanicula; // predeterminado
+    }
+    const TENANT = resolverTenant();
+    window.TENANT = TENANT;
+
+    // Alias retrocompatibles (el resto del código sigue usándolos).
+    const firebaseConfig = TENANT.firebase;
+    const STRIPE_LINKS    = TENANT.stripe;
+
+    // Aplica la identidad del tenant al DOM: enlaces, tema y variables de color.
+    // (Los textos/colores literales se irán migrando a estas variables por fases.)
+    function aplicarTenant() {
+      try {
+        const root = document.documentElement;
+        root.style.setProperty('--tenant-primario', TENANT.marca.colorPrimario);
+        root.style.setProperty('--tenant-fondo',    TENANT.marca.colorFondo);
+        const meta = document.querySelector('meta[name="theme-color"]');
+        if (meta) meta.setAttribute('content', TENANT.marca.colorPrimario);
+        const cal = document.getElementById('btn-clase-prueba');
+        if (cal) cal.setAttribute('href', TENANT.contacto.calendarioPrueba);
+        const fc = document.getElementById('form-contacto');
+        if (fc) fc.setAttribute('action', TENANT.contacto.formspree);
+      } catch (e) { console.error('aplicarTenant:', e); }
+    }
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', aplicarTenant);
+    } else { aplicarTenant(); }
 
     // ── CONFIG EVENTO ESPECIAL ────────────────────────────
     // ✏️  EDITA AQUÍ cuando tengas los datos del evento
@@ -94,7 +150,7 @@
     // El CREADOR (Rank 0) se define aquí y es el único super-admin por código.
     // El resto de ranks (Instructora/Asistente) los otorga el Rank 0 desde el
     // PANEL ADMIN dentro de su perfil (sin tocar código), usando el ID corto.
-    const SUPER_ADMIN_EMAIL = "treseenicos@gmail.com";
+    const SUPER_ADMIN_EMAIL = TENANT.superAdminEmail;
     const OVERRIDE_RANGOS = {
       [SUPER_ADMIN_EMAIL]: 0,   // ← Creador / super-admin
     };
@@ -724,11 +780,11 @@
     // Envía el correo a Formspree (vía AJAX, sin abandonar la página)
     async function enviarReservaFormspree(data) {
       try {
-        await fetch('https://formspree.io/f/mwvzdowd', {
+        await fetch(TENANT.contacto.formspree, {
           method: 'POST',
           headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            _subject: '🎟 Reserva PAGADA — Circanícula',
+            _subject: `🎟 Reserva PAGADA — ${TENANT.marca.nombre}`,
             estado:  'PAGADO ✅',
             plan:    data.plan,
             nombre:  data.nombre,
@@ -900,9 +956,13 @@
   <style>
     /* ===== VARIABLES ===== */
     :root {
-      --amarillo: #ffcc00;
+      /* Color de marca por TENANT (aplicarTenant() los sobreescribe en runtime).
+         El resto del CSS usa --amarillo/--negro, que apuntan a estos. */
+      --tenant-primario: #ffcc00;
+      --tenant-fondo: #080808;
+      --amarillo: var(--tenant-primario);
       --naranja: #e87400;
-      --negro: #080808;
+      --negro: var(--tenant-fondo);
       --blanco: #f0ede6;
       --gris: #141414;
       --gris-medio: #242424;
@@ -2073,7 +2133,7 @@
       <button type="button" class="btn-primario" onclick="irAMiCuenta()">Mi Cuenta</button>
     </div>
     <div class="hero-btns" style="margin-top:14px;">
-      <a href="https://calendar.app.google/ryLFrBeakHMMPRBMA" target="_blank" rel="noopener noreferrer" class="btn-primario">Agendar Clase de Prueba</a>
+      <a id="btn-clase-prueba" href="https://calendar.app.google/ryLFrBeakHMMPRBMA" target="_blank" rel="noopener noreferrer" class="btn-primario">Agendar Clase de Prueba</a>
       <a href="#precios" class="btn-secundario">Ver Planes</a>
     </div>
     <div class="hero-scroll">
@@ -2668,7 +2728,7 @@
       <button class="opcion-btn" data-opcion="sesion">Sesión personalizada</button>
       <button class="opcion-btn" data-opcion="feedback">Feedback</button>
     </div>
-  <form class="contacto-form" action="https://formspree.io/f/mwvzdowd" method="POST">
+  <form id="form-contacto" class="contacto-form" action="https://formspree.io/f/mwvzdowd" method="POST">
   <input type="hidden" name="_subject" value="Nuevo mensaje Circanícula">
   <input type="text" name="_gotcha" style="display:none" tabindex="-1" autocomplete="off">
   <div class="form-fila">
