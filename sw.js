@@ -1,4 +1,4 @@
-const CACHE_NAME = 'circanicula-v1';
+const CACHE_NAME = 'circanicula-v2';
 
 // Recursos a cachear para uso offline
 const STATIC_ASSETS = [
@@ -38,7 +38,6 @@ self.addEventListener('activate', event => {
   );
 });
 
-// Estrategia: cache primero para assets estáticos, red primero para Firebase/Stripe
 self.addEventListener('fetch', event => {
   const url = new URL(event.request.url);
 
@@ -52,7 +51,27 @@ self.addEventListener('fetch', event => {
     return;
   }
 
-  // Cache first para assets estáticos
+  // El HTML (navegación) va por RED PRIMERO: siempre la última versión cuando
+  // hay internet; si no hay, cae al index.html cacheado. Esto evita que la PWA
+  // se quede pegada en una versión vieja.
+  const esNavegacion =
+    event.request.mode === 'navigate' ||
+    event.request.destination === 'document';
+
+  if (esNavegacion) {
+    event.respondWith(
+      fetch(event.request)
+        .then(response => {
+          const clone = response.clone();
+          caches.open(CACHE_NAME).then(cache => cache.put('/index.html', clone));
+          return response;
+        })
+        .catch(() => caches.match(event.request).then(c => c || caches.match('/index.html')))
+    );
+    return;
+  }
+
+  // Resto de assets estáticos (imágenes, manifest): CACHE PRIMERO.
   event.respondWith(
     caches.match(event.request).then(cached => {
       if (cached) return cached;
