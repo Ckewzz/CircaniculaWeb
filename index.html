@@ -24,6 +24,11 @@
   <meta name="twitter:description" content="Clases de acrobacia aérea en Hermosillo, Sonora.">
   <meta name="twitter:image" content="https://circanicula.com/Images/BG-01.jpg">
 
+  <!-- Favicon (la C de Circanícula) -->
+  <link rel="icon" type="image/svg+xml" href="Images/favicon.svg">
+  <link rel="icon" type="image/png" href="Images/Icono_4.png">
+  <link rel="mask-icon" href="Images/favicon.svg" color="#ffcc00">
+
   <!-- PWA -->
   <link rel="manifest" href="manifest.json">
   <link rel="apple-touch-icon" href="Images/Icono_4.png">
@@ -197,6 +202,8 @@
       if (!m) return;
       m.style.display = 'flex';
       window.loginTab(modo || 'login');
+      // Si quedó un bloqueo activo de antes, muéstralo de inmediato.
+      if (_lockRestante() > 0) _arrancarContador();
     };
     window.cerrarLoginModal = () => {
       const m = document.getElementById('login-modal'); if (m) m.style.display = 'none';
@@ -215,7 +222,63 @@
     };
     const _val = id => (document.getElementById(id)?.value || '').trim();
 
+    // ════ ANTI-FUERZA BRUTA (cooldown escalado en el cliente) ═════════════
+    // Capa de DISUASIÓN local. La defensa real de servidor la da Firebase Auth
+    // (throttling propio de Google) y, recomendado, Firebase App Check.
+    // Lógica pedida: 3 intentos → bloqueo 5 min; si vuelve a fallar, el bloqueo
+    // se DUPLICA cada vez (5 → 10 → 20 → 40 → …). Persistente por dispositivo.
+    const LOCK_INTENTOS  = 3;          // intentos antes de bloquear
+    const LOCK_BASE_MIN  = 5;          // minutos del primer bloqueo
+    const _LK = { fails:'cir_lk_fails', until:'cir_lk_until', level:'cir_lk_level' };
+    const _lkGet = k => parseInt(localStorage.getItem(k) || '0', 10) || 0;
+    const _lkSet = (k,v) => localStorage.setItem(k, String(v));
+    const _lkClear = () => { localStorage.removeItem(_LK.fails); localStorage.removeItem(_LK.until); };
+
+    let _lockTimer = null;
+    function _lockRestante() { return Math.max(0, _lkGet(_LK.until) - Date.now()); }
+    function _fmtMMSS(ms) {
+      const s = Math.ceil(ms / 1000), m = Math.floor(s / 60), r = s % 60;
+      return m + ':' + String(r).padStart(2, '0');
+    }
+    function _pintarBloqueo() {
+      const rest = _lockRestante();
+      const btn = document.getElementById('btn-login-nativo');
+      if (rest <= 0) {
+        if (_lockTimer) { clearInterval(_lockTimer); _lockTimer = null; }
+        if (btn) { btn.disabled = false; btn.textContent = 'Entrar'; }
+        _loginErr('');
+        return;
+      }
+      if (btn) { btn.disabled = true; btn.textContent = 'Bloqueado'; }
+      _loginErr('Demasiados intentos. Espera ' + _fmtMMSS(rest) + ' para volver a intentar.');
+    }
+    function _arrancarContador() {
+      if (_lockTimer) clearInterval(_lockTimer);
+      _pintarBloqueo();
+      _lockTimer = setInterval(_pintarBloqueo, 1000);
+    }
+    // Registra un fallo y, si toca, activa/duplica el bloqueo. Devuelve true si quedó bloqueado.
+    function _registrarFallo() {
+      const fails = _lkGet(_LK.fails) + 1;
+      if (fails >= LOCK_INTENTOS) {
+        const level = _lkGet(_LK.level);                 // 0,1,2,3…
+        const min   = LOCK_BASE_MIN * Math.pow(2, level); // 5,10,20,40…
+        _lkSet(_LK.until, Date.now() + min * 60 * 1000);
+        _lkSet(_LK.level, level + 1);                     // el próximo bloqueo dura el doble
+        _lkSet(_LK.fails, 0);
+        _arrancarContador();
+        return true;
+      }
+      _lkSet(_LK.fails, fails);
+      const quedan = LOCK_INTENTOS - fails;
+      _loginErr('Usuario o contraseña incorrectos. Te quedan ' + quedan +
+                (quedan === 1 ? ' intento.' : ' intentos.'));
+      return false;
+    }
+
     window.loginNativo = async () => {
+      // ¿Sigue bloqueado de un intento anterior?
+      if (_lockRestante() > 0) { _arrancarContador(); return; }
       const u = _val('login-user');
       const p = document.getElementById('login-pass').value;
       if (!u || !p) { _loginErr('Escribe tu usuario y contraseña.'); return; }
@@ -224,8 +287,18 @@
       _loginErr('Entrando…', '#ffcc00');
       try {
         await signInWithEmailAndPassword(auth, email, p);
+        _lkClear();                 // login correcto → borra contadores
+        _lkSet(_LK.level, 0);       // y reinicia la escalada
         cerrarLoginModal();
-      } catch(e) { _loginErr(_msgErrorAuth(e.code)); }
+      } catch(e) {
+        if (e.code === 'auth/too-many-requests') {
+          // Firebase ya frenó del lado servidor: tratamos como bloqueo fuerte.
+          _registrarFallo();
+        } else {
+          const bloqueado = _registrarFallo();
+          if (!bloqueado) { /* mensaje ya mostrado por _registrarFallo */ }
+        }
+      }
     };
 
     window.registrarNativo = async () => {
@@ -2433,7 +2506,7 @@
         <label class="onb-label">Contraseña</label>
         <input id="login-pass" class="onb-input" type="password" autocomplete="current-password" placeholder="Tu contraseña">
         <button class="login-forgot" onclick="recuperarPass()">¿Olvidaste tu contraseña?</button>
-        <button class="onb-save login-full" onclick="loginNativo()">Entrar</button>
+        <button id="btn-login-nativo" class="onb-save login-full" onclick="loginNativo()">Entrar</button>
       </div>
 
       <!-- CREAR CUENTA -->
