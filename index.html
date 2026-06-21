@@ -43,7 +43,8 @@
   <!-- Firebase SDK (módulos ESM) -->
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-    import { getAuth, signInWithPopup, signOut, onAuthStateChanged, GoogleAuthProvider }
+    import { getAuth, signInWithPopup, signOut, onAuthStateChanged, GoogleAuthProvider,
+             createUserWithEmailAndPassword, signInWithEmailAndPassword, updateProfile }
       from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
     import { getFirestore, doc, getDoc, setDoc, collection, addDoc, query, where, getDocs, updateDoc, serverTimestamp }
       from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
@@ -151,14 +152,109 @@
 
     window.logout = async () => { await signOut(auth); };
 
-    // "Mi Cuenta": si hay sesión, baja al panel de perfil; si no, inicia login.
+    // "Mi Cuenta": si hay sesión, baja al panel de perfil; si no, abre el login.
     window.irAMiCuenta = () => {
       if (window.usuarioActual) {
         const s = document.getElementById('seccion-mis-clases');
         if (s) { s.style.display = 'block'; s.scrollIntoView({ behavior:'smooth' }); }
-      } else if (window.loginGoogle) {
-        window.loginGoogle();
+      } else {
+        window.abrirLoginModal('login');
       }
+    };
+
+    // ════ LOGIN NATIVO (usuario + contraseña) ════════════════════════════
+    // El "usuario" se convierte en un correo TÉCNICO invisible para entrar a
+    // Firebase Auth. El correo REAL del alumno es OPCIONAL y PRIVADO (solo se
+    // usa para recuperar la cuenta). Nadie más lo ve.
+    const DOMINIO_ALUMNO = '@alumno.circanicula.app';
+    function usuarioAEmail(u) {
+      const limpio = (u || '').trim().toLowerCase().replace(/[^a-z0-9._-]/g, '');
+      return limpio ? (limpio + DOMINIO_ALUMNO) : '';
+    }
+    // Datos del registro en curso; bootstrapPerfil los usa al crear el perfil.
+    let _pendingRegister = null;
+
+    function _loginErr(txt, color) {
+      const err = document.getElementById('login-error');
+      if (err) { err.style.color = color || '#ff8080'; err.textContent = txt || ''; }
+    }
+    function _msgErrorAuth(code) {
+      const map = {
+        'auth/invalid-credential':'Usuario o contraseña incorrectos.',
+        'auth/wrong-password':'Usuario o contraseña incorrectos.',
+        'auth/user-not-found':'No existe una cuenta con ese usuario.',
+        'auth/invalid-email':'Usuario no válido.',
+        'auth/email-already-in-use':'Ese nombre de usuario ya está tomado. Elige otro.',
+        'auth/weak-password':'La contraseña debe tener al menos 6 caracteres.',
+        'auth/too-many-requests':'Demasiados intentos. Espera un momento e intenta de nuevo.',
+        'auth/network-request-failed':'Sin conexión. Revisa tu internet.'
+      };
+      return map[code] || 'Algo salió mal. Intenta de nuevo.';
+    }
+
+    window.abrirLoginModal = (modo) => {
+      const m = document.getElementById('login-modal');
+      if (!m) return;
+      m.style.display = 'flex';
+      window.loginTab(modo || 'login');
+    };
+    window.cerrarLoginModal = () => {
+      const m = document.getElementById('login-modal'); if (m) m.style.display = 'none';
+    };
+    window.loginTab = (modo) => {
+      const isReg = modo === 'reg';
+      const paneL = document.getElementById('login-pane-login');
+      const paneR = document.getElementById('login-pane-reg');
+      const tabL  = document.getElementById('login-tab-login');
+      const tabR  = document.getElementById('login-tab-reg');
+      if (paneL) paneL.style.display = isReg ? 'none' : 'block';
+      if (paneR) paneR.style.display = isReg ? 'block' : 'none';
+      if (tabL)  tabL.classList.toggle('active', !isReg);
+      if (tabR)  tabR.classList.toggle('active', isReg);
+      _loginErr('');
+    };
+    const _val = id => (document.getElementById(id)?.value || '').trim();
+
+    window.loginNativo = async () => {
+      const u = _val('login-user');
+      const p = document.getElementById('login-pass').value;
+      if (!u || !p) { _loginErr('Escribe tu usuario y contraseña.'); return; }
+      const email = usuarioAEmail(u);
+      if (!email) { _loginErr('Usuario no válido.'); return; }
+      _loginErr('Entrando…', '#ffcc00');
+      try {
+        await signInWithEmailAndPassword(auth, email, p);
+        cerrarLoginModal();
+      } catch(e) { _loginErr(_msgErrorAuth(e.code)); }
+    };
+
+    window.registrarNativo = async () => {
+      const u  = _val('reg-user');
+      const p  = document.getElementById('reg-pass').value;
+      const p2 = document.getElementById('reg-pass2').value;
+      const correo = _val('reg-email');
+      const tel    = _val('reg-tel');
+      if (u.length < 3) { _loginErr('El usuario debe tener al menos 3 caracteres.'); return; }
+      if (p.length < 6) { _loginErr('La contraseña debe tener al menos 6 caracteres.'); return; }
+      if (p !== p2)     { _loginErr('Las contraseñas no coinciden.'); return; }
+      const email = usuarioAEmail(u);
+      if (!email) { _loginErr('Usa solo letras, números, punto, guion o guion bajo en el usuario.'); return; }
+      _pendingRegister = { nombreVisible: u.slice(0,40), correo: correo.slice(0,80), tel: tel.slice(0,20) };
+      _loginErr('Creando tu cuenta…', '#ffcc00');
+      try {
+        const cred = await createUserWithEmailAndPassword(auth, email, p);
+        try { await updateProfile(cred.user, { displayName: u.slice(0,40) }); } catch {}
+        // onAuthStateChanged → bootstrapPerfil usará _pendingRegister.
+        cerrarLoginModal();
+      } catch(e) {
+        _pendingRegister = null;
+        _loginErr(_msgErrorAuth(e.code));
+      }
+    };
+
+    // Recuperación: hasta tener la Cloud Function, la restablece el equipo (Rank 0).
+    window.recuperarPass = () => {
+      _loginErr('Tu contraseña es única. Si la olvidaste, escríbele a la academia y el equipo te ayuda a restablecerla. (Pronto podrás recuperarla tú con tu correo.)', '#ffcc00');
     };
 
     // ── PERFIL DE USUARIO ─────────────────────────────────
@@ -191,9 +287,12 @@
       const esNuevo = !snap.exists();
       const patch = {};
       const handle = data.handle || generarHandle(user.uid);
+      const regPend = (esNuevo && _pendingRegister) ? _pendingRegister : null;
       if (!data.userIdCorto)   patch.userIdCorto   = generarIdCorto(user.uid);
       if (!data.handle)        patch.handle        = handle;
-      if (!data.nombreVisible) patch.nombreVisible = handle;   // default = AerialistaXXXXX
+      // Registro nativo: usa el usuario elegido como nombre visible.
+      // Google u otros: queda en AerialistaXXXXX (privacidad por defecto).
+      if (!data.nombreVisible) patch.nombreVisible = (regPend && regPend.nombreVisible) || handle;
       if (!data.foto)          patch.foto          = user.photoURL || '';
       if (data.creditos === undefined) patch.creditos = 0;
       // Stats: solo se INICIALIZAN si faltan por completo. Si ya existen (aunque
@@ -205,7 +304,8 @@
       if (!data.titulos)  patch.titulos = [];
       if (!data.apodo)    patch.apodo = '';
       if (!data.especialidad) patch.especialidad = '';
-      if (data.onboardingHecho === undefined) patch.onboardingHecho = false;
+      // El registro nativo ya pidió nombre/correo/teléfono → no repetir onboarding.
+      if (data.onboardingHecho === undefined) patch.onboardingHecho = regPend ? true : false;
       // RANK: el override por correo (solo Creador) manda en el alta. Los demás
       // ranks los otorga el Rank 0 desde el panel; respeta ascensos ya en DB.
       const rankCalc = rankDeUsuario(user);
@@ -222,10 +322,19 @@
       // vive únicamente en Firebase Auth y se usa en runtime (Stripe/Formspree).
       // Teléfono: lo leen solo el dueño y las instructoras (rank ≤ 1).
       if (esNuevo) {
+        const telInit = (regPend && regPend.tel) || '';
         try {
-          await setDoc(doc(db, "usuarios_priv", user.uid), { telefono: '' }, { merge: true });
+          await setDoc(doc(db, "usuarios_priv", user.uid), { telefono: telInit }, { merge: true });
         } catch(e) { console.error('priv:', e); }
+        // Correo de RECUPERACIÓN (opcional). Doc ultra-privado: solo lo lee el
+        // dueño (y el backend con admin SDK cuando exista). Ni las instructoras.
+        if (regPend && regPend.correo) {
+          try {
+            await setDoc(doc(db, "usuarios_recuperacion", user.uid), { correo: regPend.correo }, { merge: true });
+          } catch(e) { console.error('recuperacion:', e); }
+        }
       }
+      if (esNuevo) _pendingRegister = null;
       return { ...data, ...patch };
     }
 
@@ -480,11 +589,15 @@
       const videoCards = document.querySelectorAll('.video-card');
 
       if (user) {
+        const lm = document.getElementById('login-modal'); if (lm) lm.style.display = 'none';
         if(btnLogin)  btnLogin.style.display  = 'none';
         if(btnLogout) btnLogout.style.display = 'inline-flex';
         if(userInfo)  userInfo.style.display  = 'flex';
-        if(userFoto)  userFoto.src = user.photoURL;
-        if(userName)  userName.textContent = user.displayName.split(' ')[0];
+        if(userFoto)  {
+          if (user.photoURL) { userFoto.src = user.photoURL; userFoto.style.display = ''; }
+          else userFoto.style.display = 'none';
+        }
+        if(userName)  userName.textContent = (user.displayName || 'Mi cuenta').split(' ')[0];
         if(misClases) misClases.style.display = 'block';
         // Desbloquear videos
         videosLock.forEach(l => l.style.display = 'none');
@@ -510,7 +623,7 @@
     // Guarda la reserva pendiente (Firestore + localStorage) y redirige a Stripe
     // en el MISMO tab, para que el success vuelva aquí con ?pago=exitoso.
     window.procesarPagoReserva = async ({ plan, clases, nombre }) => {
-      if (!usuarioActual) { loginGoogle(); return; }
+      if (!usuarioActual) { abrirLoginModal('login'); return; }
       const base = STRIPE_LINKS[plan];
       if (!base) { alert('Plan no válido.'); return; }
 
@@ -1379,7 +1492,35 @@
       background:#161616; border:1px solid rgba(255,204,0,.3); border-radius:14px;
       padding:28px 26px; max-width:380px; width:100%; text-align:center;
       box-shadow:0 20px 60px rgba(0,0,0,.6);
+      max-height:92vh; overflow-y:auto;
     }
+    /* ── Login nativo ── */
+    .login-tabs { display:flex; gap:8px; margin:6px 0 16px; }
+    .login-tab {
+      flex:1; background:transparent; border:1px solid rgba(255,204,0,.25);
+      color:rgba(255,255,255,.6); padding:9px; border-radius:8px; cursor:pointer;
+      font-size:.74rem; font-family:'Cinzel',serif; letter-spacing:1px;
+    }
+    .login-tab.active { background:rgba(255,204,0,.15); color:#ffcc00; border-color:#ffcc00; }
+    .login-full { width:100%; margin-top:16px; }
+    .login-forgot {
+      background:none; border:none; color:rgba(255,255,255,.45); font-size:.7rem;
+      cursor:pointer; margin-top:10px; text-decoration:underline; display:block;
+    }
+    .login-error { color:#ff8080; font-size:.74rem; min-height:1.1em; margin:12px 0 0; line-height:1.5; }
+    .login-sep { display:flex; align-items:center; gap:10px; margin:16px 0; color:rgba(255,255,255,.3); font-size:.7rem; }
+    .login-sep::before, .login-sep::after { content:''; flex:1; height:1px; background:rgba(255,255,255,.12); }
+    .login-google {
+      width:100%; display:flex; align-items:center; justify-content:center; gap:10px;
+      background:#fff; color:#333; border:none; border-radius:8px; padding:11px;
+      cursor:pointer; font-size:.85rem; font-weight:600;
+    }
+    .login-google:hover { background:#f1f1f1; }
+    .login-close {
+      width:100%; background:transparent; border:none; color:rgba(255,255,255,.4);
+      margin-top:12px; cursor:pointer; font-size:.78rem;
+    }
+    .login-nota { font-size:.66rem; color:rgba(255,255,255,.4); margin-top:14px; line-height:1.6; }
     .onb-title { color:#ffcc00; margin:0 0 4px; font-size:1.3rem; }
     .onb-sub { color:rgba(255,255,255,.6); font-size:.82rem; margin:0 0 16px; }
     .onb-foto { width:80px; height:80px; border-radius:50%; object-fit:cover;
@@ -1837,7 +1978,7 @@
           <img id="user-foto" src="" alt="foto">
           <span id="user-name"></span>
         </button>
-        <button id="btn-login" class="btn-header" onclick="loginGoogle()">
+        <button id="btn-login" class="btn-header" onclick="abrirLoginModal('login')">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
             <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
             <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
@@ -2276,6 +2417,58 @@
   </section>
 
   <!-- MODAL ONBOARDING (primera vez) -->
+  <!-- MODAL DE LOGIN NATIVO -->
+  <div id="login-modal" class="onb-bg" style="display:none;">
+    <div class="onb-card">
+      <h3 class="onb-title">Circanícula</h3>
+      <div class="login-tabs">
+        <button id="login-tab-login" class="login-tab active" onclick="loginTab('login')">Entrar</button>
+        <button id="login-tab-reg" class="login-tab" onclick="loginTab('reg')">Crear cuenta</button>
+      </div>
+
+      <!-- ENTRAR -->
+      <div id="login-pane-login">
+        <label class="onb-label">Usuario</label>
+        <input id="login-user" class="onb-input" type="text" autocomplete="username" placeholder="Tu nombre de usuario">
+        <label class="onb-label">Contraseña</label>
+        <input id="login-pass" class="onb-input" type="password" autocomplete="current-password" placeholder="Tu contraseña">
+        <button class="login-forgot" onclick="recuperarPass()">¿Olvidaste tu contraseña?</button>
+        <button class="onb-save login-full" onclick="loginNativo()">Entrar</button>
+      </div>
+
+      <!-- CREAR CUENTA -->
+      <div id="login-pane-reg" style="display:none;">
+        <label class="onb-label">Usuario <span class="onb-opt">(con esto inicias sesión)</span></label>
+        <input id="reg-user" class="onb-input" type="text" autocomplete="username" placeholder="Ej. luna_aerial">
+        <label class="onb-label">Contraseña <span class="onb-opt">(mín. 6 · es única, no la olvides)</span></label>
+        <input id="reg-pass" class="onb-input" type="password" autocomplete="new-password" placeholder="••••••">
+        <label class="onb-label">Repite la contraseña</label>
+        <input id="reg-pass2" class="onb-input" type="password" autocomplete="new-password" placeholder="••••••">
+        <label class="onb-label">Correo <span class="onb-opt">(opcional · privado · para recuperar tu cuenta)</span></label>
+        <input id="reg-email" class="onb-input" type="email" autocomplete="email" placeholder="opcional">
+        <label class="onb-label">Teléfono <span class="onb-opt">(opcional · privado · emergencias)</span></label>
+        <input id="reg-tel" class="onb-input" type="tel" placeholder="opcional">
+        <button class="onb-save login-full" onclick="registrarNativo()">Crear mi cuenta</button>
+      </div>
+
+      <p id="login-error" class="login-error"></p>
+
+      <div class="login-sep"><span>o</span></div>
+      <button class="login-google" onclick="loginGoogle()">
+        <svg width="16" height="16" viewBox="0 0 24 24">
+          <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+          <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+          <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z"/>
+          <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+        </svg>
+        Entrar con Google
+      </button>
+
+      <button class="login-close" onclick="cerrarLoginModal()">Cerrar</button>
+      <p class="login-nota">🔒 Tu correo y teléfono nunca son visibles para otras personas. Los pedimos solo por tu seguridad y para emergencias.</p>
+    </div>
+  </div>
+
   <div id="onboarding-modal" class="onb-bg" style="display:none;">
     <div class="onb-card">
       <h3 class="onb-title">¡Bienvenida/o a Circanícula! ✨</h3>
@@ -2688,8 +2881,7 @@
 
     // 2) Exigir autenticación (viewer puede negarse pero no podrá pagar)
     if (!window.usuarioActual) {
-      alert('Inicia sesión con Google para reservar y asegurar tu lugar.');
-      if (window.loginGoogle) window.loginGoogle();
+      if (window.abrirLoginModal) window.abrirLoginModal('login');
       return;
     }
 

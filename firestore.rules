@@ -90,6 +90,14 @@ service cloud.firestore {
       allow read, write: if isOwner(uid) || isStaff();
     }
 
+    // ── CORREO DE RECUPERACIÓN (ultra-privado) ────────────────────────
+    // Solo el DUEÑO lo lee/escribe. Ni las instructoras lo ven. El backend
+    // (Cloud Function con admin SDK) lo leerá para enviar el link de reseteo
+    // sin exponerlo nunca al cliente.
+    match /usuarios_recuperacion/{uid} {
+      allow read, write: if isOwner(uid);
+    }
+
     // ── RESERVAS DE CLASES ────────────────────────────────────────────
     match /reservas/{id} {
       allow read:   if signedIn() && (resource.data.uid == request.auth.uid || isStaff());
