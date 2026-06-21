@@ -1334,17 +1334,34 @@
 
     /* ===== HALLWAY EVENTOS PASADOS ===== */
     #eventos-pasados { background:rgba(0,0,0,.4); backdrop-filter:blur(2px); }
+    /* Contenedor relativo para posicionar los botones < > */
+    .hallway-wrap { position:relative; }
     .hallway-scroll {
       display:flex; gap:16px;
+      justify-content:safe center;       /* centra cuando cabe; al desbordar arranca normal (scroll usable) */
       overflow-x:auto;
-      padding:8px 0 20px;
+      padding:8px 4px 8px;
       scroll-snap-type:x proximity;
-      scrollbar-width:thin;
-      scrollbar-color:var(--amarillo) rgba(255,255,255,.06);
+      scrollbar-width:none;              /* Firefox: sin barra */
+      -ms-overflow-style:none;           /* IE/Edge viejo: sin barra */
     }
-    .hallway-scroll::-webkit-scrollbar { height:3px; }
-    .hallway-scroll::-webkit-scrollbar-track { background:rgba(255,255,255,.05); }
-    .hallway-scroll::-webkit-scrollbar-thumb { background:var(--amarillo); border-radius:2px; }
+    .hallway-scroll::-webkit-scrollbar { display:none; }  /* Chrome/Safari: sin barra */
+    /* Botones laterales de navegación (circulares, amarillos, discretos) */
+    .hallway-nav {
+      position:absolute; top:50%; transform:translateY(-50%);
+      width:46px; height:46px; border-radius:50%;
+      background:var(--amarillo); color:var(--negro);
+      border:none; cursor:pointer; z-index:5;
+      display:flex; align-items:center; justify-content:center;
+      font-size:1.4rem; line-height:1; font-weight:700;
+      opacity:.4; transition:opacity .25s, transform .15s;
+      box-shadow:0 4px 14px rgba(0,0,0,.45);
+    }
+    .hallway-nav:hover { opacity:.95; }
+    .hallway-nav:active { transform:translateY(-50%) scale(.92); }
+    .hallway-nav.prev { left:6px; }
+    .hallway-nav.next { right:6px; }
+    @media(max-width:560px){ .hallway-nav { width:40px; height:40px; font-size:1.2rem; } }
     .evento-hallway-item {
       flex:0 0 280px; height:400px;
       position:relative; border-radius:3px;
@@ -1906,7 +1923,7 @@
 
     /* ===== LABOR SOCIAL ===== */
     #labor-social { background:rgba(0,0,0,.2); }
-    .labor-wrap { max-width:660px; }
+    .labor-wrap { max-width:660px; margin:0 auto; text-align:center; }
     .labor-texto { font-size:.92rem; opacity:.6; margin-bottom:28px; line-height:1.9; }
     .donacion-meta { display:flex; gap:18px; margin-bottom:32px; flex-wrap:wrap; }
     .meta-item {
@@ -2318,6 +2335,8 @@
       <div class="titulo-linea"></div>
       <p class="seccion-desc">Un recorrido por lo que hemos construido juntas.</p>
     </div>
+    <div class="hallway-wrap">
+    <button class="hallway-nav prev" aria-label="Anterior" type="button">&#10094;</button>
     <div class="hallway-scroll">
       <div class="evento-hallway-item" data-img="Images/HW01.jpeg" data-nombre="Aéreo Menti 2024" data-fecha="Noviembre 2024"><img src="Images/HW01.jpeg" alt="Aéreo Menti 2024" loading="lazy"><div class="evento-hallway-base"><p class="evento-hallway-nombre">Aéreo Menti 2024</p><p class="evento-hallway-fecha">Noviembre 2024</p></div><div class="hallway-zoom-hint">🔍</div></div>
       <div class="evento-hallway-item" data-img="Images/HW02.jpg" data-nombre="Vogue Inspo" data-fecha="Mayo 2025"><img src="Images/HW02.jpg" alt="Vogue Inspo" loading="lazy"><div class="evento-hallway-base"><p class="evento-hallway-nombre">Vogue Inspo</p><p class="evento-hallway-fecha">Mayo 2025</p></div><div class="hallway-zoom-hint">🔍</div></div>
@@ -2327,6 +2346,8 @@
       <div class="evento-hallway-item" data-img="Images/HW06.jpg" data-nombre="Dúo Aéreo" data-fecha="Octubre 2024"><img src="Images/HW06.jpg" alt="Dúo Aéreo" loading="lazy"><div class="evento-hallway-base"><p class="evento-hallway-nombre">Dúo Aéreo</p><p class="evento-hallway-fecha">Octubre 2024</p></div><div class="hallway-zoom-hint">🔍</div></div>
       <div class="evento-hallway-item" data-img="Images/HW07.jpg" data-nombre="Aerial & Flex" data-fecha="Octubre 2024"><img src="Images/HW07.jpg" alt="Aerial & Flex" loading="lazy"><div class="evento-hallway-base"><p class="evento-hallway-nombre">Aerial & Flex</p><p class="evento-hallway-fecha">Octubre 2024</p></div><div class="hallway-zoom-hint">🔍</div></div>
       <div class="evento-hallway-item" data-img="Images/HW08.jpg" data-nombre="Aerial Fairy" data-fecha="Abril 2025"><img src="Images/HW08.jpg" alt="Aerial Fairy" loading="lazy"><div class="evento-hallway-base"><p class="evento-hallway-nombre">Aerial Fairy</p><p class="evento-hallway-fecha">Abril 2025</p></div><div class="hallway-zoom-hint">🔍</div></div>
+    </div>
+    <button class="hallway-nav next" aria-label="Siguiente" type="button">&#10095;</button>
     </div>
   </section>
 
@@ -2637,6 +2658,8 @@
       <div class="titulo-linea"></div>
       <p class="seccion-desc">Sesiones, clases y comunidad Circanícula.</p>
     </div>
+    <div class="hallway-wrap">
+    <button class="hallway-nav prev" aria-label="Anterior" type="button">&#10094;</button>
     <div class="hallway-scroll">
       <div class="evento-hallway-item" data-img="Images/CIRCANIC FORMAL 01--34.jpg" data-nombre="Sesión Circanícula" data-fecha="Estudio"><img src="Images/CIRCANIC FORMAL 01--34.jpg" alt="Sesión Circanícula" loading="lazy"><div class="evento-hallway-base"><p class="evento-hallway-nombre">Sesión Circanícula</p><p class="evento-hallway-fecha">Estudio</p></div><div class="hallway-zoom-hint">🔍</div></div>
       <div class="evento-hallway-item" data-img="Images/CIRCANIC FORMAL 01--81.jpg" data-nombre="Sesión Circanícula" data-fecha="Estudio"><img src="Images/CIRCANIC FORMAL 01--81.jpg" alt="Sesión Circanícula" loading="lazy"><div class="evento-hallway-base"><p class="evento-hallway-nombre">Sesión Circanícula</p><p class="evento-hallway-fecha">Estudio</p></div><div class="hallway-zoom-hint">🔍</div></div>
@@ -2647,6 +2670,8 @@
       <div class="evento-hallway-item" data-img="Images/IMG_6873.jpeg" data-nombre="En clase" data-fecha="Entrenamiento"><img src="Images/IMG_6873.jpeg" alt="En clase" loading="lazy"><div class="evento-hallway-base"><p class="evento-hallway-nombre">En clase</p><p class="evento-hallway-fecha">Entrenamiento</p></div><div class="hallway-zoom-hint">🔍</div></div>
       <div class="evento-hallway-item" data-img="Images/IMG_7129.jpeg" data-nombre="En clase" data-fecha="Entrenamiento"><img src="Images/IMG_7129.jpeg" alt="En clase" loading="lazy"><div class="evento-hallway-base"><p class="evento-hallway-nombre">En clase</p><p class="evento-hallway-fecha">Entrenamiento</p></div><div class="hallway-zoom-hint">🔍</div></div>
       <div class="evento-hallway-item" data-img="Images/IMG_7335.jpeg" data-nombre="En clase" data-fecha="Entrenamiento"><img src="Images/IMG_7335.jpeg" alt="En clase" loading="lazy"><div class="evento-hallway-base"><p class="evento-hallway-nombre">En clase</p><p class="evento-hallway-fecha">Entrenamiento</p></div><div class="hallway-zoom-hint">🔍</div></div>
+    </div>
+    <button class="hallway-nav next" aria-label="Siguiente" type="button">&#10095;</button>
     </div>
   </section>
 
@@ -3059,25 +3084,26 @@
   const lbNombre = document.getElementById('lightbox-nombre');
   const lbFecha = document.getElementById('lightbox-fecha');
 
-  /* Hallway en LOOP infinito: clonamos los ítems una vez y envolvemos el
-     scroll. Al llegar al final reaparece el principio (y viceversa) sin tope. */
-  document.querySelectorAll('.hallway-scroll').forEach(track => {
-    const items = Array.from(track.children);
-    if (!items.length) return;
-    items.forEach(it => track.appendChild(it.cloneNode(true)));
-    const setW = () => track.scrollWidth / 2;
-    track.scrollLeft = 1; // pequeño offset para permitir el wrap hacia atrás
-    let ticking = false;
-    track.addEventListener('scroll', () => {
-      if (ticking) return;
-      ticking = true;
-      requestAnimationFrame(() => {
-        const w = setW();
-        if (track.scrollLeft >= w) track.scrollLeft -= w;
-        else if (track.scrollLeft <= 0) track.scrollLeft += w;
-        ticking = false;
-      });
-    }, { passive: true });
+  /* Navegación de los Hallways con botones < > (con loop al llegar al borde).
+     Sin clones ni wrap-on-scroll → elimina el glitch del margen. */
+  document.querySelectorAll('.hallway-wrap').forEach(wrap => {
+    const track = wrap.querySelector('.hallway-scroll');
+    const btnPrev = wrap.querySelector('.hallway-nav.prev');
+    const btnNext = wrap.querySelector('.hallway-nav.next');
+    if (!track) return;
+    const paso = () => {
+      const item = track.querySelector('.evento-hallway-item');
+      return item ? item.getBoundingClientRect().width + 16 : 300;
+    };
+    const fin = () => track.scrollWidth - track.clientWidth;
+    if (btnNext) btnNext.addEventListener('click', () => {
+      if (track.scrollLeft >= fin() - 4) track.scrollTo({ left: 0, behavior: 'smooth' });
+      else track.scrollBy({ left: paso(), behavior: 'smooth' });
+    });
+    if (btnPrev) btnPrev.addEventListener('click', () => {
+      if (track.scrollLeft <= 4) track.scrollTo({ left: fin(), behavior: 'smooth' });
+      else track.scrollBy({ left: -paso(), behavior: 'smooth' });
+    });
   });
 
   /* Lightbox por DELEGACIÓN (cubre también los ítems clonados del loop). */
