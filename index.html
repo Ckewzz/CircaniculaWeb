@@ -989,6 +989,11 @@
 
     * { margin:0; padding:0; box-sizing:border-box; }
     html { scroll-behavior:smooth; }
+    /* En ESCRITORIO el texto se veía pequeño (la PWA en móvil se ve bien).
+       Subimos la raíz tipográfica 25% SOLO en pantallas anchas: como todas las
+       fuentes usan rem escalan (títulos, textos, calendarios, formulario), pero
+       las fotos (px) y el layout (max-width en px) NO cambian. Móvil/PWA intacto. */
+    @media (min-width:768px){ html { font-size:125%; } }
 
     body {
       background: var(--negro);
@@ -1923,7 +1928,7 @@
 
     /* ===== LABOR SOCIAL ===== */
     #labor-social { background:rgba(0,0,0,.2); }
-    .labor-wrap { max-width:660px; margin:0 auto; text-align:center; }
+    .labor-wrap { max-width:660px; }
     .labor-texto { font-size:.92rem; opacity:.6; margin-bottom:28px; line-height:1.9; }
     .donacion-meta { display:flex; gap:18px; margin-bottom:32px; flex-wrap:wrap; }
     .meta-item {
