@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex, nofollow">
+<title>Provisioning · Alta de academia — Circanícula SaaS</title>
+<style>
+  :root{
+    --amarillo:#ffcc00; --negro:#080808; --naranja:#ff9d00;
+    --panel:rgba(20,20,20,.92); --linea:rgba(255,204,0,.22);
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+    background:radial-gradient(circle at 50% -10%,#1a1500,#080808 60%); color:#f0ede6;
+    line-height:1.5; padding:0 0 80px;
+  }
+  header{
+    text-align:center; padding:42px 20px 10px;
+  }
+  header h1{ margin:0 0 6px; font-size:1.6rem; letter-spacing:1px; }
+  header h1 span{ color:var(--amarillo); }
+  header p{ margin:0; opacity:.55; font-size:.86rem; max-width:620px; margin:0 auto; }
+  .aviso{
+    max-width:760px; margin:18px auto 0; padding:11px 16px; border-radius:8px;
+    background:rgba(255,157,0,.1); border:1px solid rgba(255,157,0,.35);
+    font-size:.8rem; color:#ffd9a8; text-align:center;
+  }
+  .wrap{ max-width:760px; margin:0 auto; padding:0 18px; }
+  .card{
+    background:var(--panel); border:1px solid var(--linea); border-radius:12px;
+    padding:22px 22px 8px; margin-top:22px;
+  }
+  .card h2{
+    margin:0 0 4px; font-size:.74rem; letter-spacing:3px; text-transform:uppercase;
+    color:var(--amarillo);
+  }
+  .card .hint{ margin:0 0 16px; font-size:.76rem; opacity:.45; }
+  .grid{ display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+  @media(max-width:560px){ .grid{ grid-template-columns:1fr; } }
+  label{ display:block; font-size:.72rem; opacity:.7; margin-bottom:5px; font-weight:600; }
+  label .opt{ opacity:.4; font-weight:400; }
+  input[type=text], input[type=email], input[type=url], textarea{
+    width:100%; background:rgba(0,0,0,.45); border:1px solid rgba(255,204,0,.2);
+    color:#fff; border-radius:8px; padding:10px 12px; font-size:.85rem; font-family:inherit;
+  }
+  input:focus, textarea:focus{ outline:none; border-color:var(--amarillo); }
+  textarea{ resize:vertical; min-height:70px; }
+  .row-color{ display:flex; align-items:center; gap:10px; }
+  input[type=color]{ width:46px; height:38px; border:none; border-radius:8px; background:none; cursor:pointer; padding:0; }
+  .field{ margin-bottom:14px; }
+  .btn{
+    background:var(--amarillo); color:var(--negro); border:none; border-radius:8px;
+    padding:11px 22px; font-weight:800; font-size:.85rem; cursor:pointer; letter-spacing:.5px;
+    transition:transform .12s, opacity .2s;
+  }
+  .btn:hover{ opacity:.9; } .btn:active{ transform:scale(.97); }
+  .btn-sec{
+    background:transparent; color:var(--amarillo); border:1px solid rgba(255,204,0,.4);
+  }
+  .acciones{ text-align:center; margin:26px 0 6px; }
+  .salida{ display:none; }
+  .salida.visible{ display:block; }
+  .out-block{ position:relative; margin-top:14px; }
+  .out-block .copiar{
+    position:absolute; top:8px; right:8px; font-size:.7rem; padding:5px 12px;
+    border-radius:6px; background:var(--amarillo); color:var(--negro); border:none;
+    cursor:pointer; font-weight:700;
+  }
+  pre{
+    background:#0c0c0c; border:1px solid rgba(255,255,255,.1); border-radius:10px;
+    padding:16px 14px; overflow-x:auto; font-size:.78rem; line-height:1.6;
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; color:#d6f5c8;
+    white-space:pre; margin:0;
+  }
+  ol.checklist{ font-size:.84rem; line-height:1.9; padding-left:20px; margin:6px 0 0; }
+  ol.checklist code{ background:rgba(255,204,0,.12); color:var(--amarillo); padding:1px 6px; border-radius:4px; font-size:.82em; }
+  .err{ color:#ff8080; font-size:.8rem; text-align:center; min-height:1.2em; margin-top:10px; }
+  .toast{
+    position:fixed; bottom:24px; left:50%; transform:translateX(-50%) translateY(20px);
+    background:var(--amarillo); color:var(--negro); padding:10px 22px; border-radius:30px;
+    font-weight:700; font-size:.84rem; opacity:0; pointer-events:none; transition:all .25s;
+  }
+  .toast.show{ opacity:1; transform:translateX(-50%) translateY(0); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Alta de academia · <span>Circanícula SaaS</span></h1>
+  <p>Generador de configuración multi-tenant. Llena los datos y obtén el bloque <code>TENANT</code>, la línea de reglas y el checklist — listo para pegar.</p>
+  <div class="aviso">🔒 Herramienta interna. No genera nada en servidores: todo se procesa en tu navegador. No la enlaces desde el sitio público.</div>
+</header>
+
+<div class="wrap">
+
+  <!-- IDENTIDAD -->
+  <div class="card">
+    <h2>1 · Identidad y marca</h2>
+    <p class="hint">El <em>id</em> es un slug interno (sin espacios ni acentos). El dominio es el sitio real de la academia.</p>
+    <div class="grid">
+      <div class="field"><label>id / slug interno</label><input type="text" id="f-id" placeholder="ej. estudioluna"></div>
+      <div class="field"><label>Nombre visible</label><input type="text" id="f-nombre" placeholder="ej. Estudio Luna"></div>
+      <div class="field"><label>Dominio (sin https)</label><input type="text" id="f-dominio" placeholder="ej. estudioluna.com"></div>
+      <div class="field"><label>Dominio de alumno <span class="opt">(login sintético)</span></label><input type="text" id="f-dominioalumno" placeholder="@alumno.estudioluna.app"></div>
+    </div>
+    <div class="grid">
+      <div class="field"><label>Color primario</label><div class="row-color"><input type="color" id="f-colorprim" value="#ffcc00"><input type="text" id="f-colorprim-tx" value="#ffcc00"></div></div>
+      <div class="field"><label>Color de fondo</label><div class="row-color"><input type="color" id="f-colorfondo" value="#080808"><input type="text" id="f-colorfondo-tx" value="#080808"></div></div>
+      <div class="field"><label>Ruta del logo</label><input type="text" id="f-logo" value="Images/Logo_4.png"></div>
+      <div class="field"><label>Ruta del ícono</label><input type="text" id="f-icono" value="Images/Icono_4.png"></div>
+    </div>
+  </div>
+
+  <!-- CONTACTO -->
+  <div class="card">
+    <h2>2 · Contacto</h2>
+    <p class="hint">Link de Google Calendar para la clase de prueba y el endpoint de Formspree del formulario.</p>
+    <div class="field"><label>Link de clase de prueba (Google Calendar)</label><input type="url" id="f-calendario" placeholder="https://calendar.app.google/..."></div>
+    <div class="field"><label>Endpoint Formspree</label><input type="url" id="f-formspree" placeholder="https://formspree.io/f/xxxxxxx"></div>
+  </div>
+
+  <!-- FIREBASE -->
+  <div class="card">
+    <h2>3 · Firebase</h2>
+    <p class="hint">Pega aquí el objeto <code>firebaseConfig</code> que te da la consola de Firebase y pulsa “Rellenar”. O completa los campos a mano.</p>
+    <div class="field">
+      <label>Pegar firebaseConfig <span class="opt">(opcional, auto-rellena)</span></label>
+      <textarea id="f-fbpaste" placeholder='const firebaseConfig = {\n  apiKey: "AIza...",\n  authDomain: "miacademia.firebaseapp.com",\n  ...\n};'></textarea>
+      <div style="margin-top:8px;"><button class="btn btn-sec" type="button" onclick="parsearFirebase()">Rellenar campos desde el pegado</button></div>
+    </div>
+    <div class="grid">
+      <div class="field"><label>apiKey</label><input type="text" id="f-apikey"></div>
+      <div class="field"><label>authDomain</label><input type="text" id="f-authdomain" placeholder="proyecto.firebaseapp.com"></div>
+      <div class="field"><label>projectId</label><input type="text" id="f-projectid"></div>
+      <div class="field"><label>storageBucket</label><input type="text" id="f-storagebucket"></div>
+      <div class="field"><label>messagingSenderId</label><input type="text" id="f-sender"></div>
+      <div class="field"><label>appId</label><input type="text" id="f-appid"></div>
+    </div>
+  </div>
+
+  <!-- STRIPE -->
+  <div class="card">
+    <h2>4 · Stripe Payment Links</h2>
+    <p class="hint">Los 4 links de pago (uno por plan). Pueden quedar vacíos si la academia aún no los tiene.</p>
+    <div class="grid">
+      <div class="field"><label>Individual</label><input type="url" id="f-stripe-ind" placeholder="https://buy.stripe.com/..."></div>
+      <div class="field"><label>Básico</label><input type="url" id="f-stripe-bas" placeholder="https://buy.stripe.com/..."></div>
+      <div class="field"><label>Medio</label><input type="url" id="f-stripe-med" placeholder="https://buy.stripe.com/..."></div>
+      <div class="field"><label>Avanzado</label><input type="url" id="f-stripe-ava" placeholder="https://buy.stripe.com/..."></div>
+    </div>
+  </div>
+
+  <!-- SUPER ADMIN -->
+  <div class="card">
+    <h2>5 · Super-admin (Rank 0)</h2>
+    <p class="hint">Correo del dueño de la academia. Es quien tendrá control total y la ÚNICA línea a cambiar en las reglas.</p>
+    <div class="field"><label>Correo del super-admin</label><input type="email" id="f-superadmin" placeholder="dueno@academia.com"></div>
+  </div>
+
+  <div class="acciones">
+    <button class="btn" type="button" onclick="generar()">⚙ Generar configuración</button>
+    <div class="err" id="err"></div>
+  </div>
+
+  <!-- SALIDA -->
+  <div class="salida" id="salida">
+    <div class="card">
+      <h2>A · Bloque TENANT</h2>
+      <p class="hint">Pégalo dentro del objeto <code>TENANTS</code> en <code>index.html</code>, junto a las demás academias.</p>
+      <div class="out-block">
+        <button class="copiar" type="button" onclick="copiar('out-tenant',this)">Copiar</button>
+        <pre id="out-tenant"></pre>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>B · Línea de firestore.rules</h2>
+      <p class="hint">Esta es la ÚNICA línea que cambia por academia en <code>firestore.rules</code> de SU proyecto Firebase.</p>
+      <div class="out-block">
+        <button class="copiar" type="button" onclick="copiar('out-rules',this)">Copiar</button>
+        <pre id="out-rules"></pre>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>C · Checklist de alta manual</h2>
+      <p class="hint">Pasos que SÍ requieren tu mano (cuentas propias del dueño, todo gratis).</p>
+      <ol class="checklist" id="out-checklist"></ol>
+    </div>
+  </div>
+
+</div>
+
+<div class="toast" id="toast">Copiado ✓</div>
+
+<script>
+  // Sincroniza los color pickers con sus inputs de texto
+  function syncColor(pick, txt){
+    const p=document.getElementById(pick), t=document.getElementById(txt);
+    p.addEventListener('input',()=>t.value=p.value);
+    t.addEventListener('input',()=>{ if(/^#[0-9a-fA-F]{6}$/.test(t.value)) p.value=t.value; });
+  }
+  syncColor('f-colorprim','f-colorprim-tx');
+  syncColor('f-colorfondo','f-colorfondo-tx');
+
+  // Sugerir dominioAlumno a partir del id
+  document.getElementById('f-id').addEventListener('blur', ()=>{
+    const id=document.getElementById('f-id').value.trim().toLowerCase().replace(/[^a-z0-9]/g,'');
+    const da=document.getElementById('f-dominioalumno');
+    if(id && !da.value) da.value='@alumno.'+id+'.app';
+  });
+
+  // Parsear un firebaseConfig pegado
+  function parsearFirebase(){
+    const txt=document.getElementById('f-fbpaste').value;
+    const map={apiKey:'f-apikey',authDomain:'f-authdomain',projectId:'f-projectid',
+      storageBucket:'f-storagebucket',messagingSenderId:'f-sender',appId:'f-appid'};
+    let encontrados=0;
+    for(const k in map){
+      const re=new RegExp(k+'\\s*:\\s*["\\\']([^"\\\']+)["\\\']');
+      const m=txt.match(re);
+      if(m){ document.getElementById(map[k]).value=m[1]; encontrados++; }
+    }
+    mostrarToast(encontrados? ('Rellenados '+encontrados+' campos ✓') : 'No se reconoció el formato');
+  }
+
+  const val=id=>document.getElementById(id).value.trim();
+
+  function generar(){
+    const err=document.getElementById('err'); err.textContent='';
+    const id=val('f-id').toLowerCase().replace(/[^a-z0-9]/g,'');
+    const nombre=val('f-nombre'), dominio=val('f-dominio').replace(/^https?:\/\//,'').replace(/\/$/,'');
+    const email=val('f-superadmin');
+
+    if(!id){ err.textContent='Falta el id / slug interno.'; return; }
+    if(!nombre){ err.textContent='Falta el nombre visible.'; return; }
+    if(!dominio){ err.textContent='Falta el dominio.'; return; }
+    if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)){ err.textContent='Correo de super-admin inválido.'; return; }
+    if(!val('f-projectid')){ err.textContent='Falta projectId de Firebase (revisa la sección 3).'; return; }
+
+    let dominioAlumno=val('f-dominioalumno') || ('@alumno.'+id+'.app');
+    if(dominioAlumno[0] !== '@') dominioAlumno='@'+dominioAlumno;
+
+    const q=s=>String(s).replace(/'/g,"\\'");
+    const tenant =
+`    ${id}: {
+      id: '${q(id)}',
+      marca: {
+        nombre: '${q(nombre)}',
+        dominio: '${q(dominio)}',
+        colorPrimario: '${val('f-colorprim-tx')||'#ffcc00'}',
+        colorFondo: '${val('f-colorfondo-tx')||'#080808'}',
+        logo: '${q(val('f-logo')||'Images/Logo_4.png')}',
+        icono: '${q(val('f-icono')||'Images/Icono_4.png')}'
+      },
+      contacto: {
+        calendarioPrueba: '${q(val('f-calendario'))}',
+        formspree: '${q(val('f-formspree'))}'
+      },
+      dominioAlumno: '${q(dominioAlumno)}',
+      firebase: {
+        apiKey: "${val('f-apikey')}",
+        authDomain: "${val('f-authdomain')}",
+        projectId: "${val('f-projectid')}",
+        storageBucket: "${val('f-storagebucket')}",
+        messagingSenderId: "${val('f-sender')}",
+        appId: "${val('f-appid')}"
+      },
+      stripe: {
+        individual: "${val('f-stripe-ind')}",
+        basico: "${val('f-stripe-bas')}",
+        medio: "${val('f-stripe-med')}",
+        avanzado: "${val('f-stripe-ava')}"
+      },
+      superAdminEmail: "${email}"
+    },`;
+
+    document.getElementById('out-tenant').textContent=tenant;
+    document.getElementById('out-rules').textContent=
+`function superAdminEmail() { return '${q(email)}'; } // ← ${q(nombre)}`;
+
+    const pasos=[
+      `Crear un proyecto Firebase NUEVO para “${nombre}” (cuenta propia del dueño, plan Spark gratis).`,
+      `En ese proyecto: activar Authentication → Google + Email/Password.`,
+      `Pegar la copia de firestore.rules cambiando SOLO la línea de superAdminEmail() por la del bloque B.`,
+      `Registrar el dominio ${dominio} en Cloudflare (cuenta operadora) y apuntar los nameservers.`,
+      `En Cloudflare: copiar las reglas de seguridad (Response Headers + CSP) y HSTS de Circanícula.`,
+      `Crear los 4 Payment Links en el Stripe del dueño y pegarlos arriba (o dejarlos vacíos por ahora).`,
+      `Configurar Formspree del dueño y poner su endpoint.`,
+      `Pegar el bloque A dentro de TENANTS en index.html y desplegar.`,
+      `Verificar: abrir ${dominio}, registrar al super-admin (${email}) y confirmar que nace Rank 0.`
+    ];
+    const ol=document.getElementById('out-checklist'); ol.innerHTML='';
+    pasos.forEach(p=>{ const li=document.createElement('li'); li.textContent=p; ol.appendChild(li); });
+
+    document.getElementById('salida').classList.add('visible');
+    document.getElementById('salida').scrollIntoView({behavior:'smooth'});
+  }
+
+  function copiar(id, btn){
+    const txt=document.getElementById(id).textContent;
+    navigator.clipboard.writeText(txt).then(()=>{
+      mostrarToast('Copiado ✓');
+      if(btn){ const o=btn.textContent; btn.textContent='✓'; setTimeout(()=>btn.textContent=o,1200); }
+    });
+  }
+
+  let toastT;
+  function mostrarToast(msg){
+    const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show');
+    clearTimeout(toastT); toastT=setTimeout(()=>t.classList.remove('show'),1600);
+  }
+</script>
+</body>
+</html>
