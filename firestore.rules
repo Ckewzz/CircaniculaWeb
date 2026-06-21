@@ -23,9 +23,19 @@ service cloud.firestore {
     function signedIn() { return request.auth != null; }
     function isOwner(uid) { return signedIn() && request.auth.uid == uid; }
 
+    // ════════════════════════════════════════════════════════════════════
+    //  MULTI-TENANT (modelo: UN PROYECTO FIREBASE POR ACADEMIA)
+    //  Cada academia tiene su PROPIO proyecto Firebase → su PROPIA base, su
+    //  PROPIO Auth y su PROPIA copia de estas reglas. El aislamiento entre
+    //  academias es TOTAL por diseño (bases separadas).
+    //  ⚠️  AL DAR DE ALTA UNA ACADEMIA NUEVA: cambia el correo de abajo por el
+    //      del super-admin (Rank 0) de ESA academia. Es la ÚNICA línea a tocar.
+    // ════════════════════════════════════════════════════════════════════
+    function superAdminEmail() { return 'treseenicos@gmail.com'; } // ← SWAP por tenant
+
     // El super-admin se identifica por su correo verificado en el token de Auth.
     function isSuperAdmin() {
-      return signedIn() && request.auth.token.email == 'treseenicos@gmail.com';
+      return signedIn() && request.auth.token.email == superAdminEmail();
     }
 
     function rankDoc(uid) {

@@ -55,10 +55,20 @@
 
     // ════════════════════════════════════════════════════════════════════
     //  CONFIGURACIÓN POR TENANT (multi-academia)
+    //  Modelo: UN PROYECTO FIREBASE POR ACADEMIA → aislamiento de datos total.
     //  Cada academia = una entrada en TENANTS, identificada por su dominio.
-    //  Para dar de alta una academia nueva: copia el bloque, cambia dominio,
-    //  marca, contacto, firebase y stripe. NADA más se toca en el código.
     //  resolverTenant() elige el tenant según el hostname actual.
+    //
+    //  ── ALTA DE UNA ACADEMIA NUEVA (checklist) ──────────────────────────
+    //   1. Crear un proyecto Firebase nuevo (gratis, plan Spark).
+    //   2. Activar Authentication → Email/Password (+ Google opcional).
+    //   3. Publicar firestore.rules en ese proyecto, cambiando el correo de
+    //      superAdminEmail() por el del Rank 0 de esa academia.
+    //   4. Copiar el bloque de abajo y rellenar: id, marca (dominio/colores/
+    //      logo), contacto, dominioAlumno, firebase (config del proyecto NUEVO),
+    //      stripe (Payment Links de esa academia) y superAdminEmail.
+    //   5. Apuntar el dominio del cliente a este sitio + Cloudflare delante.
+    //  NADA de lógica se toca: solo datos.
     // ════════════════════════════════════════════════════════════════════
     const TENANTS = {
       circanicula: {
@@ -75,6 +85,10 @@
           calendarioPrueba: 'https://calendar.app.google/ryLFrBeakHMMPRBMA',
           formspree:        'https://formspree.io/f/mwvzdowd'
         },
+        // Dominio TÉCNICO del correo sintético del login usuario+contraseña.
+        // Es invisible para el alumno. NO lo cambies en una academia ya viva
+        // o los usuarios existentes no podrán entrar (su correo de Auth cambiaría).
+        dominioAlumno: '@alumno.circanicula.app',
         firebase: {
           apiKey:            "AIzaSyB_2POgJsaN6ueZQLQpq8cAIXMBNp0x_rc",
           authDomain:        "circanicula-267.firebaseapp.com",
@@ -226,7 +240,7 @@
     // El "usuario" se convierte en un correo TÉCNICO invisible para entrar a
     // Firebase Auth. El correo REAL del alumno es OPCIONAL y PRIVADO (solo se
     // usa para recuperar la cuenta). Nadie más lo ve.
-    const DOMINIO_ALUMNO = '@alumno.circanicula.app';
+    const DOMINIO_ALUMNO = TENANT.dominioAlumno;
     function usuarioAEmail(u) {
       const limpio = (u || '').trim().toLowerCase().replace(/[^a-z0-9._-]/g, '');
       return limpio ? (limpio + DOMINIO_ALUMNO) : '';
@@ -440,6 +454,9 @@
       if (data.rank === undefined) patch.rank = rankCalc;
       else if (rankCalc < data.rank) patch.rank = rankCalc;
       if (!data.creadoEn) patch.creadoEn = serverTimestamp();
+      // Sello de tenant. Con "proyecto por academia" el aislamiento ya es total
+      // (bases separadas); esto queda como etiqueta para auditoría/migración.
+      if (!data.tenantId) patch.tenantId = TENANT.id;
       if (Object.keys(patch).length) {
         // No bloqueante: si las reglas rechazan algún campo en cuentas antiguas,
         // el perfil igual se carga (cargarPerfil usa defaults visuales).
