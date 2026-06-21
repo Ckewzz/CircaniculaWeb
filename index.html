@@ -353,7 +353,7 @@
       if (!u || !p) { _loginErr('Escribe tu usuario y contraseña.'); return; }
       const email = usuarioAEmail(u);
       if (!email) { _loginErr('Usuario no válido.'); return; }
-      _loginErr('Entrando…', '#ffcc00');
+      _loginErr('Entrando…', TENANT.marca.colorPrimario);
       try {
         await signInWithEmailAndPassword(auth, email, p);
         _lkClear();                 // login correcto → borra contadores
@@ -382,7 +382,7 @@
       const email = usuarioAEmail(u);
       if (!email) { _loginErr('Usa solo letras, números, punto, guion o guion bajo en el usuario.'); return; }
       _pendingRegister = { nombreVisible: u.slice(0,40), correo: correo.slice(0,80), tel: tel.slice(0,20) };
-      _loginErr('Creando tu cuenta…', '#ffcc00');
+      _loginErr('Creando tu cuenta…', TENANT.marca.colorPrimario);
       try {
         const cred = await createUserWithEmailAndPassword(auth, email, p);
         try { await updateProfile(cred.user, { displayName: u.slice(0,40) }); } catch {}
@@ -396,7 +396,7 @@
 
     // Recuperación: hasta tener la Cloud Function, la restablece el equipo (Rank 0).
     window.recuperarPass = () => {
-      _loginErr('Tu contraseña es única. Si la olvidaste, escríbele a la academia y el equipo te ayuda a restablecerla. (Pronto podrás recuperarla tú con tu correo.)', '#ffcc00');
+      _loginErr('Tu contraseña es única. Si la olvidaste, escríbele a la academia y el equipo te ayuda a restablecerla. (Pronto podrás recuperarla tú con tu correo.)', TENANT.marca.colorPrimario);
     };
 
     // ── PERFIL DE USUARIO ─────────────────────────────────
@@ -1494,8 +1494,8 @@
 .btn-confirmar-horario:not(:disabled):hover { opacity: .85; }
     .clase-cell.disponible { opacity:1; }
     .clase-cell.kids { background:rgba(232,116,0,.25); color:#ffa040; border:1px solid rgba(232,116,0,.3); }
-    .clase-cell.flow { background:rgba(255,204,0,.2);  color:#ffcc00; border:1px solid rgba(255,204,0,.3); }
-    .clase-cell.fit  { background:rgba(255,204,0,.2);  color:#ffcc00; border:1px solid rgba(255,204,0,.3); }
+    .clase-cell.flow { background:rgba(255,204,0,.2);  color:var(--amarillo); border:1px solid rgba(255,204,0,.3); }
+    .clase-cell.fit  { background:rgba(255,204,0,.2);  color:var(--amarillo); border:1px solid rgba(255,204,0,.3); }
     .clase-cell.flex { background:rgba(80,200,255,.15); color:#80d8ff; border:1px solid rgba(80,200,255,.2); }
     .clase-cell.aro  { background:rgba(200,130,255,.18);color:#d8a0ff; border:1px solid rgba(200,130,255,.3); }
     .clase-cell.free { background:rgba(160,255,160,.12);color:#90ee90; border:1px solid rgba(160,255,160,.18); }
@@ -1555,11 +1555,11 @@
     .perfil-foto-wrap { position:relative; width:72px; height:72px; flex:0 0 auto; border-radius:50%; padding:3px; }
     .perfil-foto {
       width:100%; height:100%; border-radius:50%;
-      object-fit:cover; border:2px solid #ffcc00; background:#111; display:block;
+      object-fit:cover; border:2px solid var(--amarillo); background:#111; display:block;
     }
     /* Marco animado para Instructora / Creador */
     .perfil-foto-wrap.foto-marco {
-      background:conic-gradient(from 0deg,#ff9d00,#ffcc00,#ff5ea8,#a855f7,#ff9d00);
+      background:conic-gradient(from 0deg,#ff9d00,var(--amarillo),#ff5ea8,#a855f7,#ff9d00);
       animation:marcoGira 4s linear infinite;
     }
     .perfil-foto-wrap.foto-marco .perfil-foto { border-color:#111; }
@@ -1568,7 +1568,7 @@
     .perfil-nombre-row { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
     .perfil-nombre { font-size:1.25rem; font-weight:700; color:#fff; }
     .perfil-edit-btn {
-      background:none; border:none; color:#ffcc00; cursor:pointer;
+      background:none; border:none; color:var(--amarillo); cursor:pointer;
       font-size:.95rem; padding:2px 4px; line-height:1;
     }
     .perfil-rank-badge {
@@ -1581,7 +1581,7 @@
     .rank-alumno      { background:rgba(255,255,255,.18); color:#fff; }
     .rank-lector      { background:rgba(255,255,255,.1); color:rgba(255,255,255,.6); }
     .perfil-apodo-row { margin-top:2px; }
-    .perfil-apodo { font-style:italic; color:#ffcc00; font-size:.85rem; }
+    .perfil-apodo { font-style:italic; color:var(--amarillo); font-size:.85rem; }
     .perfil-apodo-btn { background:none; border:1px dashed rgba(255,204,0,.4);
       color:rgba(255,204,0,.7); border-radius:12px; font-size:.66rem; cursor:pointer; padding:1px 8px; margin-left:6px; }
     .perfil-id-tag { display:inline-block; margin-top:4px; font-size:.72rem;
@@ -1591,16 +1591,16 @@
       background:rgba(255,204,0,.07); border:1px solid rgba(255,204,0,.25);
     }
     .perfil-creditos-candado { position:absolute; top:5px; right:7px; font-size:.7rem; opacity:.7; }
-    .perfil-creditos-num { display:block; font-size:1.6rem; font-weight:800; color:#ffcc00; line-height:1; opacity:.6; }
+    .perfil-creditos-num { display:block; font-size:1.6rem; font-weight:800; color:var(--amarillo); line-height:1; opacity:.6; }
     .perfil-creditos-lbl { font-size:.65rem; text-transform:uppercase; letter-spacing:.08em; color:rgba(255,255,255,.55); }
     .perfil-creditos-soon { display:block; margin-top:3px; font-size:.6rem; color:#ff9d00; font-weight:700; }
     .perfil-progreso { margin-top:20px; }
-    .perfil-sub { font-size:.95rem; color:#ffcc00; margin:0 0 8px; text-align:center; }
+    .perfil-sub { font-size:.95rem; color:var(--amarillo); margin:0 0 8px; text-align:center; }
     .perfil-radar { display:flex; justify-content:center; }
     .radar-svg { width:100%; max-width:300px; height:auto; }
     .radar-grid { fill:none; stroke:rgba(255,255,255,.08); stroke-width:1; }
     .radar-axis { stroke:rgba(255,255,255,.12); stroke-width:1; }
-    .radar-area { fill:rgba(255,204,0,.28); stroke:#ffcc00; stroke-width:2; }
+    .radar-area { fill:rgba(255,204,0,.28); stroke:var(--amarillo); stroke-width:2; }
     .radar-label { fill:rgba(255,255,255,.75); font-size:10px; font-weight:600; }
     .perfil-titulos { display:flex; flex-wrap:wrap; gap:8px; justify-content:center; margin-top:8px; }
     .titulo-chip { background:linear-gradient(90deg,rgba(255,94,168,.2),rgba(168,85,247,.2));
@@ -1609,7 +1609,7 @@
     .titulo-vacio { font-size:.74rem; color:rgba(255,255,255,.4); }
     .perfil-eventos-line { margin-top:14px; text-align:center; font-size:.78rem; color:rgba(255,255,255,.55); }
     .perfil-tel { display:block; margin-top:3px; font-size:.72rem; color:rgba(255,255,255,.5); cursor:pointer; }
-    .perfil-tel:hover { color:#ffcc00; }
+    .perfil-tel:hover { color:var(--amarillo); }
     @media(max-width:560px){
       .perfil-creditos-box { margin-top:6px; }
     }
@@ -1630,7 +1630,7 @@
       background:linear-gradient(90deg,#ffd700,#ff9d00); color:#111; font-weight:800;
       border:none; border-radius:6px; padding:9px 18px; cursor:pointer; font-size:.85rem;
     }
-    .admin-resultado { text-align:center; font-size:.8rem; margin:12px 0 0; color:#ffcc00; min-height:1em; }
+    .admin-resultado { text-align:center; font-size:.8rem; margin:12px 0 0; color:var(--amarillo); min-height:1em; }
 
     /* ===== ONBOARDING MODAL ===== */
     .onb-bg {
@@ -1650,7 +1650,7 @@
       color:rgba(255,255,255,.6); padding:9px; border-radius:8px; cursor:pointer;
       font-size:.74rem; font-family:'Cinzel',serif; letter-spacing:1px;
     }
-    .login-tab.active { background:rgba(255,204,0,.15); color:#ffcc00; border-color:#ffcc00; }
+    .login-tab.active { background:rgba(255,204,0,.15); color:var(--amarillo); border-color:var(--amarillo); }
     .login-full { width:100%; margin-top:16px; }
     .login-forgot {
       background:none; border:none; color:rgba(255,255,255,.45); font-size:.7rem;
@@ -1670,10 +1670,10 @@
       margin-top:12px; cursor:pointer; font-size:.78rem;
     }
     .login-nota { font-size:.66rem; color:rgba(255,255,255,.4); margin-top:14px; line-height:1.6; }
-    .onb-title { color:#ffcc00; margin:0 0 4px; font-size:1.3rem; }
+    .onb-title { color:var(--amarillo); margin:0 0 4px; font-size:1.3rem; }
     .onb-sub { color:rgba(255,255,255,.6); font-size:.82rem; margin:0 0 16px; }
     .onb-foto { width:80px; height:80px; border-radius:50%; object-fit:cover;
-      border:3px solid #ffcc00; margin-bottom:14px; background:#111; }
+      border:3px solid var(--amarillo); margin-bottom:14px; background:#111; }
     .onb-label { display:block; text-align:left; font-size:.74rem; color:rgba(255,255,255,.7);
       margin:10px 0 4px; font-weight:600; }
     .onb-opt { font-weight:400; color:rgba(255,255,255,.4); }
@@ -2425,7 +2425,7 @@
     </div>
     <div class="horario-leyenda">
       <div class="leyenda-item"><div class="leyenda-dot" style="background:#e87400;opacity:.7"></div>Kids (4:30–6 pm)</div>
-      <div class="leyenda-item"><div class="leyenda-dot" style="background:#ffcc00;opacity:.7"></div>Adultos (6–7 pm / 7–8 pm)</div>
+      <div class="leyenda-item"><div class="leyenda-dot" style="background:var(--amarillo);opacity:.7"></div>Adultos (6–7 pm / 7–8 pm)</div>
       <div class="leyenda-item"><div class="leyenda-dot" style="background:#80d8ff;opacity:.7"></div>Flex — Mar & Jue 6–7 pm</div>
       <div class="leyenda-item"><div class="leyenda-dot" style="background:#d8a0ff;opacity:.7"></div>Aro — Mar & Jue 7–8 pm</div>
     </div><!-- /horario-leyenda -->
