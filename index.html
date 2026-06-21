@@ -86,12 +86,12 @@
 
     // ── CONFIG RANKS / ESTRELLAS ──────────────────────────
     // Sistema de roles. Por defecto todo usuario nuevo es Rank 3 (Alumno).
-    // Para asignar Creador (0), Instructora (1) o Asistente (2), agrega el
-    // correo de Google de la persona aquí abajo. ✏️ EDITA SOLO ESTO:
+    // El CREADOR (Rank 0) se define aquí y es el único super-admin por código.
+    // El resto de ranks (Instructora/Asistente) los otorga el Rank 0 desde el
+    // PANEL ADMIN dentro de su perfil (sin tocar código), usando el ID corto.
+    const SUPER_ADMIN_EMAIL = "treseenicos@gmail.com";
     const OVERRIDE_RANGOS = {
-      // "tu-correo@gmail.com": 0,     // ← Iván (Creador + Instructora)
-      // "miss-ejemplo@gmail.com": 1,  // ← Instructora
-      // "asistente@gmail.com": 2,     // ← Asistente
+      [SUPER_ADMIN_EMAIL]: 0,   // ← Creador / super-admin
     };
 
     // Definición de cada rank (nombre, distintivo, créditos mensuales de regalo)
@@ -141,16 +141,11 @@
    window.usuarioActual = null;
 
     // ── LOGIN ─────────────────────────────────────────────
+    // El perfil se crea/parchea en onAuthStateChanged → bootstrapPerfil.
+    // NO escribimos el correo en el doc público (privacidad).
     window.loginGoogle = async () => {
       try {
-        const result = await signInWithPopup(auth, provider);
-        const user = result.user;
-        await setDoc(doc(db, "usuarios", user.uid), {
-          nombre: user.displayName,
-          email: user.email,
-          foto: user.photoURL,
-          ultimoLogin: serverTimestamp()
-        }, { merge: true });
+        await signInWithPopup(auth, provider);
       } catch(e) { console.error(e); }
     };
 
@@ -167,34 +162,59 @@
       return `CIRCA-${base36}`;
     }
 
-    // Crea/parchea el documento de perfil con los campos faltantes.
-    // NOTA: creditos y nivel son SOLO de lectura desde el cliente. Antes de
-    // poner créditos en producción, las reglas de Firestore deben hacer estos
-    // campos admin-only para evitar trampas.
+    // Handle público por defecto, ej. "Aerialista93420". Estable por uid.
+    function generarHandle(uid) {
+      let h = 0;
+      for (let i = 0; i < uid.length; i++) h = (h * 17 + uid.charCodeAt(i)) >>> 0;
+      const num = (h % 90000) + 10000; // 10000–99999
+      return `Aerialista${num}`;
+    }
+
+    // Crea/parchea el perfil. Datos PÚBLICOS en usuarios/{uid}; datos PRIVADOS
+    // (correo, teléfono) en usuarios_priv/{uid}, legibles solo por el dueño y
+    // Rank 0/1. Los campos sensibles (rank/creditos/nivel/titulos) están
+    // protegidos por reglas de Firestore admin-only (ver firestore.rules).
     async function bootstrapPerfil(user) {
       const ref  = doc(db, "usuarios", user.uid);
       const snap = await getDoc(ref);
       const data = snap.exists() ? snap.data() : {};
+      const esNuevo = !snap.exists();
       const patch = {};
+      const handle = data.handle || generarHandle(user.uid);
       if (!data.userIdCorto)   patch.userIdCorto   = generarIdCorto(user.uid);
-      if (!data.nombreVisible) patch.nombreVisible = user.displayName || 'Alumno';
+      if (!data.handle)        patch.handle        = handle;
+      if (!data.nombreVisible) patch.nombreVisible = handle;   // default = AerialistaXXXXX
+      if (!data.foto)          patch.foto          = user.photoURL || '';
       if (data.creditos === undefined) patch.creditos = 0;
-      // Stats completos (6). Conserva los existentes, agrega los faltantes.
-      const nivelBase = { flexibilidad:0, fuerza:0, resistencia:0, tecnica:0, caida:0, interpretacion:0 };
-      const nivelMerge = { ...nivelBase, ...(data.nivel || {}) };
-      if (JSON.stringify(nivelMerge) !== JSON.stringify(data.nivel || {})) patch.nivel = nivelMerge;
+      // Stats: solo se INICIALIZAN si faltan por completo. Si ya existen (aunque
+      // sea con menos campos), no los tocamos — las reglas admin-only bloquean
+      // que el dueño modifique nivel. cargarPerfil completa los stats faltantes
+      // de forma visual con 0. Las instructoras los actualizan después.
+      if (!data.nivel) patch.nivel = { flexibilidad:0, fuerza:0, resistencia:0, tecnica:0, caida:0, interpretacion:0 };
       if (!data.eventos)  patch.eventos = [];
       if (!data.titulos)  patch.titulos = [];
       if (!data.apodo)    patch.apodo = '';
       if (!data.especialidad) patch.especialidad = '';
-      // RANK: el override por correo manda; si no, default 3. No se escribe
-      // un rank manual existente más alto a la baja (respeta ascensos en DB).
+      if (data.onboardingHecho === undefined) patch.onboardingHecho = false;
+      // RANK: el override por correo (solo Creador) manda en el alta. Los demás
+      // ranks los otorga el Rank 0 desde el panel; respeta ascensos ya en DB.
       const rankCalc = rankDeUsuario(user);
       if (data.rank === undefined) patch.rank = rankCalc;
-      else if (rankCalc < data.rank) patch.rank = rankCalc; // override puede ascender
+      else if (rankCalc < data.rank) patch.rank = rankCalc;
       if (!data.creadoEn) patch.creadoEn = serverTimestamp();
       if (Object.keys(patch).length) {
-        await setDoc(ref, patch, { merge: true });
+        // No bloqueante: si las reglas rechazan algún campo en cuentas antiguas,
+        // el perfil igual se carga (cargarPerfil usa defaults visuales).
+        try { await setDoc(ref, patch, { merge: true }); }
+        catch (e) { console.warn('bootstrap patch parcial:', e.code || e); }
+      }
+      // Documento privado (solo teléfono). El CORREO no se persiste en Firestore:
+      // vive únicamente en Firebase Auth y se usa en runtime (Stripe/Formspree).
+      // Teléfono: lo leen solo el dueño y las instructoras (rank ≤ 1).
+      if (esNuevo) {
+        try {
+          await setDoc(doc(db, "usuarios_priv", user.uid), { telefono: '' }, { merge: true });
+        } catch(e) { console.error('priv:', e); }
       }
       return { ...data, ...patch };
     }
@@ -289,6 +309,20 @@
 
         const eventosEl = document.getElementById('perfil-eventos');
         if (eventosEl) eventosEl.textContent = (d.eventos || []).length;
+
+        // Panel admin: solo Rank 0
+        const adminPanel = document.getElementById('admin-panel');
+        if (adminPanel) adminPanel.style.display = (rank === 0) ? 'block' : 'none';
+
+        // Teléfono propio (desde doc privado). Solo lo ve el dueño aquí.
+        const telEl = document.getElementById('perfil-tel');
+        if (telEl) {
+          try {
+            const priv = await getDoc(doc(db, "usuarios_priv", uid));
+            const tel = priv.exists() ? (priv.data().telefono || '') : '';
+            telEl.textContent = tel ? `📞 ${tel}` : '📞 Sin teléfono — agrégalo';
+          } catch { telEl.textContent = ''; }
+        }
       } catch (e) { console.error('cargarPerfil:', e); }
     }
 
@@ -311,6 +345,23 @@
       } catch (e) { console.error('apodo:', e); alert('No se pudo guardar el apodo.'); }
     };
 
+    // Editar teléfono propio (doc privado)
+    window.abrirEditarTelefono = async () => {
+      if (!usuarioActual) return;
+      let actual = '';
+      try {
+        const priv = await getDoc(doc(db, "usuarios_priv", usuarioActual.uid));
+        actual = priv.exists() ? (priv.data().telefono || '') : '';
+      } catch {}
+      const nuevo = prompt('Tu teléfono (privado, solo lo ven las instructoras):', actual);
+      if (nuevo === null) return;
+      const limpio = nuevo.trim().slice(0, 20);
+      try {
+        await setDoc(doc(db, "usuarios_priv", usuarioActual.uid), { telefono: limpio }, { merge: true });
+        cargarPerfil(usuarioActual.uid);
+      } catch(e) { console.error('tel:', e); alert('No se pudo guardar el teléfono.'); }
+    };
+
     // Candado de Estrellas (créditos) — activo hasta Agosto.
     window.accionEstrellas = () => {
       if (!ESTRELLAS_ACTIVAS) {
@@ -318,6 +369,65 @@
         return;
       }
       // (Futuro) abrir sección/compra de Estrellas
+    };
+
+    // ── ONBOARDING (primera vez tras login) ───────────────
+    function abrirOnboarding(perfil) {
+      const modal = document.getElementById('onboarding-modal');
+      if (!modal) return;
+      const inNombre = document.getElementById('onb-nombre');
+      const inTel    = document.getElementById('onb-tel');
+      const foto     = document.getElementById('onb-foto');
+      if (inNombre) inNombre.value = perfil.nombreVisible || perfil.handle || '';
+      if (inTel)    inTel.value = '';
+      if (foto && (perfil.foto || (usuarioActual && usuarioActual.photoURL)))
+        foto.src = perfil.foto || usuarioActual.photoURL;
+      modal.style.display = 'flex';
+    }
+    window.cerrarOnboarding = async (skip) => {
+      const modal = document.getElementById('onboarding-modal');
+      if (modal) modal.style.display = 'none';
+      // Marcar onboarding hecho aunque lo salte (es editable luego en su perfil)
+      if (usuarioActual) {
+        try { await updateDoc(doc(db, "usuarios", usuarioActual.uid), { onboardingHecho: true }); }
+        catch(e) { console.error('onb done:', e); }
+      }
+    };
+    window.guardarOnboarding = async () => {
+      if (!usuarioActual) return;
+      const nombre = (document.getElementById('onb-nombre').value || '').trim().slice(0, 40);
+      const tel    = (document.getElementById('onb-tel').value || '').trim().slice(0, 20);
+      try {
+        const patch = { onboardingHecho: true };
+        if (nombre) patch.nombreVisible = nombre;
+        await updateDoc(doc(db, "usuarios", usuarioActual.uid), patch);
+        // Teléfono va al doc PRIVADO (oculto para otros usuarios)
+        if (tel) await setDoc(doc(db, "usuarios_priv", usuarioActual.uid), { telefono: tel }, { merge: true });
+        document.getElementById('onboarding-modal').style.display = 'none';
+        cargarPerfil(usuarioActual.uid);
+      } catch(e) { console.error('guardarOnboarding:', e); alert('No se pudo guardar. Intenta de nuevo.'); }
+    };
+
+    // ── PANEL ADMIN (solo Rank 0): otorgar ranks por ID corto ──
+    window.otorgarRank = async () => {
+      if (!usuarioActual) return;
+      const idInput = (document.getElementById('admin-id-input').value || '').trim().toUpperCase();
+      const nuevoRank = parseInt(document.getElementById('admin-rank-select').value, 10);
+      const out = document.getElementById('admin-resultado');
+      if (!idInput) { out.textContent = 'Escribe un ID corto.'; return; }
+      out.textContent = 'Buscando...';
+      try {
+        const q = query(collection(db, "usuarios"), where("userIdCorto", "==", idInput));
+        const snap = await getDocs(q);
+        if (snap.empty) { out.textContent = '❌ No se encontró ningún usuario con ese ID.'; return; }
+        const target = snap.docs[0];
+        await updateDoc(doc(db, "usuarios", target.id), { rank: nuevoRank });
+        out.textContent = `✅ ${target.data().nombreVisible || idInput} ahora es ${RANKS[nuevoRank].nombre}.`;
+        document.getElementById('admin-id-input').value = '';
+      } catch(e) {
+        console.error('otorgarRank:', e);
+        out.textContent = '❌ Error (¿permisos? Revisa que seas Rank 0).';
+      }
     };
 
     // Editar nombre visible
@@ -370,7 +480,10 @@
         videosLock.forEach(l => l.style.display = 'none');
         videoCards.forEach(c => c.style.pointerEvents = 'auto');
         cargarMisReservas(user.uid);
-        bootstrapPerfil(user).then(() => cargarPerfil(user.uid)).catch(e => console.error('perfil:', e));
+        bootstrapPerfil(user).then((perfil) => {
+          cargarPerfil(user.uid);
+          if (!perfil.onboardingHecho) abrirOnboarding(perfil);
+        }).catch(e => console.error('perfil:', e));
       } else {
         if(btnLogin)  btnLogin.style.display  = 'inline-flex';
         if(btnLogout) btnLogout.style.display = 'none';
@@ -402,7 +515,6 @@
         await addDoc(collection(db, "reservas"), {
           uid: usuarioActual.uid,
           nombre,
-          email: usuarioActual.email,
           plan,
           clases,
           estado: "pendiente_pago",
@@ -547,7 +659,6 @@
       try {
         await addDoc(collection(db, "boletos"), {
           uid: window.usuarioActual?.uid || 'anonimo',
-          email: window.usuarioActual?.email || '',
           estado: "pagado",
           fechaPago: serverTimestamp()
         });
@@ -1216,8 +1327,60 @@
       padding:4px 11px; border-radius:14px; }
     .titulo-vacio { font-size:.74rem; color:rgba(255,255,255,.4); }
     .perfil-eventos-line { margin-top:14px; text-align:center; font-size:.78rem; color:rgba(255,255,255,.55); }
+    .perfil-tel { display:block; margin-top:3px; font-size:.72rem; color:rgba(255,255,255,.5); cursor:pointer; }
+    .perfil-tel:hover { color:#ffcc00; }
     @media(max-width:560px){
       .perfil-creditos-box { margin-top:6px; }
+    }
+
+    /* ===== PANEL ADMIN ===== */
+    .admin-panel {
+      max-width:760px; margin:1rem auto 0; padding:18px 20px; border-radius:8px;
+      background:rgba(255,215,0,.06); border:1px solid rgba(255,215,0,.3);
+    }
+    .admin-hint { font-size:.74rem; color:rgba(255,255,255,.55); text-align:center; margin:0 0 12px; }
+    .admin-row { display:flex; gap:8px; flex-wrap:wrap; justify-content:center; }
+    .admin-input {
+      background:rgba(0,0,0,.4); border:1px solid rgba(255,204,0,.3); color:#fff;
+      border-radius:6px; padding:9px 12px; font-size:.85rem;
+    }
+    .admin-input[type=text]{ flex:1; min-width:150px; }
+    .admin-btn {
+      background:linear-gradient(90deg,#ffd700,#ff9d00); color:#111; font-weight:800;
+      border:none; border-radius:6px; padding:9px 18px; cursor:pointer; font-size:.85rem;
+    }
+    .admin-resultado { text-align:center; font-size:.8rem; margin:12px 0 0; color:#ffcc00; min-height:1em; }
+
+    /* ===== ONBOARDING MODAL ===== */
+    .onb-bg {
+      position:fixed; inset:0; z-index:2000; background:rgba(0,0,0,.8);
+      display:flex; align-items:center; justify-content:center; padding:20px;
+    }
+    .onb-card {
+      background:#161616; border:1px solid rgba(255,204,0,.3); border-radius:14px;
+      padding:28px 26px; max-width:380px; width:100%; text-align:center;
+      box-shadow:0 20px 60px rgba(0,0,0,.6);
+    }
+    .onb-title { color:#ffcc00; margin:0 0 4px; font-size:1.3rem; }
+    .onb-sub { color:rgba(255,255,255,.6); font-size:.82rem; margin:0 0 16px; }
+    .onb-foto { width:80px; height:80px; border-radius:50%; object-fit:cover;
+      border:3px solid #ffcc00; margin-bottom:14px; background:#111; }
+    .onb-label { display:block; text-align:left; font-size:.74rem; color:rgba(255,255,255,.7);
+      margin:10px 0 4px; font-weight:600; }
+    .onb-opt { font-weight:400; color:rgba(255,255,255,.4); }
+    .onb-input {
+      width:100%; box-sizing:border-box; background:rgba(0,0,0,.4);
+      border:1px solid rgba(255,204,0,.3); color:#fff; border-radius:8px;
+      padding:11px 13px; font-size:.9rem;
+    }
+    .onb-btns { display:flex; gap:10px; margin-top:20px; }
+    .onb-skip {
+      flex:1; background:transparent; border:1px solid rgba(255,255,255,.25);
+      color:rgba(255,255,255,.7); border-radius:8px; padding:11px; cursor:pointer; font-size:.85rem;
+    }
+    .onb-save {
+      flex:2; background:linear-gradient(90deg,#ffd700,#ff9d00); color:#111; font-weight:800;
+      border:none; border-radius:8px; padding:11px; cursor:pointer; font-size:.9rem;
     }
     .reserva-item {
       background:rgba(20,20,20,.8);
@@ -2028,6 +2191,7 @@
             <button id="perfil-apodo-btn" class="perfil-apodo-btn" onclick="abrirEditarApodo()" style="display:none;">+ apodo</button>
           </div>
           <span class="perfil-id-tag">ID: <span id="perfil-id">—</span></span>
+          <span id="perfil-tel" class="perfil-tel" onclick="abrirEditarTelefono()" title="Solo tú y las instructoras lo ven"></span>
         </div>
         <div class="perfil-creditos-box" onclick="accionEstrellas()" title="Disponible en Agosto">
           <span class="perfil-creditos-candado">🔒</span>
@@ -2045,11 +2209,46 @@
       </div>
     </div>
 
+    <!-- PANEL ADMIN (solo Rank 0 Creador) -->
+    <div id="admin-panel" class="admin-panel" style="display:none;">
+      <h3 class="perfil-sub">⚙️ Panel del Creador — Otorgar Rank</h3>
+      <p class="admin-hint">Pide a la persona su ID corto (lo ve en su perfil) y asígnale un rango.</p>
+      <div class="admin-row">
+        <input id="admin-id-input" class="admin-input" type="text" placeholder="CIRCA-XXXXX" autocomplete="off">
+        <select id="admin-rank-select" class="admin-input">
+          <option value="0">0 · Creador</option>
+          <option value="1">1 · Instructora</option>
+          <option value="2">2 · Asistente</option>
+          <option value="3" selected>3 · Alumno</option>
+          <option value="4">4 · Lector</option>
+        </select>
+        <button class="admin-btn" onclick="otorgarRank()">Otorgar</button>
+      </div>
+      <p id="admin-resultado" class="admin-resultado"></p>
+    </div>
+
     <h3 class="perfil-sub" style="margin-top:1.4rem;">Tus reservas</h3>
     <div id="mis-reservas-lista">
       <p style="opacity:.4;font-size:.8rem;">Cargando tus reservas...</p>
     </div>
   </section>
+
+  <!-- MODAL ONBOARDING (primera vez) -->
+  <div id="onboarding-modal" class="onb-bg" style="display:none;">
+    <div class="onb-card">
+      <h3 class="onb-title">¡Bienvenida/o a Circanícula! ✨</h3>
+      <p class="onb-sub">Personaliza tu perfil. Todo es editable después.</p>
+      <img id="onb-foto" class="onb-foto" src="" alt="Foto">
+      <label class="onb-label">Nombre de usuario</label>
+      <input id="onb-nombre" class="onb-input" type="text" maxlength="40" placeholder="Tu nombre visible">
+      <label class="onb-label">Teléfono <span class="onb-opt">(opcional · privado, solo lo ven las instructoras)</span></label>
+      <input id="onb-tel" class="onb-input" type="tel" maxlength="20" placeholder="Ej. 662 123 4567">
+      <div class="onb-btns">
+        <button class="onb-skip" onclick="cerrarOnboarding(true)">Más tarde</button>
+        <button class="onb-save" onclick="guardarOnboarding()">Guardar</button>
+      </div>
+    </div>
+  </div>
 
   <!-- SEPARADOR VISUAL 4 -->
   <div class="section-divider">
