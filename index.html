@@ -68,6 +68,10 @@
     //      logo), contacto, dominioAlumno, firebase (config del proyecto NUEVO),
     //      stripe (Payment Links de esa academia) y superAdminEmail.
     //   5. Apuntar el dominio del cliente a este sitio + Cloudflare delante.
+    //   6. (Recomendado) App Check: crea un reCAPTCHA v3 (site+secret) para el
+    //      dominio, pega el SECRET en Firebase Console → App Check, y la SITE
+    //      KEY en recaptchaV3SiteKey de este tenant. Activa el enforcement al
+    //      final, tras confirmar que llegan tokens verificados.
     //  NADA de lógica se toca: solo datos.
     // ════════════════════════════════════════════════════════════════════
     const TENANTS = {
@@ -103,6 +107,11 @@
           medio:      "https://buy.stripe.com/28E9AS43X3C06tQ1auao803",
           avanzado:   "https://buy.stripe.com/28EeVceIB3C07xU1auao804"
         },
+        // App Check (anti-bot/abuso): SITE KEY de reCAPTCHA v3 de ESTA academia.
+        // VACÍO = App Check NO se inicializa (no rompe el sitio vivo ni la
+        // validación local). Pega la site key y despliega; activa el enforcement
+        // en la consola SOLO tras confirmar que llegan tokens. (Ver checklist.)
+        recaptchaV3SiteKey: "",
         superAdminEmail: "treseenicos@gmail.com"
       }
       // ──> Para agregar Fressvia u otra academia, añade aquí otra entrada.
@@ -236,6 +245,22 @@
     // ─────────────────────────────────────────────────────
 
     const app      = initializeApp(firebaseConfig);
+    // ── App Check (anti-bot / anti-abuso) ───────────────────────────────
+    // Se inicializa SOLO si el tenant tiene su site key de reCAPTCHA v3.
+    // Gateado a propósito: sin key no se toca nada (sitio vivo seguro + valida
+    // en local sin debug-token). Tras desplegar la key y CONFIRMAR en la consola
+    // de Firebase que llegan tokens → recién ahí activar el "enforcement" por
+    // servicio (Firestore, Auth). Activar enforcement antes rompería el sitio.
+    if (TENANT.recaptchaV3SiteKey) {
+      try {
+        const { initializeAppCheck, ReCaptchaV3Provider } =
+          await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-app-check.js");
+        initializeAppCheck(app, {
+          provider: new ReCaptchaV3Provider(TENANT.recaptchaV3SiteKey),
+          isTokenAutoRefreshEnabled: true
+        });
+      } catch (e) { console.error('AppCheck init:', e); }
+    }
     const auth     = getAuth(app);
     const db       = getFirestore(app);
     const provider = new GoogleAuthProvider();
