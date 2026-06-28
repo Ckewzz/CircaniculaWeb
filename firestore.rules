@@ -1,20 +1,33 @@
 rules_version = '2';
 
 // ════════════════════════════════════════════════════════════════════
-//  REGLAS DE SEGURIDAD — Circanícula (Firestore)
+//  REGLAS DE SEGURIDAD — Circanícula (Firestore) · ESQUEMA DE RANGOS v2
 //  Cómo aplicar:
 //    Firebase Console → proyecto circanicula-267 → Firestore Database →
 //    pestaña "Reglas" → pega TODO esto → "Publicar".
 //
+//  ⚠️  ORDEN DE PUESTA EN MARCHA (evita escalada de privilegios):
+//    1) Despliega el código nuevo (GitHub Pages).
+//    2) Entra como Dueño → panel admin → "Migrar rangos" (recorre nuevo=viejo+1).
+//       Esto corre con las reglas VIEJAS aún publicadas (el Dueño/super-admin
+//       puede reescribir rangos). Es seguro: solo degrada, no escala.
+//    3) Publica ESTAS reglas. Recién entonces los números nuevos cobran su
+//       nuevo significado. (Migrar DESPUÉS de publicar sí escalaría: un viejo
+//       Rank 1 "Instructora" se leería como "Administración".)
+//
+//  ESQUEMA v2 (número = poder; menor = más poder):
+//     0 Dueño · 1 Administración · 2 Instructora · 3 Asistente · 4 Alumno · 5 Viewer
+//
 //  Principios:
-//   • Créditos (Estrellas): NADIE los edita desde el cliente (ni el Creador).
-//     Quedan inmutables hasta que exista un backend/Cloud Function que los
-//     otorgue al comprar o por logros. (= "no editar créditos ni sensible").
-//   • rank: solo el Creador (Rank 0) lo cambia.
-//   • nivel/titulos/eventos (stats RPG): solo Instructoras/Creador (Rank ≤ 1).
+//   • Créditos (Estrellas): NADIE los edita desde el cliente (ni el Dueño).
+//     Inmutables hasta que exista un backend/Cloud Function que los otorgue.
+//   • rank: solo el Dueño (Rank 0 / super-admin) lo cambia.
+//   • imparteClases / colaborador: ETIQUETAS de rol curadas por admin (Rank ≤ 1).
+//     El propio dueño del perfil solo puede inicializarlas en false (anti-autoascenso).
+//   • nivel/títulos/eventos (stats RPG): los otorgan Instructoras/Admin/Dueño (Rank ≤ 2).
 //   • Correo: NO se guarda en Firestore (vive solo en Firebase Auth).
-//   • Teléfono (usuarios_priv): solo el dueño y las instructoras (Rank ≤ 1).
-//   • Pagos/reservas: privados del dueño (las instructoras los ven para agenda).
+//   • Teléfono (usuarios_priv): el dueño y el staff de clase (Rank ≤ 2).
+//   • Pagos/reservas: privados del dueño (el staff de clase los ve para agenda).
 // ════════════════════════════════════════════════════════════════════
 
 service cloud.firestore {
@@ -23,17 +36,20 @@ service cloud.firestore {
     function signedIn() { return request.auth != null; }
     function isOwner(uid) { return signedIn() && request.auth.uid == uid; }
 
+    // Alta por defecto (Alumno). Debe coincidir con RANK_DEFAULT del index.html.
+    function rankDefault() { return 4; }
+
     // ════════════════════════════════════════════════════════════════════
     //  MULTI-TENANT (modelo: UN PROYECTO FIREBASE POR ACADEMIA)
     //  Cada academia tiene su PROPIO proyecto Firebase → su PROPIA base, su
     //  PROPIO Auth y su PROPIA copia de estas reglas. El aislamiento entre
     //  academias es TOTAL por diseño (bases separadas).
     //  ⚠️  AL DAR DE ALTA UNA ACADEMIA NUEVA: cambia el correo de abajo por el
-    //      del super-admin (Rank 0) de ESA academia. Es la ÚNICA línea a tocar.
+    //      del super-admin (Rank 0 / Dueño) de ESA academia. Es la ÚNICA línea a tocar.
     // ════════════════════════════════════════════════════════════════════
     function superAdminEmail() { return 'treseenicos@gmail.com'; } // ← SWAP por tenant
 
-    // El super-admin se identifica por su correo verificado en el token de Auth.
+    // El super-admin (Dueño) se identifica por su correo verificado en el token.
     function isSuperAdmin() {
       return signedIn() && request.auth.token.email == superAdminEmail();
     }
@@ -46,8 +62,11 @@ service cloud.firestore {
               exists(/databases/$(database)/documents/usuarios/$(request.auth.uid)))
              ? rankDoc(request.auth.uid) : 99;
     }
-    function isCreador() { return isSuperAdmin() || myRank() == 0; }
-    function isStaff()   { return isCreador() || myRank() == 1; }
+
+    // ── Jerarquía de poder (esquema v2) ──
+    function isDueno()      { return isSuperAdmin() || myRank() == 0; }            // Rank 0
+    function isAdmin()      { return isDueno()  || myRank() == 1; }                // + Administración
+    function isStaffClase() { return isAdmin()  || myRank() == 2; }               // + Instructoras
 
     // Un campo no cambia, o se está inicializando por primera vez (no existía).
     function unchangedOrNew(field) {
@@ -55,32 +74,57 @@ service cloud.firestore {
              request.resource.data[field] == resource.data[field];
     }
 
+    // Flag de rol (imparteClases/colaborador): SOLO lo cura un admin. El propio
+    // dueño del perfil puede dejarlo igual o inicializarlo en false, pero NUNCA
+    // ponérselo en true por su cuenta (anti-autoascenso a docente/colaborador).
+    function selfFlagOk(field) {
+      return !(field in request.resource.data)
+             || ( (field in resource.data)
+                    ? request.resource.data[field] == resource.data[field]
+                    : request.resource.data[field] == false );
+    }
+
     // ── PERFIL PÚBLICO ────────────────────────────────────────────────
     match /usuarios/{uid} {
       // Cualquier usuario autenticado puede leer perfiles públicos
-      // (necesario para el futuro directorio de instructoras).
+      // (necesario para el directorio "Buscar Perfil" y la semblanza de misses).
       allow read: if signedIn();
 
-      // Crear el propio perfil. Nadie se autoasigna privilegios:
-      // créditos en 0 y rank = 3 (salvo el super-admin, que nace Rank 0).
+      // Crear el propio perfil. Nadie se autoasigna privilegios: créditos en 0,
+      // rank = Alumno (4) salvo el super-admin (que nace Dueño, Rank 0), y los
+      // flags de rol nacen en false (no autoascenso a docente/colaborador).
       allow create: if isOwner(uid)
         && request.resource.data.creditos == 0
-        && (isSuperAdmin() || request.resource.data.rank == 3);
+        && (isSuperAdmin() || request.resource.data.rank == rankDefault())
+        && (!('imparteClases' in request.resource.data) || request.resource.data.imparteClases == false)
+        && (!('colaborador'   in request.resource.data) || request.resource.data.colaborador   == false);
 
-      // CREADOR: puede actualizar cualquier perfil (incluido rank),
-      // pero NUNCA los créditos.
-      allow update: if isCreador()
+      // DUEÑO (Rank 0 / super-admin): edita cualquier perfil —incluido rank y los
+      // flags de rol— pero NUNCA los créditos (solo backend/Cloud Function).
+      allow update: if isDueno()
         && request.resource.data.creditos == resource.data.creditos;
 
-      // STAFF (instructoras, Rank 1): otorgan stats/títulos/eventos.
-      // No tocan rank ni créditos.
-      allow update: if isStaff()
+      // ADMINISTRACIÓN (Rank 1): gestiona perfiles (stats, títulos, eventos, flags
+      // de rol, apodo, semblanza…), pero NO toca rank ni créditos.
+      allow update: if isAdmin()
         && request.resource.data.rank == resource.data.rank
         && request.resource.data.creditos == resource.data.creditos;
 
-      // DUEÑO: solo campos cosméticos. No rank, créditos, nivel, títulos,
-      // eventos ni IDs (estos solo se inicializan una vez si faltaban).
-      // El apodo solo se permite a Rank ≤ 2 (Instructoras/Asistentes).
+      // INSTRUCTORAS (Rank 2): otorgan stats RPG (nivel/títulos/eventos) y nada
+      // más. No tocan rank, créditos, flags de rol ni IDs.
+      allow update: if isStaffClase()
+        && request.resource.data.rank == resource.data.rank
+        && request.resource.data.creditos == resource.data.creditos
+        && unchangedOrNew('imparteClases')
+        && unchangedOrNew('colaborador')
+        && unchangedOrNew('userIdCorto')
+        && unchangedOrNew('handle');
+
+      // DUEÑO DEL PERFIL (cualquier rank): solo lo suyo y solo lo cosmético
+      // (nombreVisible, foto, especialidad, semblanza, colab, visibilidad…).
+      // No rank, ni créditos, ni stats (nivel/títulos/eventos), ni IDs. Los flags
+      // de rol solo puede inicializarlos en false. El apodo solo lo cambia el
+      // staff (Rank ≤ 3: Dueño/Administración/Instructoras/Asistentes).
       allow update: if isOwner(uid)
         && request.resource.data.rank == resource.data.rank
         && request.resource.data.creditos == resource.data.creditos
@@ -89,19 +133,21 @@ service cloud.firestore {
         && unchangedOrNew('eventos')
         && unchangedOrNew('userIdCorto')
         && unchangedOrNew('handle')
-        && (request.resource.data.apodo == resource.data.apodo || myRank() <= 2);
+        && selfFlagOk('imparteClases')
+        && selfFlagOk('colaborador')
+        && (request.resource.data.apodo == resource.data.apodo || myRank() <= 3);
 
       allow delete: if false;
     }
 
     // ── DATOS PRIVADOS (teléfono) ─────────────────────────────────────
-    // Lo leen y escriben solo el dueño y las instructoras (Rank ≤ 1).
+    // Lo leen y escriben el dueño y el staff de clase (Rank ≤ 2).
     match /usuarios_priv/{uid} {
-      allow read, write: if isOwner(uid) || isStaff();
+      allow read, write: if isOwner(uid) || isStaffClase();
     }
 
     // ── CORREO DE RECUPERACIÓN (ultra-privado) ────────────────────────
-    // Solo el DUEÑO lo lee/escribe. Ni las instructoras lo ven. El backend
+    // Solo el DUEÑO del perfil lo lee/escribe. Ni el staff lo ve. El backend
     // (Cloud Function con admin SDK) lo leerá para enviar el link de reseteo
     // sin exponerlo nunca al cliente.
     match /usuarios_recuperacion/{uid} {
@@ -110,11 +156,11 @@ service cloud.firestore {
 
     // ── RESERVAS DE CLASES ────────────────────────────────────────────
     match /reservas/{id} {
-      allow read:   if signedIn() && (resource.data.uid == request.auth.uid || isStaff());
+      allow read:   if signedIn() && (resource.data.uid == request.auth.uid || isStaffClase());
       allow create: if isOwner(request.resource.data.uid);
-      // El dueño puede marcar su reserva como activa tras el pago; staff gestiona.
-      allow update: if signedIn() && (resource.data.uid == request.auth.uid || isStaff());
-      allow delete: if isStaff();
+      // El dueño puede marcar su reserva como activa tras el pago; el staff gestiona.
+      allow update: if signedIn() && (resource.data.uid == request.auth.uid || isStaffClase());
+      allow delete: if isStaffClase();
     }
 
     // ── BOLETOS DE EVENTO (contador) ──────────────────────────────────
@@ -122,7 +168,7 @@ service cloud.firestore {
       allow read:   if signedIn();
       allow create: if signedIn();
       allow update: if signedIn();
-      allow delete: if isStaff();
+      allow delete: if isStaffClase();
     }
 
     // Todo lo demás: denegado.
