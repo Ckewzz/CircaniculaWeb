@@ -68,6 +68,18 @@ service cloud.firestore {
     function isAdmin()      { return isDueno()  || myRank() == 1; }                // + Administración
     function isStaffClase() { return isAdmin()  || myRank() == 2; }               // + Instructoras
 
+    // ¿Puedo editar el CALENDARIO de cierta persona (uid) con rank targetRank?
+    //   • El Dueño (Rank 0) puede con cualquiera.
+    //   • Cualquier staff (Rank ≤ 3) puede con SU PROPIO calendario.
+    //   • Un staff con MÁS poder (número menor) puede con un subordinado de
+    //     MENOS poder, siempre que ambos sean staff (≤ 3). Así: 0→1,2,3 ·
+    //     1→2,3 · 2→3 · 3→solo el suyo. Nunca a un par ni a un superior.
+    function puedeEditarCalendario(targetUid, targetRank) {
+      return isDueno()
+        || (myRank() <= 3 && targetUid == request.auth.uid)
+        || (isStaffClase() && myRank() < targetRank && targetRank <= 3);
+    }
+
     // Un campo no cambia, o se está inicializando por primera vez (no existía).
     function unchangedOrNew(field) {
       return !(field in resource.data) ||
@@ -169,6 +181,36 @@ service cloud.firestore {
       allow create: if signedIn();
       allow update: if signedIn();
       allow delete: if isStaffClase();
+    }
+
+    // ── CALENDARIO DE HORARIOS DEL STAFF (Fase B) ─────────────────────
+    //  Cada miembro del staff (Rank ≤ 3) publica sus horas de clase /
+    //  disponibilidad. La JERARQUÍA de edición vive en puedeEditarCalendario().
+    //  INMUTABILIDAD: una hora, una vez creada ("establecida"), NO se modifica
+    //  en sitio (allow update:false). Para "cambiarla" se CANCELA (delete) y se
+    //  vuelve a crear — así nadie reescribe un compromiso ya publicado.
+    match /horarios/{id} {
+      // La leen todas las personas autenticadas (los alumnos verán las clases
+      // cuando llegue la fase de reservas).
+      allow read: if signedIn();
+
+      // Crear: el editor debe poder editar el calendario del uid objetivo, el
+      // sello creadoPor debe ser él mismo, y el rank guardado debe COINCIDIR con
+      // el rank real del objetivo (evita falsearlo para saltarse la jerarquía).
+      allow create: if signedIn()
+        && request.resource.data.creadoPor == request.auth.uid
+        && request.resource.data.uid is string
+        && request.resource.data.rank == rankDoc(request.resource.data.uid)
+        && puedeEditarCalendario(request.resource.data.uid, request.resource.data.rank);
+
+      // Inmutable: una hora establecida NO se modifica.
+      allow update: if false;
+
+      // Cancelar (borrar): el dueño de la hora, un rank de más poder, o el Dueño.
+      allow delete: if signedIn()
+        && ( resource.data.uid == request.auth.uid
+             || isDueno()
+             || (isStaffClase() && myRank() < resource.data.rank) );
     }
 
     // Todo lo demás: denegado.

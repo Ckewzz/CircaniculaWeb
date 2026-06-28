@@ -50,7 +50,7 @@
     import { getAuth, signInWithPopup, signOut, onAuthStateChanged, GoogleAuthProvider,
              createUserWithEmailAndPassword, signInWithEmailAndPassword, updateProfile }
       from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
-    import { getFirestore, doc, getDoc, setDoc, collection, addDoc, query, where, getDocs, updateDoc, serverTimestamp }
+    import { getFirestore, doc, getDoc, setDoc, collection, addDoc, query, where, getDocs, updateDoc, deleteDoc, serverTimestamp }
       from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
     // ════════════════════════════════════════════════════════════════════
@@ -572,6 +572,8 @@
         if (!snap.exists()) return;
         const d = snap.data();
         const rank = d.rank ?? RANK_DEFAULT;
+        window._miRank = rank;            // rank propio (lo usa el calendario)
+        if (window.calRefrescarControles) calRefrescarControles();
         const rk = RANKS[rank] || RANKS[RANK_DEFAULT];
         const set = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
 
@@ -1051,6 +1053,212 @@
       } catch(e) { console.error('cargarColaboradores:', e); }
     };
 
+    // ════════════════════════════════════════════════════════════════
+    //  CALENDARIO DE HORARIOS DEL STAFF (Fase B)
+    //  • Vista semanal navegable (Lun–Dom).
+    //  • Jerarquía: cada quien edita SU calendario; un rank de más poder
+    //    (número menor) edita a sus subordinados. Dueño edita todo.
+    //  • INMUTABLE: una hora establecida no se modifica; solo se cancela.
+    //  • Alcance: "solo esta semana" (semanal) o "todo el mes" (mensual).
+    //  Las REGLAS de Firestore (match /horarios) son la verdad; esto es UX.
+    // ════════════════════════════════════════════════════════════════
+    let _calAncla = null;        // Date = lunes de la semana mostrada
+    let _calStaff = [];          // [{uid,rank,nombre}] (rank<=3)
+    let _calHorarios = [];       // docs cargados (con .id)
+    let _calFiltroUid = 'todos';
+    const MES_CORTO = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+    const DIAS_LARGO = ['Lunes','Martes','Miércoles','Jueves','Viernes','Sábado','Domingo'];
+
+    function calLunes(d){ const x=new Date(d); const g=x.getDay(); x.setDate(x.getDate()+(g===0?-6:1-g)); x.setHours(0,0,0,0); return x; }
+    function calAddDays(d,n){ const x=new Date(d); x.setDate(x.getDate()+n); x.setHours(0,0,0,0); return x; }
+    function calFechaISO(d){ return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
+    function calMes(d){ return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; }
+
+    // Espejo (best-effort) de puedeEditarCalendario() de las reglas.
+    function calPuedoEditar(targetRank, targetUid){
+      const r = window._miRank ?? RANK_DEFAULT;
+      if (esDueno(r)) return true;
+      if (targetUid === (usuarioActual && usuarioActual.uid)) return r <= 3;
+      return esStaffClase(r) && r < targetRank && targetRank <= 3;
+    }
+    function calPuedoCancelar(s){
+      const r = window._miRank ?? RANK_DEFAULT;
+      if (s.uid === (usuarioActual && usuarioActual.uid)) return true;
+      if (esDueno(r)) return true;
+      return esStaffClase(r) && r < s.rank;
+    }
+
+    function renderBloque(s){
+      const rk = RANKS[s.rank] || RANKS[RANK_DEFAULT];
+      const nombre = escapeHtml(s.nombre || 'Staff');
+      const nota = s.nota ? `<div class="cal-bloque-nota">${escapeHtml(s.nota)}</div>` : '';
+      const tag = s.recurrencia === 'mensual' ? '📅 mes' : '⟳ semana';
+      const tipoIcon = s.tipo === 'clase' ? '🎪' : '🕒';
+      const x = calPuedoCancelar(s)
+        ? `<button class="cal-x" title="Cancelar esta hora" onclick="cancelarHorario('${escapeHtml(s.id)}')">✕</button>` : '';
+      return `<div class="cal-bloque">
+        <div class="cal-bloque-top"><span class="cal-bloque-hora">${escapeHtml(s.inicio)}–${escapeHtml(s.fin)}</span>${x}</div>
+        <div class="cal-bloque-nombre">${tipoIcon} ${nombre}</div>
+        ${nota}
+        <div class="cal-bloque-tag"><span class="rol-tag ${rk.clase}">${escapeHtml(rk.nombre)}</span><span class="cal-rec">${tag}</span></div>
+      </div>`;
+    }
+
+    function renderCalendario(){
+      const grid = document.getElementById('cal-grid');
+      if (!grid) return;
+      if (!_calAncla) _calAncla = calLunes(new Date());
+      const L = _calAncla;
+      const fechas = [...Array(7)].map((_,i)=> calAddDays(L,i));
+      const fin = fechas[6];
+      const rango = document.getElementById('cal-rango');
+      if (rango) rango.textContent = `${L.getDate()} ${MES_CORTO[L.getMonth()]} – ${fin.getDate()} ${MES_CORTO[fin.getMonth()]} ${fin.getFullYear()}`;
+      const cols = [[],[],[],[],[],[],[]];
+      _calHorarios.forEach(s=>{
+        if (_calFiltroUid !== 'todos' && s.uid !== _calFiltroUid) return;
+        const idx = s.diaIdx;
+        if (idx == null || idx < 0 || idx > 6) return;
+        const date = fechas[idx];
+        const vis = (s.recurrencia === 'semanal') ? (s.fecha === calFechaISO(date))
+                  : (s.recurrencia === 'mensual') ? (s.mes === calMes(date))
+                  : false;
+        if (vis) cols[idx].push(s);
+      });
+      cols.forEach(c => c.sort((a,b)=> String(a.inicio||'').localeCompare(String(b.inicio||''))));
+      const hoyISO = calFechaISO(new Date());
+      grid.innerHTML = fechas.map((date,i)=>{
+        const esHoy = calFechaISO(date) === hoyISO;
+        const head = `<div class="cal-colhead ${esHoy?'cal-colhead-hoy':''}">${DIAS_LARGO[i].slice(0,3)}<span>${date.getDate()}/${date.getMonth()+1}</span></div>`;
+        const body = cols[i].length ? cols[i].map(renderBloque).join('') : `<div class="cal-vacio-dia">—</div>`;
+        return `<div class="cal-col">${head}${body}</div>`;
+      }).join('');
+    }
+
+    window.calSemana = (delta) => { _calAncla = calAddDays(_calAncla || calLunes(new Date()), delta*7); renderCalendario(); };
+    window.calHoy = () => { _calAncla = calLunes(new Date()); renderCalendario(); };
+    window.calFiltrar = (uid) => { _calFiltroUid = uid || 'todos'; renderCalendario(); };
+
+    window.calRefrescarControles = () => {
+      const r = window._miRank ?? RANK_DEFAULT;
+      const btn = document.getElementById('cal-agregar');
+      if (btn) btn.style.display = (r <= 3) ? 'inline-block' : 'none';
+    };
+
+    window.calCargarStaff = async () => {
+      if (!usuarioActual) return;
+      try {
+        const snap = await getDocs(collection(db, "usuarios"));
+        const staff = [];
+        snap.forEach(s=>{
+          const d = s.data();
+          const rank = d.rank ?? RANK_DEFAULT;
+          if (s.id === usuarioActual.uid && window._miRank == null) window._miRank = rank;
+          if (rank <= 3) staff.push({ uid:s.id, rank, nombre: d.nombreVisible || d.handle || 'Staff' });
+        });
+        staff.sort((a,b)=> a.rank - b.rank || a.nombre.localeCompare(b.nombre));
+        _calStaff = staff;
+        const filtro = document.getElementById('cal-filtro');
+        if (filtro){
+          const val = filtro.value || 'todos';
+          filtro.innerHTML = `<option value="todos">Todo el equipo</option>` +
+            staff.map(p=>`<option value="${escapeHtml(p.uid)}">${escapeHtml(p.nombre)} · ${escapeHtml((RANKS[p.rank]||{}).nombre||'')}</option>`).join('');
+          filtro.value = val;
+        }
+        calRefrescarControles();
+      } catch(e){ console.error('calCargarStaff:', e); }
+    };
+
+    window.calCargarHorarios = async () => {
+      if (!usuarioActual){ _calHorarios = []; renderCalendario(); return; }
+      try {
+        const snap = await getDocs(collection(db, "horarios"));
+        _calHorarios = snap.docs.map(s=>({ id:s.id, ...s.data() }));
+      } catch(e){ console.error('calCargarHorarios:', e); _calHorarios = []; }
+      renderCalendario();
+    };
+
+    window.calIniciar = () => {
+      _calAncla = calLunes(new Date());
+      calCargarStaff();
+      calCargarHorarios();
+    };
+
+    window.abrirAgregarHorario = () => {
+      if (!usuarioActual) return;
+      const r = window._miRank ?? RANK_DEFAULT;
+      if (r > 3){ alert('Solo el staff (instructoras/asistentes/admin) puede agendar horarios.'); return; }
+      const sel = document.getElementById('hm-uid');
+      let opts = _calStaff.filter(p=> calPuedoEditar(p.rank, p.uid));
+      if (!opts.some(o=>o.uid===usuarioActual.uid)) opts = [{ uid:usuarioActual.uid, rank:r, nombre:'Yo' }, ...opts];
+      sel.innerHTML = opts.map(o=>{
+        const yo = o.uid===usuarioActual.uid ? ' (yo)' : '';
+        return `<option value="${escapeHtml(o.uid)}" data-rank="${o.rank}">${escapeHtml(o.nombre)} · ${escapeHtml((RANKS[o.rank]||{}).nombre||'')}${yo}</option>`;
+      }).join('');
+      const L=_calAncla||calLunes(new Date()), fin=calAddDays(L,6);
+      const lbl=document.getElementById('hm-semana');
+      if (lbl) lbl.textContent = `Agendando en la semana del ${L.getDate()} ${MES_CORTO[L.getMonth()]} al ${fin.getDate()} ${MES_CORTO[fin.getMonth()]}`;
+      ['hm-inicio','hm-fin','hm-nota'].forEach(id=>{ const e=document.getElementById(id); if(e) e.value=''; });
+      document.getElementById('hm-dia').value='0';
+      document.getElementById('hm-tipo').value='clase';
+      document.getElementById('hm-rec').value='semanal';
+      document.getElementById('horario-modal').style.display='flex';
+    };
+    window.cerrarHorarioModal = () => { const m=document.getElementById('horario-modal'); if(m) m.style.display='none'; };
+
+    window.guardarHorario = async () => {
+      if (!usuarioActual) return;
+      const sel = document.getElementById('hm-uid');
+      const uid = sel.value;
+      const opt = sel.selectedOptions[0];
+      const targetRank = opt ? Number(opt.dataset.rank) : RANK_DEFAULT;
+      const diaIdx = Number(document.getElementById('hm-dia').value);
+      const inicio = document.getElementById('hm-inicio').value;
+      const fin    = document.getElementById('hm-fin').value;
+      const tipo   = document.getElementById('hm-tipo').value;
+      const nota   = document.getElementById('hm-nota').value.trim().slice(0,60);
+      const rec    = document.getElementById('hm-rec').value;
+      if (!uid){ alert('Elige para quién es el horario.'); return; }
+      if (!inicio || !fin){ alert('Pon hora de inicio y de fin.'); return; }
+      if (fin <= inicio){ alert('La hora de fin debe ser posterior a la de inicio.'); return; }
+      if (!calPuedoEditar(targetRank, uid)){ alert('No tienes permiso para editar ese calendario.'); return; }
+      const fechaDate = calAddDays(_calAncla || calLunes(new Date()), diaIdx);
+      const fecha = calFechaISO(fechaDate);
+      const mes = calMes(fechaDate);
+      const persona = _calStaff.find(p=>p.uid===uid);
+      const nombre = (uid===usuarioActual.uid)
+        ? (document.getElementById('perfil-nombre')?.textContent || usuarioActual.displayName || 'Staff')
+        : (persona ? persona.nombre : 'Staff');
+      const alcance = rec==='mensual' ? 'TODO el mes' : 'SOLO esta semana';
+      if (!confirm(`Guardar ${inicio}–${fin}, ${DIAS_LARGO[diaIdx].toLowerCase()} (${alcance}).\n\n⚠️ IMPORTANTE: una vez guardada, esta hora NO se puede modificar. Solo podrás CANCELARLA.\n\n¿Confirmar?`)) return;
+      try {
+        await addDoc(collection(db, "horarios"), {
+          uid, rank: targetRank, nombre,
+          diaIdx, inicio, fin, tipo, nota,
+          recurrencia: rec, fecha, mes,
+          creadoPor: usuarioActual.uid,
+          creadoPorRank: (window._miRank ?? RANK_DEFAULT),
+          createdAt: serverTimestamp(), esquema: 1
+        });
+        cerrarHorarioModal();
+        await calCargarHorarios();
+      } catch(e){
+        console.error('guardarHorario:', e);
+        alert('No se pudo guardar (revisa permisos o conexión).');
+      }
+    };
+
+    window.cancelarHorario = async (id) => {
+      if (!id) return;
+      if (!confirm('¿Cancelar esta hora? No se puede deshacer; si la necesitas, tendrás que volver a crearla.')) return;
+      try {
+        await deleteDoc(doc(db, "horarios", id));
+        await calCargarHorarios();
+      } catch(e){
+        console.error('cancelarHorario:', e);
+        alert('No se pudo cancelar (¿permisos?).');
+      }
+    };
+
     // Editar nombre visible
     window.abrirEditarNombre = () => {
       const actual = document.getElementById('perfil-nombre').textContent;
@@ -1108,6 +1316,10 @@
         if(colabSec)  colabSec.style.display  = 'block';
         if (window.buscarPerfiles)     buscarPerfiles();
         if (window.cargarColaboradores) cargarColaboradores();
+        // Calendario de horarios del staff (visible y cargado al entrar)
+        const calSec = document.getElementById('calendario');
+        if(calSec) calSec.style.display = 'block';
+        if (window.calIniciar) calIniciar();
         // Desbloquear videos
         videosLock.forEach(l => l.style.display = 'none');
         videoCards.forEach(c => c.style.pointerEvents = 'auto');
@@ -1126,6 +1338,9 @@
         if(comunidad) comunidad.style.display = 'none';
         if(colabSec)  colabSec.style.display  = 'none';
         _dirCache = [];
+        const calSec = document.getElementById('calendario');
+        if(calSec) calSec.style.display = 'none';
+        _calHorarios = []; _calStaff = []; window._miRank = null;
         // Bloquear videos
         videosLock.forEach(l => l.style.display = 'flex');
         videoCards.forEach(c => c.style.pointerEvents = 'none');
@@ -2035,6 +2250,43 @@
       color:#fff; font-weight:700; font-size:.78rem; padding:7px 16px; border-radius:20px; text-decoration:none; }
     .dir-vacio { text-align:center; color:rgba(255,255,255,.5); font-size:.85rem; margin-top:18px; }
     .comunidad-links { display:flex; gap:12px; justify-content:center; flex-wrap:wrap; margin:1.4rem auto 0; }
+
+    /* ===== CALENDARIO DE HORARIOS ===== */
+    .cal-toolbar { display:flex; flex-wrap:wrap; gap:12px; align-items:center; justify-content:center; max-width:1100px; margin:0 auto 18px; }
+    .cal-nav { display:flex; gap:6px; align-items:center; }
+    .cal-navbtn { background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.18); color:#fff;
+      width:34px; height:34px; border-radius:8px; font-size:1.2rem; cursor:pointer; line-height:1; }
+    .cal-hoy { background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.18); color:rgba(255,255,255,.85);
+      border-radius:8px; padding:0 14px; height:34px; cursor:pointer; font-size:.8rem; }
+    .cal-rango { font-weight:700; color:var(--amarillo); font-size:.9rem; min-width:170px; text-align:center; }
+    .cal-select { background:rgba(0,0,0,.4); border:1px solid rgba(255,204,0,.3); color:#fff; border-radius:8px;
+      padding:7px 10px; font-size:.8rem; max-width:220px; }
+    .cal-add { background:linear-gradient(90deg,#ffd700,#ff9d00); color:#111; font-weight:800; border:none;
+      border-radius:8px; padding:9px 16px; cursor:pointer; font-size:.82rem; }
+    .cal-grid { display:grid; grid-template-columns:repeat(7,minmax(132px,1fr)); gap:8px; max-width:1100px;
+      margin:0 auto; overflow-x:auto; padding-bottom:6px; }
+    .cal-col { background:rgba(255,255,255,.03); border:1px solid rgba(255,255,255,.08); border-radius:10px;
+      padding:8px; min-height:120px; }
+    .cal-colhead { text-align:center; font-weight:700; color:rgba(255,255,255,.85); font-size:.78rem;
+      padding-bottom:8px; border-bottom:1px solid rgba(255,255,255,.1); margin-bottom:8px; }
+    .cal-colhead span { display:block; font-weight:400; color:rgba(255,255,255,.45); font-size:.7rem; }
+    .cal-colhead-hoy { color:var(--amarillo); }
+    .cal-colhead-hoy span { color:var(--amarillo); opacity:.8; }
+    .cal-vacio-dia { text-align:center; color:rgba(255,255,255,.2); font-size:.85rem; padding:10px 0; }
+    .cal-bloque { background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.12); border-radius:8px;
+      padding:8px; margin-bottom:8px; }
+    .cal-bloque-top { display:flex; justify-content:space-between; align-items:center; gap:6px; }
+    .cal-bloque-hora { font-weight:800; color:#fff; font-size:.82rem; }
+    .cal-x { background:transparent; border:none; color:#ff8080; cursor:pointer; font-size:.85rem; line-height:1;
+      padding:2px 5px; border-radius:5px; }
+    .cal-x:hover { background:rgba(255,80,80,.15); }
+    .cal-bloque-nombre { color:rgba(255,255,255,.9); font-size:.8rem; margin:4px 0 2px; }
+    .cal-bloque-nota { color:rgba(255,255,255,.6); font-size:.72rem; line-height:1.3; margin-bottom:4px; }
+    .cal-bloque-tag { display:flex; flex-wrap:wrap; gap:5px; align-items:center; margin-top:4px; }
+    .cal-rec { font-size:.66rem; color:rgba(255,255,255,.5); }
+    .cal-pie { text-align:center; color:rgba(255,255,255,.4); font-size:.75rem; margin-top:14px; }
+    .hm-warn { background:rgba(255,180,0,.12); border:1px solid rgba(255,180,0,.3); border-radius:8px;
+      color:#ffd98a; font-size:.74rem; line-height:1.5; padding:9px 11px; margin:14px 0 0; text-align:left; }
 
     @media(max-width:560px){
       .perfil-creditos-box { margin-top:6px; }
@@ -3025,6 +3277,7 @@
     <div class="comunidad-links">
       <a href="#comunidad" class="btn-secundario">🔎 Buscar Perfil</a>
       <a href="#colaboradores" class="btn-secundario">🤝 Colaboradores</a>
+      <a href="#calendario" class="btn-secundario">📅 Calendario</a>
     </div>
 
     <h3 class="perfil-sub" style="margin-top:1.4rem;">Tus reservas</h3>
@@ -3103,6 +3356,54 @@
   </div>
 
 
+  <!-- MODAL: AGREGAR HORARIO -->
+  <div id="horario-modal" class="onb-bg" style="display:none;">
+    <div class="onb-card">
+      <h3 class="onb-title">Agendar horario</h3>
+      <p class="onb-sub" id="hm-semana">Semana…</p>
+      <label class="onb-label">¿Para quién?</label>
+      <select id="hm-uid" class="onb-input"></select>
+      <label class="onb-label">Día</label>
+      <select id="hm-dia" class="onb-input">
+        <option value="0">Lunes</option>
+        <option value="1">Martes</option>
+        <option value="2">Miércoles</option>
+        <option value="3">Jueves</option>
+        <option value="4">Viernes</option>
+        <option value="5">Sábado</option>
+        <option value="6">Domingo</option>
+      </select>
+      <div style="display:flex; gap:10px;">
+        <div style="flex:1;">
+          <label class="onb-label">Inicio</label>
+          <input id="hm-inicio" class="onb-input" type="time">
+        </div>
+        <div style="flex:1;">
+          <label class="onb-label">Fin</label>
+          <input id="hm-fin" class="onb-input" type="time">
+        </div>
+      </div>
+      <label class="onb-label">Tipo</label>
+      <select id="hm-tipo" class="onb-input">
+        <option value="clase">🎪 Clase</option>
+        <option value="disponible">🕒 Disponible</option>
+      </select>
+      <label class="onb-label">Nota <span class="onb-opt">(opcional)</span></label>
+      <input id="hm-nota" class="onb-input" type="text" maxlength="60" placeholder="Ej. Telas intermedio">
+      <label class="onb-label">¿Cada cuándo?</label>
+      <select id="hm-rec" class="onb-input">
+        <option value="semanal">Solo esta semana</option>
+        <option value="mensual">Todo el mes (cada semana del mes)</option>
+      </select>
+      <p class="hm-warn">⚠️ Una vez guardada, esta hora <strong>NO se puede modificar</strong>. Solo se podrá cancelar.</p>
+      <div class="onb-btns">
+        <button class="onb-skip" onclick="cerrarHorarioModal()">Cancelar</button>
+        <button class="onb-save" onclick="guardarHorario()">Guardar</button>
+      </div>
+    </div>
+  </div>
+
+
   <!-- COMUNIDAD / BUSCAR PERFIL (solo logueadas) -->
   <section id="comunidad" class="seccion" style="display:none;" data-nav-skip="true">
     <div class="seccion-header">
@@ -3134,6 +3435,30 @@
     </div>
     <div id="colab-grid" class="dir-grid"></div>
     <p id="colab-vacio" class="dir-vacio">Aún no hay colaboradores publicados.</p>
+  </section>
+
+  <!-- CALENDARIO DE HORARIOS (staff publica; todas ven) -->
+  <section id="calendario" class="seccion" style="display:none;" data-nav-skip="true">
+    <div class="seccion-header">
+      <span class="seccion-eyebrow">Agenda del equipo</span>
+      <h2 class="seccion-titulo">Calendario de horarios</h2>
+      <div class="titulo-linea"></div>
+      <p class="seccion-desc">Las instructoras y el staff publican aquí sus horas de clase y disponibilidad. Una vez establecidas, las horas <strong>no se modifican</strong>: solo se cancelan.</p>
+    </div>
+    <div class="cal-toolbar">
+      <div class="cal-nav">
+        <button class="cal-navbtn" onclick="calSemana(-1)" title="Semana anterior">‹</button>
+        <button class="cal-hoy" onclick="calHoy()">Hoy</button>
+        <button class="cal-navbtn" onclick="calSemana(1)" title="Semana siguiente">›</button>
+      </div>
+      <span id="cal-rango" class="cal-rango"></span>
+      <select id="cal-filtro" class="cal-select" onchange="calFiltrar(this.value)">
+        <option value="todos">Todo el equipo</option>
+      </select>
+      <button id="cal-agregar" class="cal-add" style="display:none;" onclick="abrirAgregarHorario()">+ Agregar horario</button>
+    </div>
+    <div id="cal-grid" class="cal-grid"></div>
+    <p class="cal-pie">Tip: navega a la semana que quieras y agrega tu horario ahí. Elige “solo esta semana” o “todo el mes”.</p>
   </section>
 
   <!-- VIDEOS — oculto hasta tener contenido real -->
