@@ -167,11 +167,39 @@ service cloud.firestore {
     }
 
     // ── RESERVAS DE CLASES ────────────────────────────────────────────
+    //  Estados: pendiente_pago → pago_reportado (el alumno DECLARA que pagó al
+    //  volver de Stripe) → activa (la CONFIRMA el staff o el webhook, NUNCA el
+    //  propio alumno) · cancelada.
+    //  ⚠️ SEGURIDAD (P0): el dueño de la reserva NO puede ponerla en 'activa' por
+    //  su cuenta — eso sería autoactivarse sin pagar. 'activa' es exclusivo del
+    //  staff (Rank ≤ 2) o del backend (webhook de Stripe vía Admin SDK). El
+    //  navegador es del usuario: estas reglas son la ÚNICA frontera real.
     match /reservas/{id} {
-      allow read:   if signedIn() && (resource.data.uid == request.auth.uid || isStaffClase());
-      allow create: if isOwner(request.resource.data.uid);
-      // El dueño puede marcar su reserva como activa tras el pago; el staff gestiona.
-      allow update: if signedIn() && (resource.data.uid == request.auth.uid || isStaffClase());
+      allow read: if signedIn() && (resource.data.uid == request.auth.uid || isStaffClase());
+
+      // Crear: SOLO a nombre propio, SOLO como 'pendiente_pago' y SIN marcas de
+      // pago. Cierra el hueco de "crear la reserva ya activa".
+      allow create: if isOwner(request.resource.data.uid)
+        && request.resource.data.estado == 'pendiente_pago'
+        && !('fechaPago' in request.resource.data);
+
+      // STAFF (Rank ≤ 2): confirma el pago (→ 'activa'), cancela o gestiona.
+      // No puede reasignar la reserva a otro uid ni alterar plan/clases.
+      allow update: if isStaffClase()
+        && request.resource.data.uid == resource.data.uid
+        && request.resource.data.plan == resource.data.plan
+        && request.resource.data.clases == resource.data.clases;
+
+      // DUEÑO de la reserva: SOLO puede reportar su pago ('pago_reportado') o
+      // cancelar la SUYA. NUNCA 'activa'. No toca uid/plan/clases y no puede
+      // alterar una reserva que ya esté 'activa'.
+      allow update: if isOwner(resource.data.uid)
+        && resource.data.estado != 'activa'
+        && request.resource.data.estado in ['pago_reportado', 'cancelada']
+        && request.resource.data.uid == resource.data.uid
+        && request.resource.data.plan == resource.data.plan
+        && request.resource.data.clases == resource.data.clases;
+
       allow delete: if isStaffClase();
     }
 

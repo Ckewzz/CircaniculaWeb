@@ -686,6 +686,15 @@
         const adminPanel = document.getElementById('admin-panel');
         if (adminPanel) adminPanel.style.display = esDueno(rank) ? 'block' : 'none';
 
+        // Panel de confirmación de pagos: staff de clase (Rank ≤ 2). Aquí el
+        // staff verifica en Stripe y confirma la reserva (la pone 'activa').
+        const staffReservasPanel = document.getElementById('staff-reservas-panel');
+        if (staffReservasPanel) {
+          const verPanel = esStaffClase(rank);
+          staffReservasPanel.style.display = verPanel ? 'block' : 'none';
+          if (verPanel) cargarReservasStaff();
+        }
+
         // Teléfono propio (desde doc privado). Solo lo ve el dueño aquí.
         const telEl = document.getElementById('perfil-tel');
         if (telEl) {
@@ -1368,9 +1377,9 @@
       usuarioActual = user;
       window.usuarioActual = user;
       actualizarUI(user);
-      // Si viene de Stripe con pago exitoso, activar reserva una vez autenticado
+      // Si viene de Stripe, el alumno REPORTA su pago (no lo activa él mismo).
       if (user && new URLSearchParams(window.location.search).get('pago') === 'exitoso') {
-        activarReservaTrasStripe(user.uid);
+        reportarPagoTrasStripe(user.uid);
       }
     });
 
@@ -1471,8 +1480,8 @@
           method: 'POST',
           headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            _subject: `🎟 Reserva PAGADA — ${TENANT.marca.nombre}`,
-            estado:  'PAGADO ✅',
+            _subject: `🎟 Pago REPORTADO (verificar en Stripe) — ${TENANT.marca.nombre}`,
+            estado:  'PAGO REPORTADO — verifica en Stripe y confírmalo en el panel de staff',
             plan:    data.plan,
             nombre:  data.nombre,
             email:   data.email,
@@ -1530,7 +1539,7 @@
     }
 
     function estadoLabel(e) {
-      return { pendiente_pago:'Pendiente', activa:'Activa', cancelada:'Cancelada' }[e] || e;
+      return { pendiente_pago:'Pendiente de pago', pago_reportado:'En confirmación', activa:'Activa', cancelada:'Cancelada' }[e] || e;
     }
 
     // ── EVENTO ESPECIAL — leer contador de boletos ────────
@@ -1607,8 +1616,11 @@
       } catch(e) { console.error('Error registrando boleto:', e); }
     }
 
-    // Stripe success: si regresamos con ?pago=exitoso, marcar reserva como activa
-    async function activarReservaTrasStripe(uid) {
+    // Stripe success: al volver con ?pago=exitoso, el alumno REPORTA su pago
+    // (estado → 'pago_reportado'). NO lo activa él mismo: 'activa' solo lo pone el
+    // staff (verificando en Stripe) o el webhook. Esto cierra el P0 de
+    // autoactivación — las reglas rechazarían un intento de marcar 'activa' aquí.
+    async function reportarPagoTrasStripe(uid) {
       try {
         const q = query(
           collection(db, "reservas"),
@@ -1618,11 +1630,11 @@
         const snap = await getDocs(q);
         if (!snap.empty) {
           const docRef = snap.docs[snap.docs.length - 1].ref;
-          await updateDoc(docRef, { estado: "activa", fechaPago: serverTimestamp() });
+          await updateDoc(docRef, { estado: "pago_reportado", pagoReportadoTs: serverTimestamp() });
           cargarMisReservas(uid);
         }
 
-        // Enviar el correo de confirmación a Formspree SOLO ahora (pago confirmado)
+        // Avisar al staff por correo para que verifique en Stripe y confirme.
         const pend = JSON.parse(localStorage.getItem('reserva_pendiente_full') || 'null');
         if (pend && (Date.now() - (pend.ts || 0) < 2 * 60 * 60 * 1000)) {
           await enviarReservaFormspree(pend);
@@ -1636,8 +1648,63 @@
         localStorage.removeItem('reserva_pendiente_full');
         sessionStorage.removeItem('reserva_pendiente');
         history.replaceState({}, '', '/');
-      } catch(e) { console.error('Error activando reserva:', e); }
+      } catch(e) { console.error('Error reportando pago:', e); }
     }
+
+    // ── PANEL STAFF: confirmar pagos de reservas (Rank ≤ 2) ───────────────
+    // El staff VERIFICA el pago en el Stripe Dashboard y luego confirma aquí
+    // (→ 'activa'). Es el paso humano interino hasta que el webhook lo automatice.
+    async function cargarReservasStaff() {
+      const cont = document.getElementById('staff-reservas-lista');
+      if (!cont) return;
+      cont.innerHTML = '<p class="sr-empty">Cargando…</p>';
+      try {
+        const q = query(collection(db, "reservas"),
+          where("estado", "in", ["pago_reportado", "pendiente_pago"]));
+        const snap = await getDocs(q);
+        if (snap.empty) {
+          cont.innerHTML = '<p class="sr-empty">No hay reservas por confirmar. ✅</p>';
+          return;
+        }
+        // Primero las que ya reportaron pago (las que urge verificar).
+        const docs = snap.docs.slice().sort((a, b) =>
+          (a.data().estado === 'pago_reportado' ? 0 : 1) - (b.data().estado === 'pago_reportado' ? 0 : 1));
+        cont.innerHTML = docs.map(d => {
+          const r = d.data();
+          const rep = r.estado === 'pago_reportado';
+          const id = escapeHtml(d.id);
+          return `<div class="sr-item ${rep ? 'sr-item-rep' : ''}">
+            <div class="sr-info">
+              <div class="sr-nombre">${escapeHtml(r.nombre || '(sin nombre)')}</div>
+              <div class="sr-meta">${escapeHtml(r.plan || '')} · ${escapeHtml(String(r.clases || ''))} · <b>${estadoLabel(r.estado)}</b></div>
+            </div>
+            <div class="sr-acciones">
+              <button class="sr-btn sr-ok" onclick="confirmarPagoReserva('${id}')">Confirmar pago ✅</button>
+              <button class="sr-btn sr-no" onclick="cancelarReservaStaff('${id}')">Cancelar</button>
+            </div>
+          </div>`;
+        }).join('');
+      } catch (e) {
+        console.error('cargarReservasStaff:', e);
+        cont.innerHTML = '<p class="sr-empty">Error al cargar. Revisa la consola (F12).</p>';
+      }
+    }
+    window.confirmarPagoReserva = async (id) => {
+      if (!confirm('¿Verificaste este pago en tu Stripe Dashboard?\n\nConfirma SOLO si el dinero realmente llegó. Esto activa la reserva.')) return;
+      try {
+        await updateDoc(doc(db, "reservas", id),
+          { estado: "activa", fechaPago: serverTimestamp(), confirmadaPor: usuarioActual.uid });
+        cargarReservasStaff();
+      } catch (e) { console.error('confirmarPagoReserva:', e); alert('No se pudo confirmar: ' + e.message); }
+    };
+    window.cancelarReservaStaff = async (id) => {
+      if (!confirm('¿Cancelar esta reserva?')) return;
+      try {
+        await updateDoc(doc(db, "reservas", id), { estado: "cancelada" });
+        cargarReservasStaff();
+      } catch (e) { console.error('cancelarReservaStaff:', e); alert('No se pudo cancelar: ' + e.message); }
+    };
+    window.cargarReservasStaff = cargarReservasStaff;
   </script>
 
   <style>
@@ -2356,6 +2423,28 @@
     .pm-radar { margin:10px auto 0; max-width:300px; }
     .pm-titulos { display:flex; flex-wrap:wrap; gap:6px; justify-content:center; margin-top:12px; }
     .pm-oculto { color:rgba(255,255,255,.5); font-size:.82rem; margin-top:16px; }
+
+    /* ===== PANEL STAFF · CONFIRMACIÓN DE PAGOS ===== */
+    .sr-panel { max-width:560px; margin:1.4rem auto 0; background:rgba(255,255,255,.04);
+      border:1px solid rgba(255,204,0,.28); border-radius:14px; padding:18px 20px; }
+    .sr-panel .perfil-sub { margin-top:0; }
+    .sr-hint { color:rgba(255,255,255,.6); font-size:.8rem; margin:.3rem 0 1rem; line-height:1.4; }
+    .sr-hint b { color:var(--amarillo); }
+    .sr-item { display:flex; align-items:center; justify-content:space-between; gap:12px;
+      background:rgba(0,0,0,.32); border:1px solid rgba(255,255,255,.10); border-radius:10px;
+      padding:12px 14px; margin-bottom:10px; flex-wrap:wrap; }
+    .sr-item-rep { border-color:rgba(255,204,0,.55); box-shadow:0 0 0 1px rgba(255,204,0,.18) inset; }
+    .sr-info { min-width:0; flex:1 1 200px; }
+    .sr-nombre { font-weight:700; color:#fff; font-size:.95rem; }
+    .sr-meta { color:rgba(255,255,255,.6); font-size:.78rem; margin-top:2px; }
+    .sr-meta b { color:var(--amarillo); }
+    .sr-acciones { display:flex; gap:8px; flex-wrap:wrap; }
+    .sr-btn { border:none; border-radius:8px; padding:8px 12px; font-size:.78rem; font-weight:700;
+      cursor:pointer; transition:transform .1s ease, filter .1s ease; }
+    .sr-btn:hover { transform:translateY(-1px); filter:brightness(1.08); }
+    .sr-ok { background:linear-gradient(135deg,#1db954,#0e7a37); color:#fff; }
+    .sr-no { background:rgba(255,255,255,.10); color:rgba(255,255,255,.85); }
+    .sr-empty { text-align:center; color:rgba(255,255,255,.5); font-size:.85rem; padding:14px 0; }
 
     /* ===== CALENDARIO DE HORARIOS ===== */
     .cal-toolbar { display:flex; flex-wrap:wrap; gap:12px; align-items:center; justify-content:center; max-width:1100px; margin:0 auto 18px; }
@@ -3378,6 +3467,17 @@
         <button class="admin-btn" onclick="migrarRangos()">Migrar rangos</button>
         <p id="admin-migrar-out" class="admin-resultado" style="white-space:pre-line; text-align:left;"></p>
       </div>
+    </div>
+
+    <!-- PANEL STAFF · CONFIRMAR PAGOS (Rank ≤ 2 · Instructora/Admin/Dueño) -->
+    <div id="staff-reservas-panel" class="sr-panel" style="display:none;">
+      <h3 class="perfil-sub">💳 Reservas por confirmar</h3>
+      <p class="sr-hint">⚠️ <b>Verifica el pago en tu Stripe Dashboard</b> antes de confirmar.
+        Solo pulsa «Confirmar pago» cuando el dinero realmente haya llegado — eso activa la reserva.</p>
+      <div id="staff-reservas-lista">
+        <p class="sr-empty">Cargando…</p>
+      </div>
+      <button class="admin-btn" onclick="cargarReservasStaff()" style="margin-top:6px;">↻ Actualizar</button>
     </div>
 
     <div class="comunidad-links">
