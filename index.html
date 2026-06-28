@@ -222,6 +222,17 @@
     const esDueno      = r => r === RANK.DUENO;
     const esAdmin      = r => r <= RANK.ADMIN;          // Dueño + Administración
     const esStaffClase = r => r <= RANK.INSTRUCTORA;    // Dueño + Admin + Instructora (dan stats/estrellas/pase de lista)
+
+    // Sanitizadores: TODO dato de usuario que se inyecte con innerHTML pasa por
+    // aquí (importante en el directorio público, donde se ven perfiles ajenos).
+    function escapeHtml(s){
+      return String(s==null?'':s).replace(/[&<>"']/g,
+        c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    }
+    function urlSegura(u){
+      u = String(u||'').trim();
+      return /^https?:\/\//i.test(u) ? u : '';   // solo http/https (evita javascript:)
+    }
     // ─────────────────────────────────────────────────────
 
     const app      = initializeApp(firebaseConfig);
@@ -607,6 +618,43 @@
         const eventosEl = document.getElementById('perfil-eventos');
         if (eventosEl) eventosEl.textContent = (d.eventos || []).length;
 
+        // ── Roles desacoplados del rank: etiquetas + tarjetas ──
+        const imparte = !!d.imparteClases;
+        const esColab = !!d.colaborador;
+        const tagsEl = document.getElementById('perfil-rol-tags');
+        if (tagsEl) {
+          let tags = '';
+          if (imparte) tags += '<span class="rol-tag rol-tag-docente">🎓 Imparte clases</span>';
+          if (esColab) tags += `<span class="rol-tag rol-tag-colab">🤝 ${escapeHtml((d.colab && d.colab.tipo) || 'Colaborador')}</span>`;
+          tagsEl.innerHTML = tags;
+        }
+        // Semblanza docente (solo si imparte clases)
+        const semb = d.semblanza || { experiencia:'', clases:'', antiguedad:'' };
+        const sembCard = document.getElementById('perfil-semblanza-card');
+        if (sembCard) sembCard.style.display = imparte ? 'block' : 'none';
+        set('semblanza-experiencia', semb.experiencia || '—');
+        set('semblanza-clases', semb.clases || '—');
+        set('semblanza-antiguedad', semb.antiguedad || '—');
+        // Colaborador (solo si es colaborador)
+        const cl = d.colab || { tipo:'', descripcion:'', enlace:'' };
+        const colabCard = document.getElementById('perfil-colab-card');
+        if (colabCard) colabCard.style.display = esColab ? 'block' : 'none';
+        set('colab-tipo', cl.tipo || '—');
+        set('colab-descripcion', cl.descripcion || '—');
+        const colabEnlaceEl = document.getElementById('colab-enlace');
+        if (colabEnlaceEl) {
+          const safe = urlSegura(cl.enlace);
+          colabEnlaceEl.innerHTML = safe
+            ? `<a href="${escapeHtml(safe)}" target="_blank" rel="noopener noreferrer">${escapeHtml(safe)}</a>`
+            : '—';
+        }
+        // Visibilidad (checkboxes). Por defecto todo visible.
+        const vis = d.visibilidad || { perfilPublico:true, mostrarStats:true, mostrarSemblanza:true };
+        const setChk = (id,val) => { const el=document.getElementById(id); if(el) el.checked = !!val; };
+        setChk('vis-perfilPublico', vis.perfilPublico);
+        setChk('vis-mostrarStats', vis.mostrarStats);
+        setChk('vis-mostrarSemblanza', vis.mostrarSemblanza);
+
         // Panel admin (otorgar rank + migración): solo Dueño (Rank 0)
         const adminPanel = document.getElementById('admin-panel');
         if (adminPanel) adminPanel.style.display = esDueno(rank) ? 'block' : 'none';
@@ -793,6 +841,87 @@
         await updateDoc(doc(db, "usuarios", usuarioActual.uid), { foto: url });
         cargarPerfil(usuarioActual.uid);
       } catch(e) { console.error('foto:', e); alert('No se pudo guardar la foto.'); }
+    };
+
+    // ── Editar SEMBLANZA docente (la edita la propia persona; cosmética) ──
+    window.abrirEditarSemblanza = async () => {
+      if (!usuarioActual) return;
+      const snap = await getDoc(doc(db, "usuarios", usuarioActual.uid));
+      const s = (snap.exists() && snap.data().semblanza) || { experiencia:'', clases:'', antiguedad:'' };
+      const experiencia = prompt('Tu experiencia (años, formación, logros):', s.experiencia || '');
+      if (experiencia === null) return;
+      const clases = prompt('¿Qué clases impartes? (telas, aro, danza aérea…):', s.clases || '');
+      if (clases === null) return;
+      const antiguedad = prompt('¿Cuánto tiempo llevas con la academia?:', s.antiguedad || '');
+      if (antiguedad === null) return;
+      try {
+        await updateDoc(doc(db, "usuarios", usuarioActual.uid), {
+          semblanza: {
+            experiencia: experiencia.trim().slice(0,400),
+            clases:      clases.trim().slice(0,200),
+            antiguedad:  antiguedad.trim().slice(0,80)
+          }
+        });
+        cargarPerfil(usuarioActual.uid);
+      } catch(e) { console.error('semblanza:', e); alert('No se pudo guardar la semblanza.'); }
+    };
+
+    // ── Editar datos de COLABORADOR (promoción) ──
+    window.abrirEditarColab = async () => {
+      if (!usuarioActual) return;
+      const snap = await getDoc(doc(db, "usuarios", usuarioActual.uid));
+      const c = (snap.exists() && snap.data().colab) || { tipo:'', descripcion:'', enlace:'' };
+      const tipo = prompt('Tipo de colaborador (Fotógrafo, Miss invitada, Influencer…):', c.tipo || '');
+      if (tipo === null) return;
+      const descripcion = prompt('Descripción breve de lo que ofreces:', c.descripcion || '');
+      if (descripcion === null) return;
+      const enlace = prompt('Enlace (Instagram, portafolio… empieza con https://):', c.enlace || '');
+      if (enlace === null) return;
+      const enlaceLimpio = enlace.trim();
+      if (enlaceLimpio && !/^https?:\/\//i.test(enlaceLimpio)) {
+        alert('El enlace debe empezar con http:// o https://'); return;
+      }
+      try {
+        await updateDoc(doc(db, "usuarios", usuarioActual.uid), {
+          colab: {
+            tipo:        tipo.trim().slice(0,40),
+            descripcion: descripcion.trim().slice(0,300),
+            enlace:      enlaceLimpio.slice(0,200)
+          }
+        });
+        cargarPerfil(usuarioActual.uid);
+      } catch(e) { console.error('colab:', e); alert('No se pudo guardar.'); }
+    };
+
+    // ── Toggle de VISIBILIDAD (cada checkbox guarda su campo anidado) ──
+    window.toggleVisibilidad = async (campo, valor) => {
+      if (!usuarioActual) return;
+      try {
+        await updateDoc(doc(db, "usuarios", usuarioActual.uid), { [`visibilidad.${campo}`]: !!valor });
+      } catch(e) { console.error('visibilidad:', e); alert('No se pudo guardar la visibilidad. Reintenta.'); }
+    };
+
+    // ── ADMIN: alternar etiquetas de rol (imparteClases/colaborador) por ID corto.
+    //    Curado por admin (Dueño/Administración). Las reglas impiden el autoascenso. ──
+    window.toggleRolUsuario = async (campo) => {
+      if (!usuarioActual) return;
+      const idInput = (document.getElementById('admin-id-input').value || '').trim().toUpperCase();
+      const out = document.getElementById('admin-roles-out');
+      if (!idInput) { if (out) out.textContent = 'Escribe primero un ID corto arriba.'; return; }
+      if (out) out.textContent = 'Buscando...';
+      try {
+        const q = query(collection(db, "usuarios"), where("userIdCorto", "==", idInput));
+        const snap = await getDocs(q);
+        if (snap.empty) { if (out) out.textContent = '❌ No se encontró ningún usuario con ese ID.'; return; }
+        const target = snap.docs[0];
+        const actual = !!target.data()[campo];
+        await updateDoc(doc(db, "usuarios", target.id), { [campo]: !actual });
+        const etq = campo === 'imparteClases' ? 'Imparte clases' : 'Colaborador';
+        if (out) out.textContent = `✅ ${target.data().nombreVisible || idInput}: «${etq}» ahora ${!actual ? 'ACTIVADO' : 'desactivado'}.`;
+      } catch(e) {
+        console.error('toggleRolUsuario:', e);
+        if (out) out.textContent = '❌ Error (¿permisos? Debes ser Dueño o Administración).';
+      }
     };
 
     // Editar nombre visible
@@ -1721,6 +1850,27 @@
     .perfil-eventos-line { margin-top:14px; text-align:center; font-size:.78rem; color:rgba(255,255,255,.55); }
     .perfil-tel { display:block; margin-top:3px; font-size:.72rem; color:rgba(255,255,255,.5); cursor:pointer; }
     .perfil-tel:hover { color:var(--amarillo); }
+
+    /* ===== ROLES DESACOPLADOS (etiquetas + tarjetas) ===== */
+    .perfil-rol-tags { display:inline-flex; flex-wrap:wrap; gap:6px; vertical-align:middle; }
+    .rol-tag { font-size:.6rem; font-weight:800; text-transform:uppercase; letter-spacing:.06em;
+      padding:3px 9px; border-radius:20px; }
+    .rol-tag-docente { background:linear-gradient(90deg,#ff5ea8,#a855f7); color:#fff; }
+    .rol-tag-colab   { background:linear-gradient(90deg,#4fd1c5,#3182ce); color:#fff; }
+    .perfil-rol-card {
+      margin-top:16px; padding:14px 16px; border-radius:8px;
+      background:rgba(255,255,255,.04); border:1px solid rgba(255,255,255,.1);
+    }
+    .perfil-rol-card-head { display:flex; align-items:center; justify-content:center; gap:8px; }
+    .perfil-rol-card-head .perfil-sub { margin:0 0 6px; }
+    .perfil-rol-linea { font-size:.82rem; color:rgba(255,255,255,.8); margin:6px 0; line-height:1.4; }
+    .perfil-rol-linea strong { color:rgba(255,255,255,.95); }
+    .perfil-rol-linea a { color:var(--amarillo); word-break:break-all; }
+    .perfil-vis-toggles { display:flex; flex-direction:column; gap:9px; margin-top:8px; }
+    .vis-toggle { display:flex; align-items:center; gap:9px; font-size:.82rem;
+      color:rgba(255,255,255,.8); cursor:pointer; }
+    .vis-toggle input { width:16px; height:16px; accent-color:var(--amarillo); cursor:pointer; }
+
     @media(max-width:560px){
       .perfil-creditos-box { margin-top:6px; }
     }
@@ -2602,6 +2752,7 @@
             <span id="perfil-nombre" class="perfil-nombre">Alumno</span>
             <button class="perfil-edit-btn" onclick="abrirEditarNombre()" title="Editar nombre">✎</button>
             <span id="perfil-rank-badge" class="perfil-rank-badge rank-alumno">Alumno</span>
+            <span id="perfil-rol-tags" class="perfil-rol-tags"></span>
           </div>
           <div class="perfil-apodo-row">
             <span id="perfil-apodo" class="perfil-apodo" style="display:none;"></span>
@@ -2624,6 +2775,39 @@
         <div id="perfil-titulos" class="perfil-titulos"></div>
         <p class="perfil-eventos-line">Eventos participados: <span id="perfil-eventos">0</span></p>
       </div>
+
+      <!-- SEMBLANZA DOCENTE (visible si imparte clases) -->
+      <div id="perfil-semblanza-card" class="perfil-rol-card" style="display:none;">
+        <div class="perfil-rol-card-head">
+          <h3 class="perfil-sub">📖 Semblanza docente</h3>
+          <button class="perfil-edit-btn" onclick="abrirEditarSemblanza()" title="Editar semblanza">✎</button>
+        </div>
+        <p class="perfil-rol-linea"><strong>Experiencia:</strong> <span id="semblanza-experiencia">—</span></p>
+        <p class="perfil-rol-linea"><strong>Clases que imparte:</strong> <span id="semblanza-clases">—</span></p>
+        <p class="perfil-rol-linea"><strong>Tiempo con nosotras:</strong> <span id="semblanza-antiguedad">—</span></p>
+      </div>
+
+      <!-- PERFIL DE COLABORADOR (visible si es colaborador) -->
+      <div id="perfil-colab-card" class="perfil-rol-card" style="display:none;">
+        <div class="perfil-rol-card-head">
+          <h3 class="perfil-sub">🤝 Perfil de colaborador</h3>
+          <button class="perfil-edit-btn" onclick="abrirEditarColab()" title="Editar colaboración">✎</button>
+        </div>
+        <p class="perfil-rol-linea"><strong>Tipo:</strong> <span id="colab-tipo">—</span></p>
+        <p class="perfil-rol-linea"><strong>Descripción:</strong> <span id="colab-descripcion">—</span></p>
+        <p class="perfil-rol-linea"><strong>Enlace:</strong> <span id="colab-enlace">—</span></p>
+      </div>
+
+      <!-- VISIBILIDAD DEL PERFIL (todos) -->
+      <div id="perfil-visibilidad-card" class="perfil-rol-card">
+        <h3 class="perfil-sub">👁️ Visibilidad de tu perfil</h3>
+        <p class="admin-hint">Tu perfil es visible para la comunidad, pero tú decides qué se muestra.</p>
+        <div class="perfil-vis-toggles">
+          <label class="vis-toggle"><input type="checkbox" id="vis-perfilPublico" onchange="toggleVisibilidad('perfilPublico', this.checked)"> Aparecer en «Buscar Perfil»</label>
+          <label class="vis-toggle"><input type="checkbox" id="vis-mostrarStats" onchange="toggleVisibilidad('mostrarStats', this.checked)"> Mostrar mis stats y títulos</label>
+          <label class="vis-toggle"><input type="checkbox" id="vis-mostrarSemblanza" onchange="toggleVisibilidad('mostrarSemblanza', this.checked)"> Mostrar mi semblanza docente</label>
+        </div>
+      </div>
     </div>
 
     <!-- PANEL ADMIN (solo Dueño · Rank 0) -->
@@ -2643,6 +2827,21 @@
         <button class="admin-btn" onclick="otorgarRank()">Otorgar</button>
       </div>
       <p id="admin-resultado" class="admin-resultado"></p>
+
+      <!-- Etiquetas de rol (curadas por admin, independientes del rank) -->
+      <div class="admin-roles">
+        <p class="admin-hint" style="margin-top:14px;">
+          🏷️ <strong>Etiquetas de rol</strong> — escribe el ID corto arriba y alterna.
+          <em>«Imparte clases»</em> da perfil docente + semblanza (independiente del rank:
+          el Dueño puede impartir con su misma cuenta). <em>«Colaborador»</em> es categoría
+          aparte (fotógrafo, miss invitada, influencer…) con su sección de promoción.
+        </p>
+        <div class="admin-row">
+          <button class="admin-btn" onclick="toggleRolUsuario('imparteClases')">Alternar «Imparte clases»</button>
+          <button class="admin-btn" onclick="toggleRolUsuario('colaborador')">Alternar «Colaborador»</button>
+        </div>
+        <p id="admin-roles-out" class="admin-resultado"></p>
+      </div>
 
       <!-- Migración de rangos al esquema v2 (se usa UNA sola vez) -->
       <div class="admin-migrar">
