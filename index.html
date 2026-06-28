@@ -924,6 +924,133 @@
       }
     };
 
+    // ════════════════════════════════════════════════════════════════
+    //  DIRECTORIO "Buscar Perfil" + COLABORADORES
+    //  Perfiles VISIBLES por defecto; cada quien controla qué muestra
+    //  (visibilidad.perfilPublico / mostrarStats / mostrarSemblanza).
+    //  Requiere sesión (las reglas exigen signedIn para leer usuarios).
+    // ════════════════════════════════════════════════════════════════
+    let _dirCache = [];        // perfiles públicos ya cargados
+    let _dirFiltro = 'todos';
+
+    function fotoCard(d, nombre) {
+      const foto = urlSegura(d.foto);
+      if (foto) return `<img class="dir-card-foto" src="${escapeHtml(foto)}" alt="${nombre}" loading="lazy" onerror="this.style.display='none'">`;
+      const inicial = escapeHtml((d.nombreVisible || d.handle || 'A').charAt(0).toUpperCase());
+      return `<div class="dir-card-foto dir-card-foto-ph">${inicial}</div>`;
+    }
+
+    function renderPerfilCard(d) {
+      const rank = d.rank ?? RANK_DEFAULT;
+      const rk = RANKS[rank] || RANKS[RANK_DEFAULT];
+      const vis = d.visibilidad || {};
+      const nombre = escapeHtml(d.nombreVisible || d.handle || 'Aerialista');
+      const apodo = d.apodo ? ` <span class="dir-card-apodo">«${escapeHtml(d.apodo)}»</span>` : '';
+      let tags = `<span class="rol-tag ${rk.clase}">${escapeHtml(rk.nombre)}</span>`;
+      if (d.imparteClases) tags += '<span class="rol-tag rol-tag-docente">🎓 Imparte clases</span>';
+      if (d.colaborador)   tags += `<span class="rol-tag rol-tag-colab">🤝 ${escapeHtml((d.colab && d.colab.tipo) || 'Colaborador')}</span>`;
+      // Semblanza docente (solo si imparte clases y no la ocultó)
+      let semb = '';
+      if (d.imparteClases && vis.mostrarSemblanza !== false && d.semblanza) {
+        const s = d.semblanza;
+        const li = (lbl,val) => val ? `<p class="dir-card-linea"><strong>${lbl}:</strong> ${escapeHtml(val)}</p>` : '';
+        const cuerpo = li('Experiencia', s.experiencia) + li('Clases', s.clases) + li('Con nosotras', s.antiguedad);
+        if (cuerpo) semb = `<div class="dir-card-semblanza">${cuerpo}</div>`;
+      }
+      // Títulos (solo si no ocultó stats)
+      let tit = '';
+      if (vis.mostrarStats !== false) {
+        const nivel = { flexibilidad:0,fuerza:0,resistencia:0,tecnica:0,caida:0,interpretacion:0, ...(d.nivel||{}) };
+        const titulos = Array.from(new Set([ ...(d.titulos||[]), ...calcularTitulos(nivel) ]));
+        if (titulos.length) tit = `<div class="dir-card-titulos">${titulos.map(t=>`<span class="titulo-chip">🏅 ${escapeHtml(t)}</span>`).join('')}</div>`;
+      }
+      return `<div class="dir-card ${rk.marco?'dir-card-marco':''}">
+        ${fotoCard(d, nombre)}
+        <div class="dir-card-nombre">${nombre}${apodo}</div>
+        <div class="dir-card-tags">${tags}</div>
+        ${semb}${tit}
+      </div>`;
+    }
+
+    function renderColabCard(d) {
+      const nombre = escapeHtml(d.nombreVisible || d.handle || 'Colaborador');
+      const c = d.colab || {};
+      const tipo = escapeHtml(c.tipo || 'Colaborador');
+      const desc = c.descripcion ? `<p class="dir-card-linea">${escapeHtml(c.descripcion)}</p>` : '';
+      const safe = urlSegura(c.enlace);
+      const btn = safe ? `<a class="dir-card-btn" href="${escapeHtml(safe)}" target="_blank" rel="noopener noreferrer">Ver / Seguir ↗</a>` : '';
+      return `<div class="dir-card">
+        ${fotoCard(d, nombre)}
+        <div class="dir-card-nombre">${nombre}</div>
+        <div class="dir-card-tags"><span class="rol-tag rol-tag-colab">🤝 ${tipo}</span></div>
+        ${desc}${btn}
+      </div>`;
+    }
+
+    // Filtra _dirCache por término + filtro activo y lo pinta. No va a la red.
+    window.pintarDirectorio = () => {
+      const cont  = document.getElementById('dir-resultados');
+      const vacio = document.getElementById('dir-vacio');
+      const term  = (document.getElementById('dir-input')?.value || '').trim().toLowerCase();
+      let lista = _dirCache.slice();
+      if (_dirFiltro === 'instructoras') lista = lista.filter(d => d.imparteClases);
+      if (term) lista = lista.filter(d =>
+        [d.nombreVisible, d.apodo, d.handle, d.userIdCorto]
+          .some(v => String(v||'').toLowerCase().includes(term)));
+      if (cont) cont.innerHTML = lista.map(renderPerfilCard).join('');
+      if (vacio) {
+        vacio.style.display = lista.length ? 'none' : 'block';
+        if (!lista.length) vacio.textContent = term || _dirFiltro!=='todos'
+          ? 'Sin resultados. Prueba con otro nombre o filtro.'
+          : 'Aún no hay perfiles públicos.';
+      }
+    };
+
+    window.filtrarDir = (btn, filtro) => {
+      _dirFiltro = filtro;
+      document.querySelectorAll('.dir-filtro').forEach(b => b.classList.remove('active'));
+      if (btn) btn.classList.add('active');
+      pintarDirectorio();
+    };
+
+    // Trae de la red todos los perfiles públicos (opt-out con perfilPublico:false).
+    window.buscarPerfiles = async () => {
+      const vacio = document.getElementById('dir-vacio');
+      if (!usuarioActual) { if (vacio){ vacio.textContent='Inicia sesión para ver la comunidad.'; vacio.style.display='block'; } return; }
+      if (vacio) { vacio.textContent='Cargando comunidad…'; vacio.style.display='block'; }
+      try {
+        const snap = await getDocs(collection(db, "usuarios"));
+        _dirCache = [];
+        snap.forEach(s => {
+          const d = s.data();
+          if (d.visibilidad && d.visibilidad.perfilPublico === false) return; // respeta opt-out
+          _dirCache.push(d);
+        });
+        pintarDirectorio();
+      } catch(e) {
+        console.error('buscarPerfiles:', e);
+        if (vacio) { vacio.textContent='No se pudo cargar la comunidad. Reintenta.'; vacio.style.display='block'; }
+      }
+    };
+
+    window.cargarColaboradores = async () => {
+      const cont  = document.getElementById('colab-grid');
+      const vacio = document.getElementById('colab-vacio');
+      if (!usuarioActual) return;
+      try {
+        const snap = await getDocs(collection(db, "usuarios"));
+        const lista = [];
+        snap.forEach(s => {
+          const d = s.data();
+          if (!d.colaborador) return;
+          if (d.visibilidad && d.visibilidad.perfilPublico === false) return;
+          lista.push(d);
+        });
+        if (cont) cont.innerHTML = lista.map(renderColabCard).join('');
+        if (vacio) vacio.style.display = lista.length ? 'none' : 'block';
+      } catch(e) { console.error('cargarColaboradores:', e); }
+    };
+
     // Editar nombre visible
     window.abrirEditarNombre = () => {
       const actual = document.getElementById('perfil-nombre').textContent;
@@ -974,6 +1101,13 @@
         }
         if(userName)  userName.textContent = (user.displayName || 'Mi cuenta').split(' ')[0];
         if(misClases) misClases.style.display = 'block';
+        // Comunidad (directorio + colaboradores): visibles y autocargados al entrar
+        const comunidad = document.getElementById('comunidad');
+        const colabSec  = document.getElementById('colaboradores');
+        if(comunidad) comunidad.style.display = 'block';
+        if(colabSec)  colabSec.style.display  = 'block';
+        if (window.buscarPerfiles)     buscarPerfiles();
+        if (window.cargarColaboradores) cargarColaboradores();
         // Desbloquear videos
         videosLock.forEach(l => l.style.display = 'none');
         videoCards.forEach(c => c.style.pointerEvents = 'auto');
@@ -987,6 +1121,11 @@
         if(btnLogout) btnLogout.style.display = 'none';
         if(userInfo)  userInfo.style.display  = 'none';
         if(misClases) misClases.style.display = 'none';
+        const comunidad = document.getElementById('comunidad');
+        const colabSec  = document.getElementById('colaboradores');
+        if(comunidad) comunidad.style.display = 'none';
+        if(colabSec)  colabSec.style.display  = 'none';
+        _dirCache = [];
         // Bloquear videos
         videosLock.forEach(l => l.style.display = 'flex');
         videoCards.forEach(c => c.style.pointerEvents = 'none');
@@ -1870,6 +2009,32 @@
     .vis-toggle { display:flex; align-items:center; gap:9px; font-size:.82rem;
       color:rgba(255,255,255,.8); cursor:pointer; }
     .vis-toggle input { width:16px; height:16px; accent-color:var(--amarillo); cursor:pointer; }
+
+    /* ===== DIRECTORIO / COLABORADORES ===== */
+    .dir-buscador { display:flex; gap:8px; max-width:560px; margin:0 auto 14px; }
+    .dir-buscador .admin-input[type=text]{ flex:1; }
+    .dir-filtros { display:flex; gap:8px; justify-content:center; flex-wrap:wrap; margin-bottom:22px; }
+    .dir-filtro { background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.18);
+      color:rgba(255,255,255,.7); border-radius:20px; padding:6px 16px; font-size:.78rem; cursor:pointer; }
+    .dir-filtro.active { background:linear-gradient(90deg,#ffd700,#ff9d00); color:#111; border-color:transparent; font-weight:800; }
+    .dir-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:18px; max-width:1100px; margin:0 auto; }
+    .dir-card { background:rgba(255,255,255,.04); border:1px solid rgba(255,255,255,.1);
+      border-radius:12px; padding:18px 16px; text-align:center; }
+    .dir-card-marco { border-color:rgba(255,204,0,.45); box-shadow:0 0 0 1px rgba(255,204,0,.2) inset; }
+    .dir-card-foto { width:84px; height:84px; border-radius:50%; object-fit:cover; margin:0 auto 10px;
+      display:block; border:2px solid rgba(255,255,255,.15); }
+    .dir-card-foto-ph { display:flex; align-items:center; justify-content:center;
+      background:linear-gradient(135deg,#ff5ea8,#a855f7); color:#fff; font-size:2rem; font-weight:800; }
+    .dir-card-nombre { font-weight:700; font-size:1rem; color:#fff; margin-bottom:8px; }
+    .dir-card-apodo { font-style:italic; color:var(--amarillo); font-size:.82rem; font-weight:400; }
+    .dir-card-tags { display:flex; flex-wrap:wrap; gap:5px; justify-content:center; margin-bottom:10px; }
+    .dir-card-semblanza { text-align:left; margin-top:8px; }
+    .dir-card-linea { font-size:.78rem; color:rgba(255,255,255,.75); margin:4px 0; line-height:1.4; }
+    .dir-card-titulos { display:flex; flex-wrap:wrap; gap:6px; justify-content:center; margin-top:8px; }
+    .dir-card-btn { display:inline-block; margin-top:10px; background:linear-gradient(90deg,#4fd1c5,#3182ce);
+      color:#fff; font-weight:700; font-size:.78rem; padding:7px 16px; border-radius:20px; text-decoration:none; }
+    .dir-vacio { text-align:center; color:rgba(255,255,255,.5); font-size:.85rem; margin-top:18px; }
+    .comunidad-links { display:flex; gap:12px; justify-content:center; flex-wrap:wrap; margin:1.4rem auto 0; }
 
     @media(max-width:560px){
       .perfil-creditos-box { margin-top:6px; }
@@ -2857,6 +3022,11 @@
       </div>
     </div>
 
+    <div class="comunidad-links">
+      <a href="#comunidad" class="btn-secundario">🔎 Buscar Perfil</a>
+      <a href="#colaboradores" class="btn-secundario">🤝 Colaboradores</a>
+    </div>
+
     <h3 class="perfil-sub" style="margin-top:1.4rem;">Tus reservas</h3>
     <div id="mis-reservas-lista">
       <p style="opacity:.4;font-size:.8rem;">Cargando tus reservas...</p>
@@ -2932,6 +3102,39 @@
     </div>
   </div>
 
+
+  <!-- COMUNIDAD / BUSCAR PERFIL (solo logueadas) -->
+  <section id="comunidad" class="seccion" style="display:none;" data-nav-skip="true">
+    <div class="seccion-header">
+      <span class="seccion-eyebrow">Nuestra comunidad</span>
+      <h2 class="seccion-titulo">Buscar Perfil</h2>
+      <div class="titulo-linea"></div>
+      <p class="seccion-desc">Encuentra a otras aerialistas e instructoras. Cada quien decide qué muestra de su perfil.</p>
+    </div>
+    <div class="dir-buscador">
+      <input id="dir-input" class="admin-input" type="text" autocomplete="off"
+        placeholder="Nombre, apodo o ID (ej. CIRCA-ABCDE)" oninput="pintarDirectorio()">
+      <button class="admin-btn" onclick="buscarPerfiles()">Actualizar</button>
+    </div>
+    <div class="dir-filtros">
+      <button class="dir-filtro active" data-filtro="todos" onclick="filtrarDir(this,'todos')">Todos</button>
+      <button class="dir-filtro" data-filtro="instructoras" onclick="filtrarDir(this,'instructoras')">🎓 Instructoras</button>
+    </div>
+    <div id="dir-resultados" class="dir-grid"></div>
+    <p id="dir-vacio" class="dir-vacio">Cargando comunidad…</p>
+  </section>
+
+  <!-- COLABORADORES (solo logueadas) -->
+  <section id="colaboradores" class="seccion" style="display:none;" data-nav-skip="true">
+    <div class="seccion-header">
+      <span class="seccion-eyebrow">Aliados de la academia</span>
+      <h2 class="seccion-titulo">Colaboradores</h2>
+      <div class="titulo-linea"></div>
+      <p class="seccion-desc">Fotógrafas, misses invitadas e influencers que crean con nosotras. ¡Conócelas y síguelas!</p>
+    </div>
+    <div id="colab-grid" class="dir-grid"></div>
+    <p id="colab-vacio" class="dir-vacio">Aún no hay colaboradores publicados.</p>
+  </section>
 
   <!-- VIDEOS — oculto hasta tener contenido real -->
   <section id="videos" class="seccion" style="display:none;" data-nav-skip="true">

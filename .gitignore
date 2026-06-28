@@ -1,2 +1,5 @@
 # Respaldos locales de imágenes originales (no deben subirse ni desplegarse)
 Images_backup/
+
+# Herramientas locales de desarrollo/validación (servidor estático, preview)
+.claude/
