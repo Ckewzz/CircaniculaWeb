@@ -966,11 +966,15 @@
         const titulos = Array.from(new Set([ ...(d.titulos||[]), ...calcularTitulos(nivel) ]));
         if (titulos.length) tit = `<div class="dir-card-titulos">${titulos.map(t=>`<span class="titulo-chip">🏅 ${escapeHtml(t)}</span>`).join('')}</div>`;
       }
-      return `<div class="dir-card ${rk.marco?'dir-card-marco':''}">
+      return `<div class="dir-card dir-card-click ${rk.marco?'dir-card-marco':''}" role="button" tabindex="0"
+        data-id="${escapeHtml(d._id||'')}"
+        onclick="abrirPerfilModal(this.dataset.id)"
+        onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();abrirPerfilModal(this.dataset.id);}">
         ${fotoCard(d, nombre)}
         <div class="dir-card-nombre">${nombre}${apodo}</div>
         <div class="dir-card-tags">${tags}</div>
         ${semb}${tit}
+        <div class="dir-card-ver">Ver perfil →</div>
       </div>`;
     }
 
@@ -995,7 +999,11 @@
       const vacio = document.getElementById('dir-vacio');
       const term  = (document.getElementById('dir-input')?.value || '').trim().toLowerCase();
       let lista = _dirCache.slice();
-      if (_dirFiltro === 'instructoras') lista = lista.filter(d => d.imparteClases);
+      // "Instructoras": incluye a quien tiene el flag docente (imparteClases) Y a
+      // quien es Instructora POR RANGO (rank 2). Tras migrar rangos, las misses
+      // quedaron en rank 2 pero SIN el flag → por eso el filtro salía vacío.
+      if (_dirFiltro === 'instructoras')
+        lista = lista.filter(d => d.imparteClases || (d.rank ?? RANK_DEFAULT) === RANK.INSTRUCTORA);
       if (term) lista = lista.filter(d =>
         [d.nombreVisible, d.apodo, d.handle, d.userIdCorto]
           .some(v => String(v||'').toLowerCase().includes(term)));
@@ -1015,6 +1023,58 @@
       pintarDirectorio();
     };
 
+    // Detalle de un perfil al hacer click en su tarjeta del directorio.
+    // Muestra LO IMPORTANTE: foto, nombre mostrado, apodo, rango/roles y los
+    // STATS (radar + títulos). Respeta visibilidad.mostrarStats. Render XSS-safe.
+    window.abrirPerfilModal = (id) => {
+      const d = _dirCache.find(x => x._id === id);
+      if (!d) return;
+      const rank = d.rank ?? RANK_DEFAULT;
+      const rk   = RANKS[rank] || RANKS[RANK_DEFAULT];
+      const vis  = d.visibilidad || {};
+      const nombre = escapeHtml(d.nombreVisible || d.handle || 'Aerialista');
+      const apodo  = d.apodo ? `<div class="pm-apodo">«${escapeHtml(d.apodo)}»</div>` : '';
+
+      // Foto (o placeholder con inicial)
+      const foto = urlSegura(d.foto);
+      const fotoHtml = foto
+        ? `<img class="pm-foto" src="${escapeHtml(foto)}" alt="${nombre}" onerror="this.style.display='none'">`
+        : `<div class="pm-foto pm-foto-ph">${escapeHtml((d.nombreVisible||d.handle||'A').charAt(0).toUpperCase())}</div>`;
+
+      // Rango + roles
+      let tags = `<span class="rol-tag ${rk.clase}">${escapeHtml(rk.nombre)}</span>`;
+      if (d.imparteClases) tags += '<span class="rol-tag rol-tag-docente">🎓 Imparte clases</span>';
+      if (d.colaborador)   tags += `<span class="rol-tag rol-tag-colab">🤝 ${escapeHtml((d.colab && d.colab.tipo) || 'Colaborador')}</span>`;
+
+      // Stats (radar + títulos) — solo si la persona no los ocultó
+      let statsHtml;
+      if (vis.mostrarStats !== false) {
+        const nivel = { flexibilidad:0,fuerza:0,resistencia:0,tecnica:0,caida:0,interpretacion:0, ...(d.nivel||{}) };
+        const titulos = Array.from(new Set([ ...(d.titulos||[]), ...calcularTitulos(nivel) ]));
+        const tit = titulos.length
+          ? `<div class="pm-titulos">${titulos.map(t=>`<span class="titulo-chip">🏅 ${escapeHtml(t)}</span>`).join('')}</div>`
+          : '<p class="pm-oculto">Sin títulos aún.</p>';
+        statsHtml = `<div class="pm-radar">${construirRadar(nivel)}</div>${tit}`;
+      } else {
+        statsHtml = '<p class="pm-oculto">Esta persona mantiene sus stats en privado.</p>';
+      }
+
+      const card = document.getElementById('perfil-modal-card');
+      if (card) card.innerHTML = `
+        <button class="pm-close" onclick="cerrarPerfilModal()" aria-label="Cerrar">×</button>
+        ${fotoHtml}
+        <div class="pm-nombre">${nombre}</div>
+        ${apodo}
+        <div class="pm-tags">${tags}</div>
+        ${statsHtml}`;
+      const m = document.getElementById('perfil-modal');
+      if (m) m.style.display = 'flex';
+    };
+    window.cerrarPerfilModal = () => {
+      const m = document.getElementById('perfil-modal');
+      if (m) m.style.display = 'none';
+    };
+
     // Trae de la red todos los perfiles públicos (opt-out con perfilPublico:false).
     window.buscarPerfiles = async () => {
       const vacio = document.getElementById('dir-vacio');
@@ -1025,6 +1085,7 @@
         _dirCache = [];
         snap.forEach(s => {
           const d = s.data();
+          d._id = s.id;   // doc id (uid) → para abrir el modal de detalle al hacer click
           if (d.visibilidad && d.visibilidad.perfilPublico === false) return; // respeta opt-out
           _dirCache.push(d);
         });
@@ -2250,6 +2311,26 @@
       color:#fff; font-weight:700; font-size:.78rem; padding:7px 16px; border-radius:20px; text-decoration:none; }
     .dir-vacio { text-align:center; color:rgba(255,255,255,.5); font-size:.85rem; margin-top:18px; }
     .comunidad-links { display:flex; gap:12px; justify-content:center; flex-wrap:wrap; margin:1.4rem auto 0; }
+    /* Tarjeta clicable del directorio */
+    .dir-card-click { cursor:pointer; transition:transform .12s ease, border-color .12s ease, box-shadow .12s ease; }
+    .dir-card-click:hover { transform:translateY(-3px); border-color:rgba(255,204,0,.5); box-shadow:0 8px 24px rgba(0,0,0,.45); }
+    .dir-card-click:focus-visible { outline:2px solid var(--amarillo); outline-offset:2px; }
+    .dir-card-ver { margin-top:10px; font-size:.72rem; font-weight:700; color:var(--amarillo); opacity:.8; }
+    /* Modal de detalle de perfil */
+    .pm-card { position:relative; max-width:420px; }
+    .pm-close { position:absolute; top:8px; right:12px; background:transparent; border:none; color:rgba(255,255,255,.6);
+      font-size:1.7rem; line-height:1; cursor:pointer; padding:2px 6px; }
+    .pm-close:hover { color:#fff; }
+    .pm-foto { width:112px; height:112px; border-radius:50%; object-fit:cover; margin:6px auto 14px;
+      display:block; border:3px solid var(--amarillo); background:#111; }
+    .pm-foto-ph { display:flex; align-items:center; justify-content:center;
+      background:linear-gradient(135deg,#ff5ea8,#a855f7); color:#fff; font-size:2.6rem; font-weight:800; }
+    .pm-nombre { font-weight:800; font-size:1.3rem; color:#fff; }
+    .pm-apodo { font-style:italic; color:var(--amarillo); font-size:.95rem; margin-top:2px; }
+    .pm-tags { display:flex; flex-wrap:wrap; gap:6px; justify-content:center; margin:12px 0 6px; }
+    .pm-radar { margin:10px auto 0; max-width:300px; }
+    .pm-titulos { display:flex; flex-wrap:wrap; gap:6px; justify-content:center; margin-top:12px; }
+    .pm-oculto { color:rgba(255,255,255,.5); font-size:.82rem; margin-top:16px; }
 
     /* ===== CALENDARIO DE HORARIOS ===== */
     .cal-toolbar { display:flex; flex-wrap:wrap; gap:12px; align-items:center; justify-content:center; max-width:1100px; margin:0 auto 18px; }
@@ -3401,6 +3482,12 @@
         <button class="onb-save" onclick="guardarHorario()">Guardar</button>
       </div>
     </div>
+  </div>
+
+
+  <!-- MODAL: DETALLE DE PERFIL (click en una tarjeta del directorio) -->
+  <div id="perfil-modal" class="onb-bg" style="display:none;" onclick="if(event.target===this)cerrarPerfilModal()">
+    <div id="perfil-modal-card" class="onb-card pm-card"></div>
   </div>
 
 
