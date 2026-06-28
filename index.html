@@ -50,7 +50,7 @@
     import { getAuth, signInWithPopup, signOut, onAuthStateChanged, GoogleAuthProvider,
              createUserWithEmailAndPassword, signInWithEmailAndPassword, updateProfile }
       from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
-    import { getFirestore, doc, getDoc, setDoc, collection, addDoc, query, where, getDocs, updateDoc, deleteDoc, serverTimestamp }
+    import { getFirestore, doc, getDoc, setDoc, collection, addDoc, query, where, getDocs, updateDoc, deleteDoc, serverTimestamp, arrayUnion }
       from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
     // ════════════════════════════════════════════════════════════════════
@@ -86,7 +86,7 @@
           icono:          'Images/Icono_4.png'
         },
         contacto: {
-          calendarioPrueba: 'https://calendar.app.google/ryLFrBeakHMMPRBMA',
+          // Clase de prueba: ahora EXIGE registro (no hay link de calendario).
           formspree:        'https://formspree.io/f/mwvzdowd'
         },
         // Dominio TÉCNICO del correo sintético del login usuario+contraseña.
@@ -112,6 +112,12 @@
         // validación local). Pega la site key y despliega; activa el enforcement
         // en la consola SOLO tras confirmar que llegan tokens. (Ver checklist.)
         recaptchaV3SiteKey: "6Lf3BTotAAAAADUKUyKisJc7l5MtAJmugOyctCn1",
+        // PUSH (FCM): VAPID key web de ESTA academia (Firebase Console →
+        // Cloud Messaging → "Certificados push web" → par de claves). VACÍO =
+        // pedimos permiso y lo explicamos, pero NO capturamos token todavía
+        // (el envío remoto llega con el backend n8n/VPS, Fase 4). Pega la clave
+        // y el cliente empezará a registrar tokens FCM por usuario.
+        pushVapidKey: "",
         superAdminEmail: "treseenicos@gmail.com"
       }
       // ──> Para agregar Fressvia u otra academia, añade aquí otra entrada.
@@ -142,8 +148,6 @@
         root.style.setProperty('--tenant-fondo',    TENANT.marca.colorFondo);
         const meta = document.querySelector('meta[name="theme-color"]');
         if (meta) meta.setAttribute('content', TENANT.marca.colorPrimario);
-        const cal = document.getElementById('btn-clase-prueba');
-        if (cal) cal.setAttribute('href', TENANT.contacto.calendarioPrueba);
         const fc = document.getElementById('form-contacto');
         if (fc) fc.setAttribute('action', TENANT.contacto.formspree);
       } catch (e) { console.error('aplicarTenant:', e); }
@@ -286,6 +290,18 @@
         if (s) { s.style.display = 'block'; s.scrollIntoView({ behavior:'smooth' }); }
       } else {
         window.abrirLoginModal('login');
+      }
+    };
+
+    // CLASE DE PRUEBA → ya NO es un link externo de calendario. Para tener una
+    // clase de prueba hay que REGISTRARSE: a invitados se les abre "Crear cuenta";
+    // a quien ya entró se le lleva a los horarios para que agende.
+    window.agendarPrueba = () => {
+      if (window.usuarioActual) {
+        const s = document.getElementById('horarios');
+        if (s) s.scrollIntoView({ behavior:'smooth' });
+      } else {
+        window.abrirLoginModal('reg');
       }
     };
 
@@ -623,9 +639,19 @@
         }
         if (apodoBtn) apodoBtn.style.display = rk.puedeApodo ? 'inline' : 'none';
 
-        const fotoEl = document.getElementById('perfil-foto');
-        if (fotoEl && (d.foto || (usuarioActual && usuarioActual.photoURL))) {
-          fotoEl.src = d.foto || usuarioActual.photoURL;
+        // Avatar del perfil: emoji elegido o, si no, foto/URL (compat).
+        if (!pintarAvatarEl('perfil-foto', 'perfil-foto-emoji', d, '2rem')) {
+          const fotoEl = document.getElementById('perfil-foto');
+          if (fotoEl) {
+            fotoEl.style.display = '';
+            if (d.foto || (usuarioActual && usuarioActual.photoURL))
+              fotoEl.src = d.foto || usuarioActual.photoURL;
+          }
+        }
+        // El chip del nav refleja el mismo avatar (emoji o foto).
+        if (!pintarAvatarEl('user-foto', 'user-foto-emoji', d, '1rem')) {
+          const uf = document.getElementById('user-foto');
+          if (uf) uf.style.display = uf.getAttribute('src') ? '' : 'none';
         }
 
         // Radar de stats
@@ -758,11 +784,18 @@
       if (!modal) return;
       const inNombre = document.getElementById('onb-nombre');
       const inTel    = document.getElementById('onb-tel');
-      const foto     = document.getElementById('onb-foto');
       if (inNombre) inNombre.value = perfil.nombreVisible || perfil.handle || '';
       if (inTel)    inTel.value = '';
-      if (foto && (perfil.foto || (usuarioActual && usuarioActual.photoURL)))
-        foto.src = perfil.foto || usuarioActual.photoURL;
+      // Avatar: emoji elegido o foto/URL (compat con perfiles viejos / Google).
+      if (!pintarAvatarEl('onb-foto', 'onb-foto-emoji', perfil, '2.2rem')) {
+        const foto = document.getElementById('onb-foto');
+        if (foto) {
+          foto.style.display = '';
+          if (perfil.foto || (usuarioActual && usuarioActual.photoURL))
+            foto.src = perfil.foto || usuarioActual.photoURL;
+        }
+      }
+      sincronizarBotonPush();   // refleja el permiso de notificaciones actual
       modal.style.display = 'flex';
     }
     window.cerrarOnboarding = async (skip) => {
@@ -784,10 +817,54 @@
         await updateDoc(doc(db, "usuarios", usuarioActual.uid), patch);
         // Teléfono va al doc PRIVADO (oculto para otros usuarios)
         if (tel) await setDoc(doc(db, "usuarios_priv", usuarioActual.uid), { telefono: tel }, { merge: true });
+        // PUSH al registrarse: si todavía no decidió, se le pide aquí mismo (este
+        // click es un gesto válido para mostrar el prompt del navegador).
+        await pedirPermisoPush();
         document.getElementById('onboarding-modal').style.display = 'none';
         cargarPerfil(usuarioActual.uid);
       } catch(e) { console.error('guardarOnboarding:', e); alert('No se pudo guardar. Intenta de nuevo.'); }
     };
+
+    // ── PUSH (notificaciones) ─────────────────────────────────────────────
+    // Al registrarse pedimos permiso y EXPLICAMOS por qué conviene tenerlas
+    // (avisos/promociones/cambios/noticias). El ENVÍO remoto vive en el backend
+    // (n8n en el VPS propio, Fase 4). Aquí guardamos el permiso y, en cuanto la
+    // academia tenga su VAPID key (TENANT.pushVapidKey), capturamos el token FCM.
+    function sincronizarBotonPush() {
+      const btn = document.getElementById('onb-push-btn');
+      if (!btn) return;
+      if (!('Notification' in window)) { btn.textContent = 'No disponible en este navegador'; btn.disabled = true; return; }
+      const perm = Notification.permission;
+      if (perm === 'granted')      { btn.textContent = '✅ Notificaciones activadas'; btn.disabled = true; }
+      else if (perm === 'denied')  { btn.textContent = '🔕 Bloqueadas — actívalas en tu navegador'; btn.disabled = false; }
+      else                         { btn.textContent = 'Activar notificaciones'; btn.disabled = false; }
+    }
+    window.pedirPermisoPush = async () => {
+      if (!('Notification' in window)) { sincronizarBotonPush(); return 'unsupported'; }
+      let permiso = Notification.permission;
+      try { if (permiso === 'default') permiso = await Notification.requestPermission(); }
+      catch(e) { console.error('push permiso:', e); }
+      sincronizarBotonPush();
+      if (usuarioActual) {
+        try { await updateDoc(doc(db, "usuarios", usuarioActual.uid), { notifPermiso: permiso, notifPedidoTs: Date.now() }); }
+        catch(e) { console.error('push estado:', e); }
+      }
+      // Token FCM: SOLO si esta academia ya configuró su VAPID key.
+      if (permiso === 'granted' && TENANT.pushVapidKey) capturarTokenPush().catch(e => console.error('push token:', e));
+      return permiso;
+    };
+    // Captura del token FCM. DIFERIDO: requiere TENANT.pushVapidKey + un service
+    // worker de messaging. Sin VAPID key no se ejecuta (no rompe nada hoy).
+    async function capturarTokenPush() {
+      if (!TENANT.pushVapidKey || !usuarioActual) return;
+      try {
+        const { getMessaging, getToken } = await import('https://www.gstatic.com/firebasejs/10.12.0/firebase-messaging.js');
+        const messaging = getMessaging(app);
+        const reg = await navigator.serviceWorker.getRegistration();
+        const token = await getToken(messaging, { vapidKey: TENANT.pushVapidKey, serviceWorkerRegistration: reg });
+        if (token) await updateDoc(doc(db, "usuarios", usuarioActual.uid), { fcmTokens: arrayUnion(token) });
+      } catch(e) { console.error('capturarTokenPush:', e); }
+    }
 
     // ── PANEL ADMIN (solo Rank 0): otorgar ranks por ID corto ──
     window.otorgarRank = async () => {
@@ -864,19 +941,50 @@
       }
     };
 
-    // ── Editar FOTO de perfil (v1: por URL, gratis sin Storage) ──
-    window.abrirEditarFoto = async () => {
+    // ── Editar AVATAR de perfil: por EMOJI (ya NO por URL/link) ───────────
+    // Abre un selector con 50 emojis (cielo/días/animales/caritas). Sin subir
+    // data y sin pegar "links raros": el alumno toca un emoji y ese es su avatar.
+    window.abrirEditarFoto = () => {
       if (!usuarioActual) return;
-      const actual = (document.getElementById('perfil-foto')?.src) || '';
-      const nuevo = prompt('Pega la URL de tu foto de perfil (https://...). Déjalo vacío para quitarla:', actual);
-      if (nuevo === null) return;
-      const url = nuevo.trim();
-      // Validación mínima: vacío (quitar) o http/https
-      if (url && !/^https?:\/\//i.test(url)) { alert('La URL debe empezar con http:// o https://'); return; }
+      const grid  = document.getElementById('emoji-grid');
+      const modal = document.getElementById('emoji-modal');
+      if (!grid || !modal) return;
+      if (!grid.dataset.listo) {                       // construye la grilla 1 sola vez
+        grid.innerHTML = AVATAR_EMOJIS
+          .map(e => `<button type="button" class="emoji-pick" data-emoji="${e}" aria-label="avatar">${e}</button>`)
+          .join('');
+        grid.addEventListener('click', ev => {
+          const b = ev.target.closest('.emoji-pick');
+          if (b) elegirAvatarEmoji(b.dataset.emoji);
+        });
+        grid.dataset.listo = '1';
+      }
+      modal.style.display = 'flex';
+    };
+    window.cerrarEmojiModal = () => {
+      const m = document.getElementById('emoji-modal'); if (m) m.style.display = 'none';
+    };
+    // Guarda el emoji elegido y LIMPIA la foto/URL anterior (adiós "link raro").
+    window.elegirAvatarEmoji = async (emoji) => {
+      if (!usuarioActual || !esEmojiValido(emoji)) return;
       try {
-        await updateDoc(doc(db, "usuarios", usuarioActual.uid), { foto: url });
+        await updateDoc(doc(db, "usuarios", usuarioActual.uid), { avatarEmoji: emoji, foto: '' });
+        cerrarEmojiModal();
+        // Refresca el avatar del onboarding si está abierto (registro en curso).
+        const onb = document.getElementById('onboarding-modal');
+        if (onb && onb.style.display === 'flex')
+          pintarAvatarEl('onb-foto', 'onb-foto-emoji', { avatarEmoji: emoji }, '2.2rem');
         cargarPerfil(usuarioActual.uid);
-      } catch(e) { console.error('foto:', e); alert('No se pudo guardar la foto.'); }
+      } catch(e) { console.error('avatar emoji:', e); alert('No se pudo guardar tu avatar.'); }
+    };
+    // Quitar avatar: vuelve a la inicial del nombre (sin emoji ni foto).
+    window.quitarAvatarEmoji = async () => {
+      if (!usuarioActual) return;
+      try {
+        await updateDoc(doc(db, "usuarios", usuarioActual.uid), { avatarEmoji: '', foto: '' });
+        cerrarEmojiModal();
+        cargarPerfil(usuarioActual.uid);
+      } catch(e) { console.error('quitar avatar:', e); alert('No se pudo quitar el avatar.'); }
     };
 
     // ── Editar SEMBLANZA docente (la edita la propia persona; cosmética) ──
@@ -969,11 +1077,51 @@
     let _dirCache = [];        // perfiles públicos ya cargados
     let _dirFiltro = 'todos';
 
+    // ── AVATAR POR EMOJI (reemplaza el "link" de foto; NO sube data) ──────
+    // 50 emojis de cielo/días, animales y caritas. En el perfil guardamos solo
+    // el emoji elegido (campo avatarEmoji). La whitelist es la frontera de
+    // seguridad: al pintar y al guardar solo aceptamos un emoji de esta lista.
+    const AVATAR_EMOJIS = [
+      // Cielo y días (16)
+      '☀️','🌙','⭐','🌟','✨','☁️','⛅','🌈','🌤️','🌧️','⛈️','❄️','🌠','🌌','🪐','🌅',
+      // Animales (22)
+      '🐱','🐶','🦊','🐼','🐨','🦁','🐯','🦄','🐰','🐹','🐭','🐻','🐲','🦋','🐸','🐵','🦉','🦅','🐢','🐧','🐳','🐙',
+      // Caritas (12)
+      '😀','😄','😎','🥳','😇','🤩','😺','🙂','😊','😍','🤗','😸'
+    ];
+    const esEmojiValido = e => typeof e === 'string' && AVATAR_EMOJIS.includes(e);
+
+    // Markup de avatar para tarjetas/modales (devuelve string HTML). Prioridad:
+    //   1) emoji elegido · 2) foto por URL (compat con perfiles viejos) · 3) inicial.
+    function avatarMarkup(d, claseBase, clasePh, nombre) {
+      if (d && esEmojiValido(d.avatarEmoji))
+        return `<div class="${claseBase} ${clasePh} avatar-emoji">${d.avatarEmoji}</div>`;
+      const foto = urlSegura(d && d.foto);
+      if (foto)
+        return `<img class="${claseBase}" src="${escapeHtml(foto)}" alt="${nombre}" loading="lazy" onerror="this.style.display='none'">`;
+      const inicial = escapeHtml(((d && (d.nombreVisible || d.handle)) || 'A').charAt(0).toUpperCase());
+      return `<div class="${claseBase} ${clasePh}">${inicial}</div>`;
+    }
+
+    // Pinta un avatar sobre un <img> FIJO (perfil/onboarding/chip del nav) usando
+    // un <div> hermano para el emoji. Si hay emoji válido: muestra el div con el
+    // emoji (tamaño = tam) y oculta la <img>; devuelve true. Si no, oculta el div
+    // y devuelve false (el llamador decide qué hacer con la <img>).
+    function pintarAvatarEl(imgId, emojiId, d, tam) {
+      const img = document.getElementById(imgId);
+      const em  = document.getElementById(emojiId);
+      const emoji = (d && esEmojiValido(d.avatarEmoji)) ? d.avatarEmoji : '';
+      if (emoji) {
+        if (em) { em.textContent = emoji; em.style.fontSize = tam; em.style.display = 'flex'; }
+        if (img) img.style.display = 'none';
+        return true;
+      }
+      if (em) em.style.display = 'none';
+      return false;
+    }
+
     function fotoCard(d, nombre) {
-      const foto = urlSegura(d.foto);
-      if (foto) return `<img class="dir-card-foto" src="${escapeHtml(foto)}" alt="${nombre}" loading="lazy" onerror="this.style.display='none'">`;
-      const inicial = escapeHtml((d.nombreVisible || d.handle || 'A').charAt(0).toUpperCase());
-      return `<div class="dir-card-foto dir-card-foto-ph">${inicial}</div>`;
+      return avatarMarkup(d, 'dir-card-foto', 'dir-card-foto-ph', nombre);
     }
 
     function renderPerfilCard(d) {
@@ -1041,6 +1189,22 @@
       if (term) lista = lista.filter(d =>
         [d.nombreVisible, d.apodo, d.handle, d.userIdCorto]
           .some(v => String(v||'').toLowerCase().includes(term)));
+      // ORDEN DE PRESENTACIÓN: instructoras → asistentes → colaboradores → alumnado.
+      // Cada perfil cae en UN solo grupo por prioridad (un colaborador que además
+      // imparte clases sale en "instructoras"). Dentro del grupo, alfabético.
+      const grupoOrden = d => {
+        const rank = d.rank ?? RANK_DEFAULT;
+        if (d.imparteClases || rank <= RANK.INSTRUCTORA) return 0; // Dueño/Admin/Instructoras
+        if (rank === RANK.ASISTENTE) return 1;                     // Asistentes
+        if (d.colaborador) return 2;                               // Colaboradores
+        return 3;                                                   // Alumnado y demás
+      };
+      lista.sort((a, b) => {
+        const ga = grupoOrden(a), gb = grupoOrden(b);
+        if (ga !== gb) return ga - gb;
+        return String(a.nombreVisible || a.handle || '')
+          .localeCompare(String(b.nombreVisible || b.handle || ''), 'es', { sensitivity: 'base' });
+      });
       if (cont) cont.innerHTML = lista.map(renderPerfilCard).join('');
       if (vacio) {
         vacio.style.display = lista.length ? 'none' : 'block';
@@ -1069,11 +1233,8 @@
       const nombre = escapeHtml(d.nombreVisible || d.handle || 'Aerialista');
       const apodo  = d.apodo ? `<div class="pm-apodo">«${escapeHtml(d.apodo)}»</div>` : '';
 
-      // Foto (o placeholder con inicial)
-      const foto = urlSegura(d.foto);
-      const fotoHtml = foto
-        ? `<img class="pm-foto" src="${escapeHtml(foto)}" alt="${nombre}" onerror="this.style.display='none'">`
-        : `<div class="pm-foto pm-foto-ph">${escapeHtml((d.nombreVisible||d.handle||'A').charAt(0).toUpperCase())}</div>`;
+      // Avatar: emoji elegido, foto por URL (compat) o inicial.
+      const fotoHtml = avatarMarkup(d, 'pm-foto', 'pm-foto-ph', nombre);
 
       // Rango + roles
       let tags = `<span class="rol-tag ${rk.clase}">${escapeHtml(rk.nombre)}</span>`;
@@ -2564,6 +2725,44 @@
       flex:2; background:linear-gradient(90deg,#ffd700,#ff9d00); color:#111; font-weight:800;
       border:none; border-radius:8px; padding:11px; cursor:pointer; font-size:.9rem;
     }
+    /* Avatar por EMOJI: fondo neutro + emoji centrado. Sirve en tarjeta, modal,
+       perfil, onboarding y chip del nav. El tamaño lo fija cada contexto (las
+       tarjetas/modal por su clase -ph; perfil/onb/nav en línea desde JS). */
+    .avatar-emoji {
+      display:flex !important; align-items:center; justify-content:center; line-height:1;
+      background:radial-gradient(circle at 50% 36%, #2b2440, #14101c) !important;
+      -webkit-user-select:none; user-select:none; overflow:hidden;
+    }
+    /* Selector de avatar (grilla de emojis) */
+    .emoji-card { max-width:360px; }
+    .emoji-grid {
+      display:grid; grid-template-columns:repeat(6,1fr); gap:6px;
+      margin:6px 0 2px; max-height:46vh; overflow-y:auto; padding:2px;
+    }
+    .emoji-grid .emoji-pick {
+      font-size:1.5rem; line-height:1; padding:8px 0; cursor:pointer;
+      background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.12);
+      border-radius:10px; transition:transform .1s ease, background .1s ease, border-color .1s ease;
+    }
+    .emoji-grid .emoji-pick:hover { transform:scale(1.12); background:rgba(255,204,0,.18); border-color:var(--amarillo); }
+    /* Botón "Elegir avatar" en el onboarding */
+    .onb-avatar-btn {
+      background:transparent; border:1px solid rgba(255,204,0,.4); color:var(--amarillo);
+      border-radius:20px; padding:6px 16px; font-size:.78rem; font-weight:700; cursor:pointer;
+      margin:0 auto 4px; display:inline-block;
+    }
+    .onb-avatar-btn:hover { background:rgba(255,204,0,.12); }
+    /* Bloque de activación de notificaciones Push en el onboarding */
+    .onb-push {
+      margin-top:16px; padding:12px 14px; border-radius:10px; text-align:left;
+      background:rgba(255,204,0,.07); border:1px solid rgba(255,204,0,.22);
+    }
+    .onb-push-txt { font-size:.78rem; color:rgba(255,255,255,.82); line-height:1.5; margin:0 0 10px; }
+    .onb-push-btn {
+      width:100%; background:linear-gradient(90deg,#ffd700,#ff9d00); color:#111; font-weight:800;
+      border:none; border-radius:8px; padding:10px; cursor:pointer; font-size:.84rem;
+    }
+    .onb-push-btn:disabled { opacity:.7; cursor:default; filter:grayscale(.2); }
     .reserva-item {
       background:rgba(20,20,20,.8);
       border:1px solid rgba(255,204,0,.1);
@@ -2997,6 +3196,7 @@
       <div class="nav-auth">
         <button id="user-info" onclick="irAMiCuenta()" title="Ir a Mi Cuenta">
           <img id="user-foto" src="" alt="foto">
+          <div id="user-foto-emoji" class="avatar-emoji" style="display:none;width:30px;height:30px;border-radius:50%;border:1px solid var(--amarillo);font-size:1rem;"></div>
           <span id="user-name"></span>
         </button>
         <button id="btn-login" class="btn-header" onclick="abrirLoginModal('login')">
@@ -3022,7 +3222,7 @@
       <button type="button" class="btn-primario" onclick="irAMiCuenta()">Mi Cuenta</button>
     </div>
     <div class="hero-btns" style="margin-top:14px;">
-      <a id="btn-clase-prueba" href="https://calendar.app.google/ryLFrBeakHMMPRBMA" target="_blank" rel="noopener noreferrer" class="btn-primario">Agendar Clase de Prueba</a>
+      <button type="button" id="btn-clase-prueba" class="btn-primario" onclick="agendarPrueba()">Agendar Clase de Prueba</button>
       <a href="#precios" class="btn-secundario">Ver Planes</a>
     </div>
     <div class="hero-scroll">
@@ -3249,7 +3449,7 @@
       <span class="seccion-eyebrow">Organiza tu semana</span>
       <h2 class="seccion-titulo">Horarios</h2>
       <div class="titulo-linea"></div>
-      <p class="seccion-desc">Lunes a Viernes · Kids 4:30–6 pm · Adultos 6–8 pm · Clases especiales Flex y Aro Mar & Jue.</p>
+      <p class="seccion-desc">Lunes a Viernes · Kids 5:30–6 pm · Adultos 6–8 pm · Clases especiales Flex y Aro Mar & Jue.</p>
     </div>
     <div class="plan-selector">
       <button class="plan-btn" data-plan="individual">Clase Individual</button>
@@ -3270,7 +3470,7 @@
       </table>
     </div>
     <div class="horario-leyenda">
-      <div class="leyenda-item"><div class="leyenda-dot" style="background:#e87400;opacity:.7"></div>Kids (4:30–6 pm)</div>
+      <div class="leyenda-item"><div class="leyenda-dot" style="background:#e87400;opacity:.7"></div>Kids (5:30–6 pm)</div>
       <div class="leyenda-item"><div class="leyenda-dot" style="background:var(--amarillo);opacity:.7"></div>Adultos (6–7 pm / 7–8 pm)</div>
       <div class="leyenda-item"><div class="leyenda-dot" style="background:#80d8ff;opacity:.7"></div>Flex — Mar & Jue 6–7 pm</div>
       <div class="leyenda-item"><div class="leyenda-dot" style="background:#d8a0ff;opacity:.7"></div>Aro — Mar & Jue 7–8 pm</div>
@@ -3357,7 +3557,8 @@
       <div class="perfil-head">
         <div id="perfil-foto-wrap" class="perfil-foto-wrap">
           <img id="perfil-foto" class="perfil-foto" src="" alt="Foto de perfil">
-          <button class="perfil-foto-edit" onclick="abrirEditarFoto()" title="Cambiar foto">✎</button>
+          <div id="perfil-foto-emoji" class="perfil-foto avatar-emoji" style="display:none;"></div>
+          <button class="perfil-foto-edit" onclick="abrirEditarFoto()" title="Cambiar avatar">✎</button>
         </div>
         <div class="perfil-head-info">
           <div class="perfil-nombre-row">
@@ -3550,10 +3751,17 @@
       <h3 class="onb-title">¡Bienvenida/o a Circanícula! ✨</h3>
       <p class="onb-sub">Personaliza tu perfil. Todo es editable después.</p>
       <img id="onb-foto" class="onb-foto" src="" alt="Foto">
+      <div id="onb-foto-emoji" class="onb-foto avatar-emoji" style="display:none;margin-left:auto;margin-right:auto;"></div>
+      <button type="button" class="onb-avatar-btn" onclick="abrirEditarFoto()">Elegir avatar ✨</button>
       <label class="onb-label">Nombre de usuario</label>
       <input id="onb-nombre" class="onb-input" type="text" maxlength="40" placeholder="Tu nombre visible">
       <label class="onb-label">Teléfono <span class="onb-opt">(opcional · privado, solo lo ven las instructoras)</span></label>
       <input id="onb-tel" class="onb-input" type="tel" maxlength="20" placeholder="Ej. 662 123 4567">
+      <div class="onb-push">
+        <p class="onb-push-txt">🔔 <strong>Activa las notificaciones.</strong> Te recomendamos tenerlas
+          encendidas para enterarte de <strong>avisos, promociones, cambios y noticias</strong> de Circanícula.</p>
+        <button type="button" class="onb-push-btn" id="onb-push-btn" onclick="pedirPermisoPush()">Activar notificaciones</button>
+      </div>
       <div class="onb-btns">
         <button class="onb-skip" onclick="cerrarOnboarding(true)">Más tarde</button>
         <button class="onb-save" onclick="guardarOnboarding()">Guardar</button>
@@ -3561,6 +3769,19 @@
     </div>
   </div>
 
+
+  <!-- MODAL: ELEGIR AVATAR (emoji, sin subir data) -->
+  <div id="emoji-modal" class="onb-bg" style="display:none;">
+    <div class="onb-card emoji-card">
+      <h3 class="onb-title">Elige tu avatar ✨</h3>
+      <p class="onb-sub">Toca un emoji. Es tu foto de perfil — sin subir nada.</p>
+      <div id="emoji-grid" class="emoji-grid"></div>
+      <div class="onb-btns">
+        <button class="onb-skip" onclick="quitarAvatarEmoji()">Quitar avatar</button>
+        <button class="onb-skip" onclick="cerrarEmojiModal()">Cerrar</button>
+      </div>
+    </div>
+  </div>
 
   <!-- MODAL: AGREGAR HORARIO -->
   <div id="horario-modal" class="onb-bg" style="display:none;">
@@ -3918,7 +4139,7 @@
   // Horario real Circanícula — Lun-Vie
   // Columnas: Lunes, Martes, Miércoles, Jueves, Viernes
   const horarioBase = [
-    ['4:30 – 6:00', 'kids', 'kids',  'kids', 'kids',  'kids' ],
+    ['5:30 – 6:00', 'kids', 'kids',  'kids', 'kids',  'kids' ],
     ['6:00 – 7:00', 'flow', 'flex',  'flow', 'flex',  'flow' ],
     ['7:00 – 8:00', 'fit',  'aro',   'fit',  'aro',   'fit'  ],
   ];
