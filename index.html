@@ -246,6 +246,98 @@
       u = String(u||'').trim();
       return /^https?:\/\//i.test(u) ? u : '';   // solo http/https (evita javascript:)
     }
+
+    /* ════════════════════════════════════════════════════════════════
+       DIÁLOGOS NATIVOS DE LA PÁGINA — reemplazan alert/confirm/prompt del
+       navegador (los "recuadros de Windows"). Devuelven Promesas para poder
+       await. Se exponen en window.* para que también los use el script no-module
+       del calendario de reservas. XSS-safe: todo texto entra por textContent /
+       .value, nunca innerHTML.
+         window.uiAlert(msg, {titulo, okText, peligro})              -> Promise<true>
+         window.uiConfirm(msg, {titulo, okText, cancelText, peligro})-> Promise<bool>
+         window.uiPrompt(label, {titulo, mensaje, valor, placeholder,
+                                 maxlength, multiline, tipo})        -> Promise<string|null>
+         window.uiForm({titulo, mensaje, campos:[{id,label,valor,...}],
+                        okText, cancelText, peligro})                -> Promise<obj|null>
+       ════════════════════════════════════════════════════════════════ */
+    (function () {
+      let _host = null, _resolver = null;
+      function host() {
+        if (!_host) { _host = document.createElement('div'); _host.id = 'ui-dlg-host'; document.body.appendChild(_host); }
+        return _host;
+      }
+      function cerrar(resultado) {
+        document.removeEventListener('keydown', onKey, true);
+        if (_host) _host.innerHTML = '';
+        const r = _resolver; _resolver = null;
+        if (r) r(resultado);
+      }
+      function onKey(e) {
+        if (!_host || !_host.firstChild) return;
+        if (e.key === 'Escape') {
+          const c = _host.querySelector('[data-dlg-cancel]') || _host.querySelector('[data-dlg-ok]');
+          if (c) { e.preventDefault(); c.click(); }
+        } else if (e.key === 'Enter') {
+          if (document.activeElement && document.activeElement.tagName === 'TEXTAREA') return; // newline
+          const ok = _host.querySelector('[data-dlg-ok]');
+          if (ok) { e.preventDefault(); ok.click(); }
+        }
+      }
+      function abrir({ tipo = 'alert', titulo = '', mensaje = '', campos = [], okText, cancelText = 'Cancelar', peligro = false }) {
+        // No apilar: si hay uno abierto, resuélvelo en "negativo" antes de abrir otro.
+        if (_resolver) { const r = _resolver; _resolver = null; r(tipo === 'confirm' ? false : (tipo === 'form' ? null : true)); if (_host) _host.innerHTML = ''; }
+        return new Promise((resolve) => {
+          _resolver = resolve;
+          const h = host();
+          const bg = document.createElement('div'); bg.className = 'ui-dlg-bg';
+          const card = document.createElement('div'); card.className = 'ui-dlg-card' + (peligro ? ' peligro' : '');
+          if (titulo) { const t = document.createElement('h3'); t.className = 'ui-dlg-title'; t.textContent = titulo; card.appendChild(t); }
+          if (mensaje) {
+            const m = document.createElement('p'); m.className = 'ui-dlg-msg';
+            String(mensaje).split('\n').forEach((ln, i) => { if (i) m.appendChild(document.createElement('br')); m.appendChild(document.createTextNode(ln)); });
+            card.appendChild(m);
+          }
+          const inputs = {};
+          (campos || []).forEach((c) => {
+            const wrap = document.createElement('label'); wrap.className = 'ui-dlg-fieldwrap';
+            if (c.label) { const lb = document.createElement('span'); lb.className = 'ui-dlg-label'; lb.textContent = c.label; wrap.appendChild(lb); }
+            const inp = c.multiline ? document.createElement('textarea') : document.createElement('input');
+            if (c.multiline) inp.rows = c.rows || 3; else inp.type = c.tipo || 'text';
+            inp.className = 'ui-dlg-input';
+            if (c.valor != null) inp.value = c.valor;
+            if (c.placeholder) inp.placeholder = c.placeholder;
+            if (c.maxlength) inp.maxLength = c.maxlength;
+            inputs[c.id] = inp; wrap.appendChild(inp); card.appendChild(wrap);
+          });
+          const btns = document.createElement('div'); btns.className = 'ui-dlg-btns';
+          if (tipo !== 'alert') {
+            const cancel = document.createElement('button'); cancel.type = 'button';
+            cancel.className = 'ui-dlg-cancel'; cancel.textContent = cancelText; cancel.setAttribute('data-dlg-cancel', '');
+            cancel.onclick = () => cerrar(tipo === 'confirm' ? false : null);
+            btns.appendChild(cancel);
+          }
+          const ok = document.createElement('button'); ok.type = 'button';
+          ok.className = 'ui-dlg-ok' + (peligro ? ' peligro' : '');
+          ok.textContent = okText || (tipo === 'confirm' ? 'Confirmar' : (tipo === 'form' ? 'Guardar' : 'Entendido'));
+          ok.setAttribute('data-dlg-ok', '');
+          ok.onclick = () => {
+            if (tipo === 'form') { const v = {}; for (const k in inputs) v[k] = inputs[k].value; cerrar(v); }
+            else cerrar(true);
+          };
+          btns.appendChild(ok); card.appendChild(btns);
+          bg.onclick = (e) => { if (e.target !== bg) return; const cb = card.querySelector('[data-dlg-cancel]'); if (cb) cb.click(); else cerrar(true); };
+          bg.appendChild(card); h.appendChild(bg);
+          document.addEventListener('keydown', onKey, true);
+          setTimeout(() => { const f = card.querySelector('.ui-dlg-input') || ok; if (f) f.focus(); }, 30);
+        });
+      }
+      window.uiAlert   = (mensaje, o = {}) => abrir({ tipo:'alert',   mensaje, titulo:o.titulo||'', okText:o.okText, peligro:o.peligro });
+      window.uiConfirm = (mensaje, o = {}) => abrir({ tipo:'confirm', mensaje, titulo:o.titulo||'', okText:o.okText, cancelText:o.cancelText||'Cancelar', peligro:o.peligro });
+      window.uiPrompt  = (label, o = {}) => abrir({ tipo:'form', titulo:o.titulo||'', mensaje:o.mensaje||'', okText:o.okText||'Guardar', cancelText:o.cancelText||'Cancelar',
+                            campos:[{ id:'v', label, valor:o.valor, placeholder:o.placeholder, maxlength:o.maxlength, multiline:o.multiline, tipo:o.tipo }] })
+                            .then(r => r ? r.v : null);
+      window.uiForm    = (o = {}) => abrir({ tipo:'form', titulo:o.titulo||'', mensaje:o.mensaje||o.descripcion||'', campos:o.campos||[], okText:o.okText||'Guardar', cancelText:o.cancelText||'Cancelar', peligro:o.peligro });
+    })();
     // ─────────────────────────────────────────────────────
 
     const app      = initializeApp(firebaseConfig);
@@ -739,17 +831,17 @@
       const snap = await getDoc(doc(db, "usuarios", usuarioActual.uid));
       const rank = snap.exists() ? (snap.data().rank ?? RANK_DEFAULT) : RANK_DEFAULT;
       if (!(RANKS[rank] && RANKS[rank].puedeApodo)) {
-        alert('Los apodos son exclusivos del staff (Dueño, Administración, Instructoras y Asistentes).');
+        await uiAlert('Los apodos son exclusivos del staff (Dueño, Administración, Instructoras y Asistentes).', { titulo: 'Solo staff' });
         return;
       }
       const actual = snap.data().apodo || '';
-      const nuevo = prompt('Tu apodo (máx. 24):', actual);
+      const nuevo = await uiPrompt('Tu apodo', { titulo: 'Editar apodo', valor: actual, maxlength: 24, placeholder: 'Máx. 24 caracteres' });
       if (nuevo === null) return;
       const limpio = nuevo.trim().slice(0, 24);
       try {
         await updateDoc(doc(db, "usuarios", usuarioActual.uid), { apodo: limpio });
         cargarPerfil(usuarioActual.uid);
-      } catch (e) { console.error('apodo:', e); alert('No se pudo guardar el apodo.'); }
+      } catch (e) { console.error('apodo:', e); await uiAlert('No se pudo guardar el apodo.', { titulo: 'Error', peligro: true }); }
     };
 
     // Editar teléfono propio (doc privado)
@@ -760,19 +852,19 @@
         const priv = await getDoc(doc(db, "usuarios_priv", usuarioActual.uid));
         actual = priv.exists() ? (priv.data().telefono || '') : '';
       } catch {}
-      const nuevo = prompt('Tu teléfono (privado, solo lo ven las instructoras):', actual);
+      const nuevo = await uiPrompt('Tu teléfono', { titulo: 'Editar teléfono', mensaje: 'Privado, solo lo ven las instructoras.', valor: actual, maxlength: 20, tipo: 'tel', placeholder: '10 dígitos' });
       if (nuevo === null) return;
       const limpio = nuevo.trim().slice(0, 20);
       try {
         await setDoc(doc(db, "usuarios_priv", usuarioActual.uid), { telefono: limpio }, { merge: true });
         cargarPerfil(usuarioActual.uid);
-      } catch(e) { console.error('tel:', e); alert('No se pudo guardar el teléfono.'); }
+      } catch(e) { console.error('tel:', e); await uiAlert('No se pudo guardar el teléfono.', { titulo: 'Error', peligro: true }); }
     };
 
     // Candado de Estrellas (créditos) — activo hasta Agosto.
-    window.accionEstrellas = () => {
+    window.accionEstrellas = async () => {
       if (!ESTRELLAS_ACTIVAS) {
-        alert('⭐ Las Estrellas estarán disponibles a partir de Agosto. ¡Muy pronto podrás comprarlas y canjearlas!');
+        await uiAlert('Las Estrellas estarán disponibles a partir de Agosto. ¡Muy pronto podrás comprarlas y canjearlas!', { titulo: '⭐ Estrellas' });
         return;
       }
       // (Futuro) abrir sección/compra de Estrellas
@@ -821,10 +913,11 @@
       const err = await guardarCamposPerfil(patch);
       if (err) {
         console.error('guardarOnboarding:', err);
-        alert('No se pudo guardar (' + err + ').' +
+        await uiAlert('No se pudo guardar (' + err + ').\n\n' +
           (/permission-denied/i.test(err)
-            ? '\n\nParece App Check o permisos. Reintenta; si sigue, avísame.'
-            : '\n\nReintenta. Si persiste, cierra sesión y vuelve a entrar.'));
+            ? 'Parece App Check o permisos. Reintenta; si sigue, avísame.'
+            : 'Reintenta. Si persiste, cierra sesión y vuelve a entrar.'),
+          { titulo: 'Error al guardar', peligro: true });
         return;
       }
       // Teléfono va al doc PRIVADO (oculto para otros usuarios). No bloquea el cierre.
@@ -1018,7 +1111,7 @@
     window.elegirAvatarEmoji = async (emoji) => {
       if (!usuarioActual || !esEmojiValido(emoji)) return;
       const err = await guardarCamposPerfil({ avatarEmoji: emoji, foto: '' });
-      if (err) { alert('No se pudo guardar tu avatar (' + err + ').'); return; }
+      if (err) { await uiAlert('No se pudo guardar tu avatar (' + err + ').', { titulo: 'Error', peligro: true }); return; }
       cerrarEmojiModal();
       refrescarAvatares({ avatarEmoji: emoji });
       cargarPerfil(usuarioActual.uid);
@@ -1027,7 +1120,7 @@
     window.quitarAvatarEmoji = async () => {
       if (!usuarioActual) return;
       const err = await guardarCamposPerfil({ avatarEmoji: '', foto: '' });
-      if (err) { alert('No se pudo quitar el avatar (' + err + ').'); return; }
+      if (err) { await uiAlert('No se pudo quitar el avatar (' + err + ').', { titulo: 'Error', peligro: true }); return; }
       cerrarEmojiModal();
       refrescarAvatares({ avatarEmoji: '' });
       cargarPerfil(usuarioActual.uid);
@@ -1038,22 +1131,27 @@
       if (!usuarioActual) return;
       const snap = await getDoc(doc(db, "usuarios", usuarioActual.uid));
       const s = (snap.exists() && snap.data().semblanza) || { experiencia:'', clases:'', antiguedad:'' };
-      const experiencia = prompt('Tu experiencia (años, formación, logros):', s.experiencia || '');
-      if (experiencia === null) return;
-      const clases = prompt('¿Qué clases impartes? (telas, aro, danza aérea…):', s.clases || '');
-      if (clases === null) return;
-      const antiguedad = prompt('¿Cuánto tiempo llevas con la academia?:', s.antiguedad || '');
-      if (antiguedad === null) return;
+      const r = await uiForm({
+        titulo: 'Editar semblanza',
+        mensaje: 'Tu información docente para el directorio.',
+        okText: 'Guardar',
+        campos: [
+          { id: 'experiencia', label: 'Tu experiencia (años, formación, logros)', valor: s.experiencia || '', maxlength: 400, multiline: true, placeholder: 'Cuéntale a tus alumnas tu trayectoria…' },
+          { id: 'clases', label: '¿Qué clases impartes?', valor: s.clases || '', maxlength: 200, placeholder: 'Telas, aro, danza aérea…' },
+          { id: 'antiguedad', label: '¿Cuánto tiempo llevas con la academia?', valor: s.antiguedad || '', maxlength: 80, placeholder: 'Ej. 3 años' }
+        ]
+      });
+      if (r === null) return;
       try {
         await updateDoc(doc(db, "usuarios", usuarioActual.uid), {
           semblanza: {
-            experiencia: experiencia.trim().slice(0,400),
-            clases:      clases.trim().slice(0,200),
-            antiguedad:  antiguedad.trim().slice(0,80)
+            experiencia: r.experiencia.trim().slice(0,400),
+            clases:      r.clases.trim().slice(0,200),
+            antiguedad:  r.antiguedad.trim().slice(0,80)
           }
         });
         cargarPerfil(usuarioActual.uid);
-      } catch(e) { console.error('semblanza:', e); alert('No se pudo guardar la semblanza.'); }
+      } catch(e) { console.error('semblanza:', e); await uiAlert('No se pudo guardar la semblanza.', { titulo: 'Error', peligro: true }); }
     };
 
     // ── Editar datos de COLABORADOR (promoción) ──
@@ -1061,26 +1159,31 @@
       if (!usuarioActual) return;
       const snap = await getDoc(doc(db, "usuarios", usuarioActual.uid));
       const c = (snap.exists() && snap.data().colab) || { tipo:'', descripcion:'', enlace:'' };
-      const tipo = prompt('Tipo de colaborador (Fotógrafo, Miss invitada, Influencer…):', c.tipo || '');
-      if (tipo === null) return;
-      const descripcion = prompt('Descripción breve de lo que ofreces:', c.descripcion || '');
-      if (descripcion === null) return;
-      const enlace = prompt('Enlace (Instagram, portafolio… empieza con https://):', c.enlace || '');
-      if (enlace === null) return;
-      const enlaceLimpio = enlace.trim();
+      const r = await uiForm({
+        titulo: 'Editar colaborador',
+        mensaje: 'Tus datos para la sección de promoción.',
+        okText: 'Guardar',
+        campos: [
+          { id: 'tipo', label: 'Tipo de colaborador', valor: c.tipo || '', maxlength: 40, placeholder: 'Fotógrafo, Miss invitada, Influencer…' },
+          { id: 'descripcion', label: 'Descripción breve de lo que ofreces', valor: c.descripcion || '', maxlength: 300, multiline: true, placeholder: 'Una o dos líneas…' },
+          { id: 'enlace', label: 'Enlace (empieza con https://)', valor: c.enlace || '', maxlength: 200, tipo: 'url', placeholder: 'https://instagram.com/…' }
+        ]
+      });
+      if (r === null) return;
+      const enlaceLimpio = r.enlace.trim();
       if (enlaceLimpio && !/^https?:\/\//i.test(enlaceLimpio)) {
-        alert('El enlace debe empezar con http:// o https://'); return;
+        await uiAlert('El enlace debe empezar con http:// o https://', { titulo: 'Enlace inválido', peligro: true }); return;
       }
       try {
         await updateDoc(doc(db, "usuarios", usuarioActual.uid), {
           colab: {
-            tipo:        tipo.trim().slice(0,40),
-            descripcion: descripcion.trim().slice(0,300),
+            tipo:        r.tipo.trim().slice(0,40),
+            descripcion: r.descripcion.trim().slice(0,300),
             enlace:      enlaceLimpio.slice(0,200)
           }
         });
         cargarPerfil(usuarioActual.uid);
-      } catch(e) { console.error('colab:', e); alert('No se pudo guardar.'); }
+      } catch(e) { console.error('colab:', e); await uiAlert('No se pudo guardar.', { titulo: 'Error', peligro: true }); }
     };
 
     // ── Toggle de VISIBILIDAD (cada checkbox guarda su campo anidado) ──
@@ -1088,7 +1191,7 @@
       if (!usuarioActual) return;
       try {
         await updateDoc(doc(db, "usuarios", usuarioActual.uid), { [`visibilidad.${campo}`]: !!valor });
-      } catch(e) { console.error('visibilidad:', e); alert('No se pudo guardar la visibilidad. Reintenta.'); }
+      } catch(e) { console.error('visibilidad:', e); await uiAlert('No se pudo guardar la visibilidad. Reintenta.', { titulo: 'Error', peligro: true }); }
     };
 
     // ── ADMIN: alternar etiquetas de rol (imparteClases/colaborador) por ID corto.
@@ -1485,10 +1588,10 @@
       calCargarHorarios();
     };
 
-    window.abrirAgregarHorario = () => {
+    window.abrirAgregarHorario = async () => {
       if (!usuarioActual) return;
       const r = window._miRank ?? RANK_DEFAULT;
-      if (r > 3){ alert('Solo el staff (instructoras/asistentes/admin) puede agendar horarios.'); return; }
+      if (r > 3){ await uiAlert('Solo el staff (instructoras/asistentes/admin) puede agendar horarios.', { titulo: 'Solo staff' }); return; }
       const sel = document.getElementById('hm-uid');
       let opts = _calStaff.filter(p=> calPuedoEditar(p.rank, p.uid));
       if (!opts.some(o=>o.uid===usuarioActual.uid)) opts = [{ uid:usuarioActual.uid, rank:r, nombre:'Yo' }, ...opts];
@@ -1519,10 +1622,10 @@
       const tipo   = document.getElementById('hm-tipo').value;
       const nota   = document.getElementById('hm-nota').value.trim().slice(0,60);
       const rec    = document.getElementById('hm-rec').value;
-      if (!uid){ alert('Elige para quién es el horario.'); return; }
-      if (!inicio || !fin){ alert('Pon hora de inicio y de fin.'); return; }
-      if (fin <= inicio){ alert('La hora de fin debe ser posterior a la de inicio.'); return; }
-      if (!calPuedoEditar(targetRank, uid)){ alert('No tienes permiso para editar ese calendario.'); return; }
+      if (!uid){ await uiAlert('Elige para quién es el horario.', { titulo: 'Falta un dato' }); return; }
+      if (!inicio || !fin){ await uiAlert('Pon hora de inicio y de fin.', { titulo: 'Falta un dato' }); return; }
+      if (fin <= inicio){ await uiAlert('La hora de fin debe ser posterior a la de inicio.', { titulo: 'Horas inválidas' }); return; }
+      if (!calPuedoEditar(targetRank, uid)){ await uiAlert('No tienes permiso para editar ese calendario.', { titulo: 'Sin permiso', peligro: true }); return; }
       const fechaDate = calAddDays(_calAncla || calLunes(new Date()), diaIdx);
       const fecha = calFechaISO(fechaDate);
       const mes = calMes(fechaDate);
@@ -1531,7 +1634,9 @@
         ? (document.getElementById('perfil-nombre')?.textContent || usuarioActual.displayName || 'Staff')
         : (persona ? persona.nombre : 'Staff');
       const alcance = rec==='mensual' ? 'TODO el mes' : 'SOLO esta semana';
-      if (!confirm(`Guardar ${inicio}–${fin}, ${DIAS_LARGO[diaIdx].toLowerCase()} (${alcance}).\n\n⚠️ IMPORTANTE: una vez guardada, esta hora NO se puede modificar. Solo podrás CANCELARLA.\n\n¿Confirmar?`)) return;
+      if (!(await uiConfirm(
+        `Guardar ${inicio}–${fin}, ${DIAS_LARGO[diaIdx].toLowerCase()} (${alcance}).\n\n⚠️ Una vez guardada, esta hora NO se puede modificar. Solo podrás CANCELARLA.`,
+        { titulo: 'Confirmar horario', okText: 'Guardar', cancelText: 'Volver' }))) return;
       try {
         await addDoc(collection(db, "horarios"), {
           uid, rank: targetRank, nombre,
@@ -1545,26 +1650,26 @@
         await calCargarHorarios();
       } catch(e){
         console.error('guardarHorario:', e);
-        alert('No se pudo guardar (revisa permisos o conexión).');
+        await uiAlert('No se pudo guardar (revisa permisos o conexión).', { titulo: 'Error', peligro: true });
       }
     };
 
     window.cancelarHorario = async (id) => {
       if (!id) return;
-      if (!confirm('¿Cancelar esta hora? No se puede deshacer; si la necesitas, tendrás que volver a crearla.')) return;
+      if (!(await uiConfirm('¿Cancelar esta hora? No se puede deshacer; si la necesitas, tendrás que volver a crearla.', { titulo: 'Cancelar hora', okText: 'Sí, cancelar', cancelText: 'No', peligro: true }))) return;
       try {
         await deleteDoc(doc(db, "horarios", id));
         await calCargarHorarios();
       } catch(e){
         console.error('cancelarHorario:', e);
-        alert('No se pudo cancelar (¿permisos?).');
+        await uiAlert('No se pudo cancelar (¿permisos?).', { titulo: 'Error', peligro: true });
       }
     };
 
     // Editar nombre visible
-    window.abrirEditarNombre = () => {
+    window.abrirEditarNombre = async () => {
       const actual = document.getElementById('perfil-nombre').textContent;
-      const nuevo = prompt('Tu nombre visible:', actual);
+      const nuevo = await uiPrompt('Tu nombre visible', { titulo: 'Editar nombre', valor: actual, maxlength: 40, placeholder: 'Como quieres que te vean' });
       if (nuevo === null) return;
       const limpio = nuevo.trim().slice(0, 40);
       if (!limpio) return;
@@ -1576,7 +1681,7 @@
         await updateDoc(doc(db, "usuarios", usuarioActual.uid), { nombreVisible });
         const el = document.getElementById('perfil-nombre');
         if (el) el.textContent = nombreVisible;
-      } catch (e) { console.error('guardarNombreVisible:', e); alert('No se pudo guardar el nombre.'); }
+      } catch (e) { console.error('guardarNombreVisible:', e); await uiAlert('No se pudo guardar el nombre.', { titulo: 'Error', peligro: true }); }
     }
 
     // ── AUTH STATE ────────────────────────────────────────
@@ -1658,7 +1763,7 @@
     window.procesarPagoReserva = async ({ plan, clases, nombre, slots }) => {
       if (!usuarioActual) { abrirLoginModal('login'); return; }
       const base = STRIPE_LINKS[plan];
-      if (!base) { alert('Plan no válido.'); return; }
+      if (!base) { await uiAlert('Plan no válido.', { titulo: 'Error', peligro: true }); return; }
 
       // Persistir selección completa (sobrevive el redirect de Stripe)
       localStorage.setItem('reserva_pendiente_full', JSON.stringify({
@@ -1828,9 +1933,9 @@
       } catch(e) { console.warn('contador boletos:', e); }
     }
 
-    window.comprarBoleto = () => {
+    window.comprarBoleto = async () => {
       const link = EVENTO_CONFIG.stripeLink;
-      if (!link) { alert('Link de pago no disponible aún.'); return; }
+      if (!link) { await uiAlert('Link de pago no disponible aún.', { titulo: 'No disponible' }); return; }
       const email = window.usuarioActual?.email || '';
       const url = email ? `${link}?prefilled_email=${encodeURIComponent(email)}` : link;
       const a = document.createElement('a');
@@ -2031,21 +2136,21 @@
       }
     }
     window.confirmarPagoReserva = async (id) => {
-      if (!confirm('¿Verificaste este pago en tu Stripe Dashboard?\n\nConfirma SOLO si el dinero realmente llegó. Esto activa la reserva.')) return;
+      if (!(await uiConfirm('¿Verificaste este pago en tu Stripe Dashboard?\n\nConfirma SOLO si el dinero realmente llegó. Esto activa la reserva.', { titulo: 'Confirmar pago', okText: 'Sí, activar', cancelText: 'Aún no' }))) return;
       try {
         await updateDoc(doc(db, "reservas", id),
           { estado: "activa", fechaPago: serverTimestamp(), confirmadaPor: usuarioActual.uid });
         if (window.sincronizarCupos) window.sincronizarCupos(); // mantiene el cupo publico al dia
         cargarReservasStaff();
-      } catch (e) { console.error('confirmarPagoReserva:', e); alert('No se pudo confirmar: ' + e.message); }
+      } catch (e) { console.error('confirmarPagoReserva:', e); await uiAlert('No se pudo confirmar: ' + e.message, { titulo: 'Error', peligro: true }); }
     };
     window.cancelarReservaStaff = async (id) => {
-      if (!confirm('¿Cancelar esta reserva?')) return;
+      if (!(await uiConfirm('¿Cancelar esta reserva?', { titulo: 'Cancelar reserva', okText: 'Sí, cancelar', cancelText: 'No', peligro: true }))) return;
       try {
         await updateDoc(doc(db, "reservas", id), { estado: "cancelada" });
         if (window.sincronizarCupos) window.sincronizarCupos(); // libera el lugar en el cupo
         cargarReservasStaff();
-      } catch (e) { console.error('cancelarReservaStaff:', e); alert('No se pudo cancelar: ' + e.message); }
+      } catch (e) { console.error('cancelarReservaStaff:', e); await uiAlert('No se pudo cancelar: ' + e.message, { titulo: 'Error', peligro: true }); }
     };
     window.cargarReservasStaff = cargarReservasStaff;
 
@@ -3054,6 +3159,61 @@
       flex:2; background:linear-gradient(90deg,#ffd700,#ff9d00); color:#111; font-weight:800;
       border:none; border-radius:8px; padding:11px; cursor:pointer; font-size:.9rem;
     }
+    /* ════════════════════════════════════════════════════════════════
+       DIÁLOGOS NATIVOS DE LA PÁGINA (reemplazan alert/confirm/prompt del
+       navegador, que se veían como recuadros de Windows). Mismo lenguaje
+       que las tarjetas de alumno: fondo oscuro, borde dorado, texto cálido
+       --blanco (nada de blancos planos). Variante .peligro para borrados.
+       ════════════════════════════════════════════════════════════════ */
+    .ui-dlg-bg {
+      position:fixed; inset:0; z-index:4000; background:rgba(0,0,0,.82);
+      -webkit-backdrop-filter:blur(3px); backdrop-filter:blur(3px);
+      display:flex; align-items:center; justify-content:center; padding:20px;
+      animation:uiDlgFade .14s ease;
+    }
+    @keyframes uiDlgFade { from{opacity:0} to{opacity:1} }
+    .ui-dlg-card {
+      background:linear-gradient(160deg,#1b1b1b,#101010);
+      border:1px solid rgba(255,204,0,.35); border-radius:16px;
+      padding:24px 22px; max-width:390px; width:100%;
+      box-shadow:0 24px 70px rgba(0,0,0,.7);
+      max-height:92vh; overflow-y:auto;
+      animation:uiDlgPop .18s cubic-bezier(.2,.9,.3,1.15);
+    }
+    @keyframes uiDlgPop { from{transform:scale(.94);opacity:.3} to{transform:scale(1);opacity:1} }
+    .ui-dlg-card.peligro { border-color:rgba(255,95,95,.5); }
+    .ui-dlg-title {
+      font-family:'Cinzel',serif; color:var(--amarillo); font-size:1.12rem;
+      margin:0 0 10px; letter-spacing:.5px; line-height:1.3;
+    }
+    .ui-dlg-card.peligro .ui-dlg-title { color:#ff7a7a; }
+    .ui-dlg-msg { color:var(--blanco); opacity:.85; font-size:.9rem; line-height:1.6; margin:0; }
+    .ui-dlg-fieldwrap { display:block; text-align:left; margin:14px 0 0; }
+    .ui-dlg-label {
+      display:block; font-size:.74rem; color:var(--amarillo); opacity:.85;
+      font-weight:600; margin:0 0 5px; letter-spacing:.3px;
+    }
+    .ui-dlg-input {
+      width:100%; box-sizing:border-box; background:rgba(0,0,0,.45);
+      border:1px solid rgba(255,204,0,.3); color:var(--blanco);
+      border-radius:9px; padding:11px 13px; font-size:.9rem; font-family:inherit;
+    }
+    .ui-dlg-input:focus { outline:none; border-color:var(--amarillo); box-shadow:0 0 0 2px rgba(255,204,0,.15); }
+    textarea.ui-dlg-input { resize:vertical; min-height:64px; line-height:1.5; }
+    .ui-dlg-btns { display:flex; gap:10px; margin-top:22px; }
+    .ui-dlg-cancel {
+      flex:1; background:transparent; border:1px solid rgba(255,255,255,.22);
+      color:var(--blanco); opacity:.8; border-radius:9px; padding:11px;
+      cursor:pointer; font-size:.85rem; font-family:inherit; transition:.15s;
+    }
+    .ui-dlg-cancel:hover { opacity:1; border-color:rgba(255,255,255,.4); }
+    .ui-dlg-ok {
+      flex:2; background:linear-gradient(90deg,#ffd700,#ff9d00); color:#111;
+      font-weight:800; border:none; border-radius:9px; padding:11px;
+      cursor:pointer; font-size:.9rem; font-family:inherit; transition:.15s;
+    }
+    .ui-dlg-ok:hover { filter:brightness(1.08); }
+    .ui-dlg-ok.peligro { background:linear-gradient(90deg,#ff6b6b,#c0392b); color:#fff; }
     /* Avatar por EMOJI: fondo neutro + emoji centrado. Sirve en tarjeta, modal,
        perfil, onboarding y chip del nav. El tamaño lo fija cada contexto (las
        tarjetas/modal por su clase -ph; perfil/onb/nav en línea desde JS). */
@@ -3290,7 +3450,7 @@
     }
     .nombre-modal-cancel:hover { border-color:rgba(255,255,255,.5); color:var(--blanco); }
     .nombre-modal-ok { background:var(--amarillo); color:var(--negro); font-weight:900; border:none; }
-    .nombre-modal-ok:hover { background:#fff; }
+    .nombre-modal-ok:hover { background:var(--naranja); }
 
     /* ===== EVENTO ESPECIAL ===== */
     .evento-especial-wrap {
@@ -3325,7 +3485,7 @@
       letter-spacing:3px; text-transform:uppercase; padding:16px 32px; border-radius:3px;
       transition:background .3s, transform .2s; align-self:flex-start;
     }
-    .btn-boleto:hover { background:#fff; transform:translateY(-2px); }
+    .btn-boleto:hover { background:var(--naranja); transform:translateY(-2px); }
     .evento-compra-nota { font-size:.68rem; opacity:.35; letter-spacing:1px; }
 
     /* ===== LABOR SOCIAL ===== */
@@ -4771,7 +4931,7 @@
     btn.disabled = true; btn.textContent = '…';
     const ok = await window.marcarAsistencia(uid, sid);
     if (ok) { btn.textContent = 'Asistió ✓'; btn.classList.add('hecho'); }
-    else { btn.disabled = false; btn.textContent = 'Marcar'; alert('No se pudo marcar la asistencia. (¿Faltan publicar las reglas de "asistencias"?)'); }
+    else { btn.disabled = false; btn.textContent = 'Marcar'; await window.uiAlert('No se pudo marcar la asistencia. (¿Faltan publicar las reglas de "asistencias"?)', { titulo: 'Error', peligro: true }); }
   };
 
   // STAFF: recalcula y publica el cupo de todas las clases (T3-H).
@@ -4853,12 +5013,12 @@
   /* ===== FLUJO UNIFICADO: seleccionar → autenticar → confirmar nombre → pagar ===== */
   let _reservaPendiente = null;
 
-  function confirmarHorario() {
+  async function confirmarHorario() {
     const plan = document.querySelector('.plan-btn.activo')?.dataset.plan || 'medio';
 
     // 1) Validar que haya al menos una clase seleccionada
     if (slotsSeleccionados.size === 0) {
-      alert('Selecciona al menos una clase en el calendario.');
+      await window.uiAlert('Selecciona al menos una clase en el calendario.', { titulo: 'Falta tu clase' });
       return;
     }
 
@@ -4885,9 +5045,9 @@
   }
   window.cerrarNombreModal = cerrarNombreModal;
 
-  function continuarAlPago() {
+  async function continuarAlPago() {
     const nombre = document.getElementById('nombre-modal-input').value.trim();
-    if (!nombre) { alert('Por favor escribe tu nombre completo.'); return; }
+    if (!nombre) { await window.uiAlert('Por favor escribe tu nombre completo.', { titulo: 'Falta tu nombre' }); return; }
     if (!_reservaPendiente) { cerrarNombreModal(); return; }
     cerrarNombreModal();
     // Entrega al módulo Firebase: guarda pendiente + redirige a Stripe
