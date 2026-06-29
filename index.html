@@ -1602,6 +1602,7 @@
         videosLock.forEach(l => l.style.display = 'none');
         videoCards.forEach(c => c.style.pointerEvents = 'auto');
         cargarMisReservas(user.uid);
+        if (window.cargarOverlayHorario) window.cargarOverlayHorario();
         bootstrapPerfil(user).then((perfil) => {
           cargarPerfil(user.uid);
           if (!perfil.onboardingHecho) abrirOnboarding(perfil);
@@ -1619,6 +1620,7 @@
         const calSec = document.getElementById('calendario');
         if(calSec) calSec.style.display = 'none';
         _calHorarios = []; _calStaff = []; window._miRank = null;
+        if (window.cargarOverlayHorario) window.cargarOverlayHorario();  // limpia marcas del usuario anterior
         // Bloquear videos
         videosLock.forEach(l => l.style.display = 'flex');
         videoCards.forEach(c => c.style.pointerEvents = 'none');
@@ -1629,14 +1631,14 @@
     // Llamado desde confirmarHorario() tras seleccionar plan + horas + nombre.
     // Guarda la reserva pendiente (Firestore + localStorage) y redirige a Stripe
     // en el MISMO tab, para que el success vuelva aquí con ?pago=exitoso.
-    window.procesarPagoReserva = async ({ plan, clases, nombre }) => {
+    window.procesarPagoReserva = async ({ plan, clases, nombre, slots }) => {
       if (!usuarioActual) { abrirLoginModal('login'); return; }
       const base = STRIPE_LINKS[plan];
       if (!base) { alert('Plan no válido.'); return; }
 
       // Persistir selección completa (sobrevive el redirect de Stripe)
       localStorage.setItem('reserva_pendiente_full', JSON.stringify({
-        plan, clases, nombre,
+        plan, clases, slots: slots || [], nombre,
         email: usuarioActual.email, uid: usuarioActual.uid, ts: Date.now()
       }));
 
@@ -1647,6 +1649,7 @@
           nombre,
           plan,
           clases,
+          slots: slots || [],
           estado: "pendiente_pago",
           fechaReserva: serverTimestamp()
         });
@@ -1724,6 +1727,27 @@
     function estadoLabel(e) {
       return { pendiente_pago:'Pendiente de pago', pago_reportado:'En confirmación', activa:'Activa', cancelada:'Cancelada' }[e] || e;
     }
+
+    // Slots que el ALUMNO ya apartó (reservas no canceladas) y dónde una miss le
+    // marcó asistencia. Devuelve {apartados:[slotId], asistidos:[slotId]}.
+    // Lo consume el calendario (window.cargarOverlayHorario). Defensiva: cualquier
+    // fallo de permisos/colección devuelve listas vacías sin romper el render.
+    window.cargarMisSlots = async (uid) => {
+      const apartados = [], asistidos = [];
+      try {
+        const snap = await getDocs(query(collection(db, "reservas"), where("uid", "==", uid)));
+        snap.docs.forEach(d => {
+          const r = d.data();
+          if (r.estado === 'cancelada') return;
+          (r.slots || []).forEach(s => { if (s && s.slotId) apartados.push(s.slotId); });
+        });
+      } catch (e) { console.warn('cargarMisSlots/reservas:', e); }
+      try {
+        const snapA = await getDocs(query(collection(db, "asistencias"), where("uid", "==", uid)));
+        snapA.docs.forEach(d => { const a = d.data(); if (a && a.slotId) asistidos.push(a.slotId); });
+      } catch (e) { /* colección/reglas de asistencias aún no existen */ }
+      return { apartados, asistidos };
+    };
 
     // ── EVENTO ESPECIAL — leer contador de boletos ────────
     async function cargarContadorBoletos() {
@@ -2368,6 +2392,31 @@
       font-size: .6rem;
       color: var(--amarillo);
     }
+    /* ── Capa de SEGUIMIENTO por rol (T3-E/F/H) ── */
+    /* Clase que el ALUMNO ya apartó: anillo verde + etiqueta. No re-seleccionable. */
+    .clase-cell.mi-reserva {
+      position: relative; cursor: default;
+      outline: 2px solid #7CFC9A; outline-offset: -2px;
+      box-shadow: inset 0 0 0 3px rgba(124,252,154,.12);
+    }
+    .clase-cell.mi-reserva:hover { transform: none; filter: none; }
+    .mi-reserva-tag {
+      position: absolute; bottom: 2px; left: 0; right: 0; text-align: center;
+      font-size: .5rem; letter-spacing: .5px; color: #7CFC9A;
+      font-family: 'Cinzel', serif; pointer-events: none;
+    }
+    /* Clase ASISTIDA (marcada por una miss) — se activará con el pase de lista. */
+    .clase-cell.asistida { outline-color: #4fd1c5; }
+    .clase-cell.asistida .mi-reserva-tag { color: #4fd1c5; }
+    /* Cupo / lleno (se activa cuando se publiquen las reglas de 'cupos'). */
+    .cupo-badge {
+      position: absolute; top: 2px; left: 4px;
+      font-size: .5rem; letter-spacing: .3px; color: rgba(255,255,255,.6);
+      font-family: 'Cinzel', serif; pointer-events: none;
+    }
+    .clase-cell.lleno { opacity: .55; cursor: not-allowed; filter: grayscale(.4); }
+    .clase-cell.lleno:hover { transform: none; filter: grayscale(.4); }
+    .clase-cell.lleno .cupo-badge { color: var(--naranja, #e87400); font-weight: 600; }
     @keyframes shake {
       0%,100%{transform:translateX(0)}
       20%{transform:translateX(-5px)}
@@ -4188,6 +4237,37 @@
   }
   window.slotsFormateados = slotsFormateados;
 
+  // ── SLOTS ESTRUCTURADOS + SEGUIMIENTO POR ROL (T3-E/F/H) ───────────────
+  // Regla de la academia: máximo 6 personas por clase.
+  const CUPO_MAX = 6;
+  // slotId canónico y estable para reservas/cupo: "<dia>_<horaCompacta>".
+  //   dia=2, hora="8:00 – 9:00"  ->  "2_8-9"
+  function slotIdDe(dia, hora) {
+    const m = String(hora).match(/(\d+):\d+\s*[–-]\s*(\d+):\d+/);
+    const h = m ? `${m[1]}-${m[2]}` : String(hora).replace(/\s+/g, '');
+    return `${dia}_${h}`;
+  }
+  // Reconstruye {dia,hora,tipo,slotId} desde una key de selección ("8:00 – 9:00-2").
+  // El tipo se recupera de horarioBase porque la key no lo lleva.
+  function slotInfoDeKey(key) {
+    const idx  = key.lastIndexOf('-');
+    const hora = key.slice(0, idx).trim();
+    const dia  = Number(key.slice(idx + 1));
+    const row  = horarioBase.find(r => r[0] === hora);
+    const tipo = row ? row[dia] : '';
+    return { dia, hora, tipo, slotId: slotIdDe(dia, hora) };
+  }
+  // Selección actual como array estructurado (se guarda dentro de la reserva).
+  function slotsEstructurados() {
+    return Array.from(slotsSeleccionados).map(slotInfoDeKey);
+  }
+  window.slotsEstructurados = slotsEstructurados;
+
+  // Cachés de la capa de seguimiento (se llenan tras login; siempre defensivas).
+  let _misSlots     = new Set();  // slotIds que el ALUMNO ya apartó (reserva propia)
+  let _misAsistidos = new Set();  // slotIds donde una miss le marcó asistencia
+  let _cuposCache   = {};         // slotId -> conteo de cupo (agregado público)
+
   let slotsSeleccionados = new Set();
   let planActual = 'medio';
 
@@ -4217,12 +4297,21 @@
         } else {
           div.className = 'clase-cell ' + tipo + ' disponible';
           div.title = 'Click para seleccionar / deseleccionar';
+          div.dataset.slotId = slotIdDe(i, row[0]);
+          div.dataset.dia = i;
+          div.dataset.tipo = tipo;
           const span = document.createElement('span');
           span.className = 'clase-nombre';
           span.textContent = claseNombres[tipo];
           div.appendChild(span);
 
           div.addEventListener('click', () => {
+            // Capa de seguimiento: celdas bloqueadas (ya apartada / llena) no se seleccionan.
+            if(div.dataset.bloqueado === '1'){
+              div.style.animation = 'shake .4s';
+              setTimeout(() => div.style.animation='', 400);
+              return;
+            }
             if(slotsSeleccionados.has(key)){
               slotsSeleccionados.delete(key);
               div.classList.remove('seleccionada');
@@ -4241,7 +4330,71 @@
       }
       body.appendChild(tr);
     });
+    decorarHorario();
   }
+
+  // ── Capa de SEGUIMIENTO: pinta sobre las celdas ya construidas ─────────
+  // Defensiva: si las cachés están vacías, no hace nada y el calendario sigue
+  // 100% funcional (selección + pago intactos). No toca la selección de compra.
+  function decorarHorario() {
+    const cells = document.querySelectorAll('#horario-body .clase-cell.disponible');
+    cells.forEach(div => {
+      div.classList.remove('mi-reserva', 'asistida', 'lleno');
+      div.dataset.bloqueado = '';
+      div.querySelectorAll('.mi-reserva-tag, .cupo-badge').forEach(n => n.remove());
+
+      const sid = div.dataset.slotId;
+      const esStaff = (window._miRank != null && window._miRank <= 2);
+
+      // Cupo para TODOS ("n/6" o "Lleno"), solo si hay dato agregado público.
+      const n = _cuposCache[sid];
+      if (typeof n === 'number') {
+        const badge = document.createElement('span');
+        badge.className = 'cupo-badge';
+        const lleno = n >= CUPO_MAX;
+        badge.textContent = lleno ? 'Lleno' : (n + '/' + CUPO_MAX);
+        div.appendChild(badge);
+        if (lleno && !esStaff && !_misSlots.has(sid)) {  // alumno no aparta una llena
+          div.classList.add('lleno');
+          div.dataset.bloqueado = '1';
+        }
+      }
+
+      // ALUMNO: clases que ya apartó (verde) y, si la miss marcó, "Asististe".
+      if (_misSlots.has(sid)) {
+        div.classList.add('mi-reserva');
+        div.dataset.bloqueado = '1';   // ya es suya: no re-seleccionar
+        const tag = document.createElement('span');
+        tag.className = 'mi-reserva-tag';
+        if (_misAsistidos.has(sid)) { div.classList.add('asistida'); tag.textContent = 'Asististe ✓'; }
+        else tag.textContent = 'Apartada ✓';
+        div.appendChild(tag);
+      }
+    });
+  }
+  window.decorarHorario = decorarHorario;
+
+  // Carga la capa según el rol del visitante. Todo opcional y defensivo:
+  //  • cupos (público): para mostrar lleno/cupo a cualquiera.
+  //  • mis slots (alumno): resalta lo que apartó / asistió.
+  // Si una pieza aún no existe (p.ej. reglas de 'cupos' sin publicar), se omite.
+  async function cargarOverlayHorario() {
+    _misSlots = new Set(); _misAsistidos = new Set(); _cuposCache = {};
+    try {
+      if (window.cargarCupos) {
+        const cupos = await window.cargarCupos();
+        if (cupos) _cuposCache = cupos;
+      }
+      const u = window.usuarioActual;
+      if (u && window.cargarMisSlots) {
+        const r = await window.cargarMisSlots(u.uid) || {};
+        (r.apartados || []).forEach(s => _misSlots.add(s));
+        (r.asistidos || []).forEach(s => _misAsistidos.add(s));
+      }
+    } catch (e) { console.warn('overlay horario:', e); }
+    decorarHorario();
+  }
+  window.cargarOverlayHorario = cargarOverlayHorario;
 
   function actualizarContador() {
     const max = planHoras[planActual] || 5;
@@ -4325,7 +4478,7 @@
 
     // 3) Guardar selección y abrir modal para confirmar el nombre
     const clases = slotsFormateados();
-    _reservaPendiente = { plan, clases };
+    _reservaPendiente = { plan, clases, slots: slotsEstructurados() };
 
     document.getElementById('nombre-modal-resumen').textContent =
       `${planNombres[plan]} · ${clases}`;
