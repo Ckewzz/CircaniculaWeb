@@ -860,7 +860,7 @@
       try {
         const { getMessaging, getToken } = await import('https://www.gstatic.com/firebasejs/10.12.0/firebase-messaging.js');
         const messaging = getMessaging(app);
-        const reg = await navigator.serviceWorker.getRegistration();
+        const reg = await navigator.serviceWorker.register('/firebase-messaging-sw.js', { scope: '/firebase-cloud-messaging-push-scope' });
         const token = await getToken(messaging, { vapidKey: TENANT.pushVapidKey, serviceWorkerRegistration: reg });
         if (token) await updateDoc(doc(db, "usuarios", usuarioActual.uid), { fcmTokens: arrayUnion(token) });
       } catch(e) { console.error('capturarTokenPush:', e); }
@@ -2392,9 +2392,10 @@
     .clase-cell.disponible { opacity:1; }
     .clase-cell.kids { background:rgba(232,116,0,.25); color:#ffa040; border:1px solid rgba(232,116,0,.3); }
     .clase-cell.flow { background:rgba(255,204,0,.2);  color:var(--amarillo); border:1px solid rgba(255,204,0,.3); }
-    .clase-cell.fit  { background:rgba(255,204,0,.2);  color:var(--amarillo); border:1px solid rgba(255,204,0,.3); }
+    .clase-cell.fit  { background:rgba(200,130,255,.18);color:#d8a0ff; border:1px solid rgba(200,130,255,.3); }
     .clase-cell.flex { background:rgba(80,200,255,.15); color:#80d8ff; border:1px solid rgba(80,200,255,.2); }
     .clase-cell.aro  { background:rgba(200,130,255,.18);color:#d8a0ff; border:1px solid rgba(200,130,255,.3); }
+    .clase-cell.open { background:rgba(79,209,197,.16); color:#5eefdf; border:1px solid rgba(79,209,197,.3); }
     .clase-cell.free { background:rgba(160,255,160,.12);color:#90ee90; border:1px solid rgba(160,255,160,.18); }
     .clase-cell.empty { background:transparent; border:1px dashed rgba(255,255,255,.04); color:transparent; opacity:1; }
     .horario-leyenda { display:flex; gap:18px; margin-top:22px; flex-wrap:wrap; }
@@ -3449,7 +3450,7 @@
       <span class="seccion-eyebrow">Organiza tu semana</span>
       <h2 class="seccion-titulo">Horarios</h2>
       <div class="titulo-linea"></div>
-      <p class="seccion-desc">Lunes a Viernes · Kids 5:30–6 pm · Adultos 6–8 pm · Clases especiales Flex y Aro Mar & Jue.</p>
+      <p class="seccion-desc">Lunes a Viernes · Open Gym 8–10 am · Kids 5:30–7 pm · Telas 7–8 pm · Aro 8–9 pm · Flex especial Mar & Jue.</p>
     </div>
     <div class="plan-selector">
       <button class="plan-btn" data-plan="individual">Clase Individual</button>
@@ -3470,10 +3471,11 @@
       </table>
     </div>
     <div class="horario-leyenda">
-      <div class="leyenda-item"><div class="leyenda-dot" style="background:#e87400;opacity:.7"></div>Kids (5:30–6 pm)</div>
-      <div class="leyenda-item"><div class="leyenda-dot" style="background:var(--amarillo);opacity:.7"></div>Adultos (6–7 pm / 7–8 pm)</div>
-      <div class="leyenda-item"><div class="leyenda-dot" style="background:#80d8ff;opacity:.7"></div>Flex — Mar & Jue 6–7 pm</div>
-      <div class="leyenda-item"><div class="leyenda-dot" style="background:#d8a0ff;opacity:.7"></div>Aro — Mar & Jue 7–8 pm</div>
+      <div class="leyenda-item"><div class="leyenda-dot" style="background:#4fd1c5;opacity:.7"></div>Open Gym (8–10 am)</div>
+      <div class="leyenda-item"><div class="leyenda-dot" style="background:#e87400;opacity:.7"></div>Kids (5:30–7 pm)</div>
+      <div class="leyenda-item"><div class="leyenda-dot" style="background:var(--amarillo);opacity:.7"></div>Telas (7–8 pm · Lun/Mié/Vie)</div>
+      <div class="leyenda-item"><div class="leyenda-dot" style="background:#d8a0ff;opacity:.7"></div>Aro (8–9 pm · diario)</div>
+      <div class="leyenda-item"><div class="leyenda-dot" style="background:#80d8ff;opacity:.7"></div>Flex (7–8 pm · Mar & Jue)</div>
     </div><!-- /horario-leyenda -->
       <!-- Acciones del calendario -->
 <div class="calendario-acciones">
@@ -3614,9 +3616,9 @@
       <!-- VISIBILIDAD DEL PERFIL (todos) -->
       <div id="perfil-visibilidad-card" class="perfil-rol-card">
         <h3 class="perfil-sub">👁️ Visibilidad de tu perfil</h3>
-        <p class="admin-hint">Tu perfil es visible para la comunidad, pero tú decides qué se muestra.</p>
+        <p class="admin-hint">Tú decides qué se muestra. Desactiva «Aparecer en Buscar Perfil» para <strong>ocultar tu perfil por completo</strong> del directorio (útil si tienes una cuenta de dueño y prefieres aparecer solo con otra cuenta de instructor).</p>
         <div class="perfil-vis-toggles">
-          <label class="vis-toggle"><input type="checkbox" id="vis-perfilPublico" onchange="toggleVisibilidad('perfilPublico', this.checked)"> Aparecer en «Buscar Perfil»</label>
+          <label class="vis-toggle"><input type="checkbox" id="vis-perfilPublico" onchange="toggleVisibilidad('perfilPublico', this.checked)"> Aparecer en «Buscar Perfil» <span style="opacity:.55">(apágalo para ocultar tu perfil)</span></label>
           <label class="vis-toggle"><input type="checkbox" id="vis-mostrarStats" onchange="toggleVisibilidad('mostrarStats', this.checked)"> Mostrar mis stats y títulos</label>
           <label class="vis-toggle"><input type="checkbox" id="vis-mostrarSemblanza" onchange="toggleVisibilidad('mostrarSemblanza', this.checked)"> Mostrar mi semblanza docente</label>
         </div>
@@ -4139,13 +4141,14 @@
   // Horario real Circanícula — Lun-Vie
   // Columnas: Lunes, Martes, Miércoles, Jueves, Viernes
   const horarioBase = [
-    ['5:30 – 6:00', 'kids', 'kids',  'kids', 'kids',  'kids' ],
-    ['6:00 – 7:00', 'flow', 'flex',  'flow', 'flex',  'flow' ],
-    ['7:00 – 8:00', 'fit',  'aro',   'fit',  'aro',   'fit'  ],
+    ['8:00 – 10:00', 'open', 'open',  'open', 'open',  'open' ],
+    ['5:30 – 7:00',  'kids', 'kids',  'kids', 'kids',  'kids' ],
+    ['7:00 – 8:00',  'flow', 'flex',  'flow', 'flex',  'flow' ],
+    ['8:00 – 9:00',  'fit',  'aro',   'fit',  'aro',   'fit'  ],
   ];
   const planHoras = {individual:1, basico:2, medio:5, avanzado:7};
   const planNombres = {individual:'Individual', basico:'Básico', medio:'Medio', avanzado:'Avanzado'};
-  const claseNombres = {kids:'Kids', flow:'Adultos', fit:'Adultos', flex:'Flex', aro:'Aro'};
+  const claseNombres = {kids:'Kids', flow:'Telas', fit:'Aro', flex:'Flex', aro:'Aro', open:'Open Gym'};
 
   // Días por índice de columna (1=Lunes ... 5=Viernes)
   const DIAS_NOMBRE = {1:'Lun', 2:'Mar', 3:'Mié', 4:'Jue', 5:'Vie'};
