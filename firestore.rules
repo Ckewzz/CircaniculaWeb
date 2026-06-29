@@ -117,10 +117,12 @@ service cloud.firestore {
         && request.resource.data.creditos == resource.data.creditos;
 
       // ADMINISTRACIÓN (Rank 1): gestiona perfiles (stats, títulos, eventos, flags
-      // de rol, apodo, semblanza…), pero NO toca rank ni créditos.
+      // de rol, apodo, semblanza…), pero NO toca rank ni créditos. Tampoco
+      // habilita/deshabilita cuentas (eso es exclusivo del Dueño).
       allow update: if isAdmin()
         && request.resource.data.rank == resource.data.rank
-        && request.resource.data.creditos == resource.data.creditos;
+        && request.resource.data.creditos == resource.data.creditos
+        && unchangedOrNew('cuentaActiva');
 
       // INSTRUCTORAS (Rank 2): otorgan stats RPG (nivel/títulos/eventos) y nada
       // más. No tocan rank, créditos, flags de rol ni IDs.
@@ -130,7 +132,8 @@ service cloud.firestore {
         && unchangedOrNew('imparteClases')
         && unchangedOrNew('colaborador')
         && unchangedOrNew('userIdCorto')
-        && unchangedOrNew('handle');
+        && unchangedOrNew('handle')
+        && unchangedOrNew('cuentaActiva');
 
       // DUEÑO DEL PERFIL (cualquier rank): solo lo suyo y solo lo cosmético
       // (nombreVisible, foto, especialidad, semblanza, colab, visibilidad…).
@@ -147,9 +150,14 @@ service cloud.firestore {
         && unchangedOrNew('handle')
         && selfFlagOk('imparteClases')
         && selfFlagOk('colaborador')
+        && unchangedOrNew('cuentaActiva')
         && (request.resource.data.apodo == resource.data.apodo || myRank() <= 3);
 
-      allow delete: if false;
+      // ELIMINAR LA PROPIA CUENTA: cada quien puede borrar SU perfil (la opción
+      // "Eliminar mi cuenta"). El Dueño NO se puede borrar a otro desde el cliente
+      // (eso requiere Admin SDK); para "quitar" a un tercero usa cuentaActiva:false
+      // (deshabilitar), que sí controla el Dueño vía las reglas update de arriba.
+      allow delete: if isOwner(uid);
     }
 
     // ── DATOS PRIVADOS (teléfono) ─────────────────────────────────────

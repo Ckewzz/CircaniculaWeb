@@ -46,9 +46,10 @@
 
   <!-- Firebase SDK (módulos ESM) -->
   <script type="module">
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+    import { initializeApp, deleteApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
     import { getAuth, signInWithPopup, signOut, onAuthStateChanged, GoogleAuthProvider,
-             createUserWithEmailAndPassword, signInWithEmailAndPassword, updateProfile }
+             createUserWithEmailAndPassword, signInWithEmailAndPassword, updateProfile,
+             EmailAuthProvider, reauthenticateWithCredential, reauthenticateWithPopup }
       from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
     import { getFirestore, doc, getDoc, setDoc, collection, addDoc, query, where, getDocs, updateDoc, deleteDoc, serverTimestamp, arrayUnion }
       from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
@@ -804,6 +805,11 @@
         const adminPanel = document.getElementById('admin-panel');
         if (adminPanel) adminPanel.style.display = esDueno(rank) ? 'block' : 'none';
 
+        // Zona de peligro (eliminar mi propia cuenta): todos MENOS el Dueño
+        // (el super-admin se gestiona aparte y no debe autoeliminarse por error).
+        const peligroCard = document.getElementById('perfil-peligro-card');
+        if (peligroCard) peligroCard.style.display = esDueno(rank) ? 'none' : 'block';
+
         // Panel de confirmación de pagos: staff de clase (Rank ≤ 2). Aquí el
         // staff verifica en Stripe y confirma la reserva (la pone 'activa').
         const staffReservasPanel = document.getElementById('staff-reservas-panel');
@@ -1218,6 +1224,215 @@
     };
 
     // ════════════════════════════════════════════════════════════════
+    //  GESTIÓN DE CUENTAS — eliminar (self) · deshabilitar/reactivar (Dueño)
+    //  · crear (Dueño). Límite del SDK cliente: solo puedes BORRAR de Auth tu
+    //  PROPIA cuenta; la de un tercero no (eso es Admin SDK). Por eso el Dueño
+    //  "deshabilita" (cuentaActiva:false) en vez de borrar a terceros.
+    // ════════════════════════════════════════════════════════════════
+
+    // Re-autenticación según proveedor (Google o correo/contraseña). Necesaria
+    // cuando Auth pide login reciente para una acción sensible (borrar cuenta).
+    async function reautenticar(u) {
+      const provId = (u.providerData && u.providerData[0] && u.providerData[0].providerId) || 'password';
+      try {
+        if (provId === 'google.com') {
+          await reauthenticateWithPopup(u, new GoogleAuthProvider());
+          return true;
+        }
+        const pass = await uiPrompt('Tu contraseña', { titulo:'Confirma tu identidad', mensaje:'Por seguridad, confirma tu contraseña para continuar.', tipo:'password', placeholder:'Contraseña', okText:'Confirmar' });
+        if (!pass) return false;
+        await reauthenticateWithCredential(u, EmailAuthProvider.credential(u.email, pass));
+        return true;
+      } catch(e) { console.error('reautenticar:', e); return false; }
+    }
+
+    // ── ELIMINAR MI PROPIA CUENTA (perfil + Auth). Irreversible. ──
+    // El Dueño (Rank 0) NO ve este botón (evita auto-borrar al super-admin).
+    window.eliminarMiCuenta = async () => {
+      if (!usuarioActual) return;
+      const u = usuarioActual;
+      const ok = await uiConfirm(
+        'Vas a ELIMINAR tu cuenta de forma permanente: tu perfil, tus datos y tu acceso. Esto NO se puede deshacer.\n\n¿Seguro que quieres continuar?',
+        { titulo:'Eliminar mi cuenta', okText:'Sí, eliminar', cancelText:'Cancelar', peligro:true });
+      if (!ok) return;
+      // 1) Borra los docs (las reglas permiten borrar lo propio con sesión válida).
+      try { await deleteDoc(doc(db, "usuarios_priv", u.uid)); } catch(e){ console.warn('del priv:', e.code||e); }
+      try { await deleteDoc(doc(db, "usuarios_recuperacion", u.uid)); } catch(e){ console.warn('del recup:', e.code||e); }
+      try { await deleteDoc(doc(db, "usuarios", u.uid)); } catch(e){ console.warn('del perfil:', e.code||e); }
+      // 2) Borra la cuenta de Auth (puede exigir login reciente → reautenticar).
+      try {
+        await u.delete();
+      } catch(e) {
+        if (e && e.code === 'auth/requires-recent-login') {
+          const reok = await reautenticar(u);
+          if (!reok) { await uiAlert('No se pudo verificar tu identidad. Vuelve a entrar e inténtalo otra vez.', { titulo:'Verificación necesaria', peligro:true }); return; }
+          try { await u.delete(); }
+          catch(e2){ console.error('delete2:', e2); await uiAlert('No se pudo eliminar la cuenta (' + (e2.code||e2.message) + ').', { titulo:'Error', peligro:true }); return; }
+        } else {
+          console.error('eliminarMiCuenta:', e);
+          await uiAlert('No se pudo eliminar la cuenta (' + (e.code||e.message) + ').', { titulo:'Error', peligro:true });
+          return;
+        }
+      }
+      await uiAlert('Tu cuenta fue eliminada. ¡Gracias por haber sido parte de Circanícula!', { titulo:'Cuenta eliminada' });
+      try { await signOut(auth); } catch {}
+    };
+
+    // Busca un perfil por su ID corto (CIRCA-XXXXX). Devuelve el doc o null.
+    async function _buscarPorIdCorto(idInput) {
+      const qy = query(collection(db, "usuarios"), where("userIdCorto", "==", idInput));
+      const snap = await getDocs(qy);
+      return snap.empty ? null : snap.docs[0];
+    }
+
+    // ── DUEÑO: DESHABILITAR una cuenta (cuentaActiva:false) por ID corto ──
+    window.deshabilitarCuenta = async () => {
+      if (!usuarioActual) return;
+      const idInput = (document.getElementById('admin-id-input').value || '').trim().toUpperCase();
+      const out = document.getElementById('admin-cuenta-out');
+      if (!idInput) { if (out) out.textContent = 'Escribe primero un ID corto arriba.'; return; }
+      if (out) out.textContent = 'Buscando...';
+      try {
+        const target = await _buscarPorIdCorto(idInput);
+        if (!target) { if (out) out.textContent = '❌ No se encontró ningún usuario con ese ID.'; return; }
+        const data = target.data();
+        if (target.id === usuarioActual.uid) { if (out) out.textContent = '⚠️ No puedes deshabilitar tu propia cuenta de Dueño aquí.'; return; }
+        if ((data.rank ?? RANK_DEFAULT) === RANK.DUENO) { if (out) out.textContent = '⚠️ No se puede deshabilitar a otro Dueño.'; return; }
+        const ok = await uiConfirm(`Deshabilitar la cuenta de «${data.nombreVisible || idInput}». Dejará de aparecer y no podrá entrar. ¿Continuar?`, { titulo:'Deshabilitar cuenta', okText:'Sí, deshabilitar', cancelText:'Cancelar', peligro:true });
+        if (!ok) { if (out) out.textContent = 'Cancelado.'; return; }
+        await updateDoc(doc(db, "usuarios", target.id), { cuentaActiva: false });
+        if (out) out.textContent = `✅ «${data.nombreVisible || idInput}» (ID ${idInput}) deshabilitada. Para revertir: «Reactivar» con el mismo ID.`;
+        if (window.buscarPerfiles) buscarPerfiles();
+      } catch(e) {
+        console.error('deshabilitarCuenta:', e);
+        if (out) out.textContent = '❌ Error (¿permisos? Debes ser Dueño).';
+      }
+    };
+
+    // ── DUEÑO: REACTIVAR una cuenta (cuentaActiva:true) por ID corto ──
+    window.reactivarCuenta = async () => {
+      if (!usuarioActual) return;
+      const idInput = (document.getElementById('admin-id-input').value || '').trim().toUpperCase();
+      const out = document.getElementById('admin-cuenta-out');
+      if (!idInput) { if (out) out.textContent = 'Escribe primero un ID corto arriba.'; return; }
+      if (out) out.textContent = 'Buscando...';
+      try {
+        const target = await _buscarPorIdCorto(idInput);
+        if (!target) { if (out) out.textContent = '❌ No se encontró ningún usuario con ese ID.'; return; }
+        const data = target.data();
+        await updateDoc(doc(db, "usuarios", target.id), { cuentaActiva: true });
+        if (out) out.textContent = `✅ «${data.nombreVisible || idInput}» reactivada. Si es instructora, recuerda volver a otorgarle su Rank y «Imparte clases».`;
+        if (window.buscarPerfiles) buscarPerfiles();
+      } catch(e) {
+        console.error('reactivarCuenta:', e);
+        if (out) out.textContent = '❌ Error (¿permisos? Debes ser Dueño).';
+      }
+    };
+
+    // ── DUEÑO: LISTAR cuentas deshabilitadas (para reactivarlas) ──
+    window.listarDeshabilitadas = async () => {
+      if (!usuarioActual) return;
+      const out = document.getElementById('admin-cuenta-out');
+      if (out) out.textContent = 'Buscando cuentas deshabilitadas...';
+      try {
+        const qy = query(collection(db, "usuarios"), where("cuentaActiva", "==", false));
+        const snap = await getDocs(qy);
+        if (snap.empty) { if (out) out.textContent = '✅ No hay cuentas deshabilitadas.'; return; }
+        const lineas = snap.docs.map(d => { const x=d.data(); return `• ${x.nombreVisible || x.handle || d.id} — ID ${x.userIdCorto || '—'}`; }).join('\n');
+        if (out) out.textContent = `Cuentas deshabilitadas (${snap.size}):\n${lineas}\n\nCopia un ID arriba y pulsa «Reactivar».`;
+      } catch(e) {
+        console.error('listarDeshabilitadas:', e);
+        if (out) out.textContent = '❌ Error al listar (¿permisos?).';
+      }
+    };
+
+    // ── DUEÑO: CREAR cuenta para una alumna sin cerrar su propia sesión ──
+    // Usa una instancia SECUNDARIA de Firebase: crea el usuario en Auth, escribe
+    // su perfil CON LA SESIÓN DE LA ALUMNA (las reglas exigen self-create) y
+    // cierra esa sesión secundaria. El Dueño sigue logueado en la app principal.
+    window.crearCuentaAlumna = async () => {
+      if (!usuarioActual) return;
+      const out = document.getElementById('admin-crear-out');
+      const datos = await uiForm({
+        titulo: 'Crear cuenta de alumna',
+        mensaje: 'Para alumnas que no pueden o no quieren registrarse solas. Tú pones los datos y se los compartes.',
+        okText: 'Crear cuenta',
+        campos: [
+          { id:'nombre', label:'Nombre visible', placeholder:'Ej. María González', maxlength:40 },
+          { id:'email',  label:'Correo (será su usuario)', placeholder:'correo@ejemplo.com', tipo:'email', maxlength:120 },
+          { id:'pass',   label:'Contraseña temporal (mín. 6)', placeholder:'mín. 6 caracteres', tipo:'password', maxlength:64 }
+        ]
+      });
+      if (datos === null) return;
+      const nombre = (datos.nombre||'').trim().slice(0,40);
+      const email  = (datos.email||'').trim();
+      const pass   = (datos.pass||'');
+      if (!nombre) { if (out) out.textContent = '⚠️ Falta el nombre.'; return; }
+      if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) { if (out) out.textContent = '⚠️ Correo no válido.'; return; }
+      if (pass.length < 6) { if (out) out.textContent = '⚠️ La contraseña debe tener al menos 6 caracteres.'; return; }
+      if (out) out.textContent = 'Creando cuenta...';
+      let sec = null;
+      try {
+        sec = initializeApp(firebaseConfig, 'altaAlumna-' + Date.now());
+        // App Check también en la instancia secundaria: si el tenant lo usa y está
+        // "enforced", sin token los writes (createUser/setDoc) fallarían.
+        if (TENANT.recaptchaV3SiteKey) {
+          try {
+            const { initializeAppCheck, ReCaptchaV3Provider } =
+              await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-app-check.js");
+            initializeAppCheck(sec, {
+              provider: new ReCaptchaV3Provider(TENANT.recaptchaV3SiteKey),
+              isTokenAutoRefreshEnabled: true
+            });
+          } catch(e) { console.warn('AppCheck sec:', e && (e.code||e.message)); }
+        }
+        const secAuth = getAuth(sec);
+        const secDb = getFirestore(sec);
+        const cred = await createUserWithEmailAndPassword(secAuth, email, pass);
+        const nu = cred.user;
+        try { await updateProfile(nu, { displayName: nombre }); } catch {}
+        // El perfil lo crea la PROPIA alumna (sesión secundaria) → cumple la regla
+        // create (isOwner + creditos 0 + rank 4 + flags en false).
+        await setDoc(doc(secDb, "usuarios", nu.uid), {
+          nombreVisible: nombre,
+          handle: generarHandle(nu.uid),
+          userIdCorto: generarIdCorto(nu.uid),
+          creditos: 0,
+          rank: RANK_DEFAULT,
+          onboardingHecho: true,
+          cuentaActiva: true,
+          imparteClases: false,
+          colaborador: false,
+          nivel: { flexibilidad:0, fuerza:0, resistencia:0, tecnica:0, caida:0, interpretacion:0 },
+          eventos: [], titulos: [], apodo: '', especialidad: '',
+          semblanza: { experiencia:'', clases:'', antiguedad:'' },
+          colab: { tipo:'', descripcion:'', enlace:'' },
+          visibilidad: { perfilPublico:true, mostrarStats:true, mostrarSemblanza:true },
+          rankEsquema: RANK_ESQUEMA,
+          creadoEn: serverTimestamp(),
+          tenantId: TENANT.id
+        });
+        await signOut(secAuth);
+        if (out) out.textContent = `✅ Cuenta creada para ${nombre}.\nUsuario: ${email}\nContraseña temporal: ${pass}\nID corto: ${generarIdCorto(nu.uid)}\n\nCompárteselos; podrá cambiar la contraseña al entrar.`;
+        if (window.buscarPerfiles) buscarPerfiles();
+      } catch(e) {
+        console.error('crearCuentaAlumna:', e);
+        const code = (e && (e.code || e.message)) || 'error';
+        if (/email-already-in-use/.test(code)) {
+          if (out) out.textContent = '⚠️ Ese correo YA tiene cuenta. Si es una instructora que se registró antes, usa «Reactivar» + «Otorgar Rank» con su ID corto.';
+        } else if (/weak-password/.test(code)) {
+          if (out) out.textContent = '⚠️ Contraseña muy débil (mín. 6 caracteres).';
+        } else if (/invalid-email/.test(code)) {
+          if (out) out.textContent = '⚠️ Correo no válido.';
+        } else {
+          if (out) out.textContent = '❌ No se pudo crear (' + code + ').';
+        }
+      } finally {
+        if (sec) { try { await deleteApp(sec); } catch {} }
+      }
+    };
+
+    // ════════════════════════════════════════════════════════════════
     //  DIRECTORIO "Buscar Perfil" + COLABORADORES
     //  Perfiles VISIBLES por defecto; cada quien controla qué muestra
     //  (visibilidad.perfilPublico / mostrarStats / mostrarSemblanza).
@@ -1430,6 +1645,7 @@
         snap.forEach(s => {
           const d = s.data();
           d._id = s.id;   // doc id (uid) → para abrir el modal de detalle al hacer click
+          if (d.cuentaActiva === false) return; // oculta cuentas deshabilitadas
           if (d.visibilidad && d.visibilidad.perfilPublico === false) return; // respeta opt-out
           _dirCache.push(d);
         });
@@ -1449,6 +1665,7 @@
         const lista = [];
         snap.forEach(s => {
           const d = s.data();
+          if (d.cuentaActiva === false) return; // oculta cuentas deshabilitadas
           if (!d.colaborador) return;
           if (d.visibilidad && d.visibilidad.perfilPublico === false) return;
           lista.push(d);
@@ -1733,6 +1950,13 @@
         cargarMisReservas(user.uid);
         if (window.cargarOverlayHorario) window.cargarOverlayHorario();
         bootstrapPerfil(user).then((perfil) => {
+          // Cuenta deshabilitada por el dueno: se cierra sesion (el Dueno nunca se bloquea).
+          if (perfil && perfil.cuentaActiva === false && (perfil.rank ?? RANK_DEFAULT) !== RANK.DUENO) {
+            uiAlert('Tu cuenta esta deshabilitada. Contacta a Circanicula para reactivarla.',
+                    { titulo: 'Cuenta deshabilitada', peligro: true })
+              .finally(() => { try { signOut(auth); } catch(_){} });
+            return;
+          }
           cargarPerfil(user.uid);
           if (!perfil.onboardingHecho) abrirOnboarding(perfil);
         }).catch(e => console.error('perfil:', e));
@@ -3099,6 +3323,15 @@
       border:none; border-radius:6px; padding:9px 18px; cursor:pointer; font-size:.85rem;
     }
     .admin-resultado { text-align:center; font-size:.8rem; margin:12px 0 0; color:var(--amarillo); min-height:1em; }
+    /* Botón de acción destructiva (deshabilitar / eliminar): rojo de marca, no blanco */
+    .admin-btn-peligro {
+      background:linear-gradient(90deg,#b0231b,#7a1410); color:#ffecec;
+      box-shadow:0 0 0 1px rgba(255,90,80,.35) inset;
+    }
+    .admin-btn-peligro:hover { background:linear-gradient(90deg,#c92a20,#8f1812); }
+    /* Tarjeta de "zona de peligro" en el perfil: mismo lenguaje oscuro, acento rojo */
+    .perfil-peligro { border-color:rgba(220,70,60,.4); }
+    .perfil-peligro .perfil-sub { color:#ff8a80; }
 
     /* ===== ONBOARDING MODAL ===== */
     .onb-bg {
@@ -4129,6 +4362,13 @@
           <label class="vis-toggle"><input type="checkbox" id="vis-mostrarSemblanza" onchange="toggleVisibilidad('mostrarSemblanza', this.checked)"> Mostrar mi semblanza docente</label>
         </div>
       </div>
+
+      <!-- ZONA DE PELIGRO · eliminar mi propia cuenta (todos menos el Dueño) -->
+      <div id="perfil-peligro-card" class="perfil-rol-card perfil-peligro" style="display:none;">
+        <h3 class="perfil-sub">⚠️ Eliminar mi cuenta</h3>
+        <p class="admin-hint">Esto borra <strong>permanentemente</strong> tu cuenta, tu perfil, tus stats y tu acceso. No se puede deshacer. Tus reservas pasadas se conservan en el historial de Circanícula, pero ya no podrás iniciar sesión con esta cuenta.</p>
+        <button class="admin-btn admin-btn-peligro" onclick="eliminarMiCuenta()">Eliminar mi cuenta para siempre</button>
+      </div>
     </div>
 
     <!-- PANEL ADMIN (solo Dueño · Rank 0) -->
@@ -4175,6 +4415,34 @@
         </p>
         <button class="admin-btn" onclick="migrarRangos()">Migrar rangos</button>
         <p id="admin-migrar-out" class="admin-resultado" style="white-space:pre-line; text-align:left;"></p>
+      </div>
+
+      <!-- Gestión de cuentas: deshabilitar / reactivar (usa el ID corto de arriba) -->
+      <div class="admin-cuentas">
+        <p class="admin-hint" style="margin-top:14px;">
+          🗂️ <strong>Gestión de cuentas</strong> — escribe el ID corto arriba.
+          <em>Deshabilitar</em> oculta la cuenta del directorio y le cierra el acceso
+          (cuenta fantasma); se puede <em>reactivar</em> cuando regrese (p. ej. las Misses
+          que ya tenían cuenta). No borra nada: es reversible. No puedes deshabilitar tu
+          propia cuenta de Dueño ni la de otro Dueño.
+        </p>
+        <div class="admin-row">
+          <button class="admin-btn" onclick="deshabilitarCuenta()">Deshabilitar cuenta</button>
+          <button class="admin-btn" onclick="reactivarCuenta()">Reactivar cuenta</button>
+          <button class="admin-btn" onclick="listarDeshabilitadas()">Ver deshabilitadas</button>
+        </div>
+        <p id="admin-cuenta-out" class="admin-resultado" style="white-space:pre-line; text-align:left;"></p>
+      </div>
+
+      <!-- Crear cuenta de alumna (para quienes no pueden/quieren registrarse) -->
+      <div class="admin-crear">
+        <p class="admin-hint" style="margin-top:14px;">
+          ➕ <strong>Crear cuenta de alumna</strong> — para alumnas que no saben o no quieren
+          registrarse. Tú defines nombre, correo y una contraseña temporal; entrégaselos para
+          que después la cambien. Tu sesión de Dueño <strong>no se cierra</strong> al crearla.
+        </p>
+        <button class="admin-btn" onclick="crearCuentaAlumna()">Crear cuenta de alumna</button>
+        <p id="admin-crear-out" class="admin-resultado" style="white-space:pre-line; text-align:left;"></p>
       </div>
     </div>
 
