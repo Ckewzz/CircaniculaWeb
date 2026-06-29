@@ -1749,6 +1749,41 @@
       return { apartados, asistidos };
     };
 
+    // STAFF: mapa slotId -> [{nombre,estado,uid}] con TODAS las reservas no canceladas.
+    // Las reglas permiten leer toda la colección 'reservas' a isStaffClase(); para un
+    // alumno la query se rechaza y devolvemos {} sin romper el calendario.
+    window.cargarReservasPorSlot = async () => {
+      const mapa = {};
+      try {
+        const snap = await getDocs(collection(db, "reservas"));
+        snap.docs.forEach(d => {
+          const r = d.data();
+          if (r.estado === 'cancelada') return;
+          (r.slots || []).forEach(s => {
+            if (!s || !s.slotId) return;
+            (mapa[s.slotId] = mapa[s.slotId] || []).push({
+              nombre: r.nombre || 'Alumno',
+              estado: r.estado || 'pendiente_pago',
+              uid: r.uid || ''
+            });
+          });
+        });
+      } catch (e) { console.warn('cargarReservasPorSlot:', e); }
+      return mapa;
+    };
+
+    // STAFF: días (diaIdx 0-6, Lun-anclado) en los que la instructora imparte clase,
+    // según su propio calendario de horas (colección 'horarios'). Para el filtro
+    // "solo mis clases". Defensiva: devuelve [] si no hay datos/permisos.
+    window.cargarMisDiasStaff = async (uid) => {
+      const dias = new Set();
+      try {
+        const snap = await getDocs(query(collection(db, "horarios"), where("uid", "==", uid)));
+        snap.docs.forEach(d => { const h = d.data(); if (h && typeof h.diaIdx === 'number') dias.add(h.diaIdx); });
+      } catch (e) { console.warn('cargarMisDiasStaff:', e); }
+      return Array.from(dias);
+    };
+
     // ── EVENTO ESPECIAL — leer contador de boletos ────────
     async function cargarContadorBoletos() {
       try {
@@ -2417,6 +2452,49 @@
     .clase-cell.lleno { opacity: .55; cursor: not-allowed; filter: grayscale(.4); }
     .clase-cell.lleno:hover { transform: none; filter: grayscale(.4); }
     .clase-cell.lleno .cupo-badge { color: var(--naranja, #e87400); font-weight: 600; }
+    /* Vista STAFF/MISS (T3-F): ver quién apartó + filtro "mis clases". */
+    .clase-cell.staff-view { cursor: pointer; }
+    .clase-cell.staff-view:hover { filter: brightness(1.18); }
+    .staff-reservas-badge {
+      position: absolute; top: 2px; left: 4px; z-index: 2;
+      font-size: .5rem; letter-spacing: .3px; font-family: 'Cinzel', serif;
+      color: #ffe08a; background: rgba(0,0,0,.5); border-radius: 8px;
+      padding: 1px 6px; pointer-events: none;
+    }
+    .staff-reservas-badge.vacio { color: rgba(255,255,255,.38); }
+    .clase-cell.fuera-mis-dias { opacity: .26; filter: grayscale(.6); }
+    .clase-cell.fuera-mis-dias:hover { filter: grayscale(.6) brightness(1.05); }
+    .horario-staff-bar {
+      display: none; align-items: center; gap: 12px; flex-wrap: wrap;
+      margin: 4px 0 16px; padding: 10px 14px; border-radius: 8px;
+      background: rgba(255,204,0,.06); border: 1px solid rgba(255,204,0,.18);
+    }
+    .horario-staff-bar .staff-bar-txt { font-size: .72rem; opacity: .72; letter-spacing: .3px; line-height: 1.5; }
+    .horario-staff-bar .staff-bar-txt strong { color: var(--amarillo); }
+    .staff-filtro-btn {
+      margin-left: auto; padding: 8px 16px; border-radius: 6px; cursor: pointer;
+      font-family: 'Cinzel', serif; font-size: .68rem; letter-spacing: 1px;
+      background: transparent; border: 1px solid rgba(255,204,0,.4); color: var(--amarillo);
+      transition: all .25s; white-space: nowrap;
+    }
+    .staff-filtro-btn:hover { background: rgba(255,204,0,.12); }
+    .staff-filtro-btn.activo { background: var(--amarillo); color: var(--negro); font-weight: 800; border-color: var(--amarillo); }
+    /* Modal "quién apartó": lista de reservas. */
+    .reservas-lista { text-align: left; max-height: 320px; overflow-y: auto; margin: 4px 0 20px; }
+    .reservas-lista .vacio { text-align: center; opacity: .5; font-size: .82rem; padding: 22px 0; }
+    .reserva-fila {
+      display: flex; align-items: center; justify-content: space-between; gap: 10px;
+      padding: 10px 12px; border-radius: 6px; background: var(--gris-medio); margin-bottom: 8px;
+    }
+    .reserva-fila .r-nombre { font-size: .86rem; color: var(--blanco); }
+    .reserva-fila .r-estado {
+      font-size: .58rem; letter-spacing: .5px; text-transform: uppercase;
+      padding: 3px 8px; border-radius: 20px; white-space: nowrap;
+    }
+    .r-estado.activa { background: rgba(124,252,154,.15); color: #7CFC9A; }
+    .r-estado.pago_reportado { background: rgba(255,204,0,.15); color: var(--amarillo); }
+    .r-estado.pendiente_pago { background: rgba(255,255,255,.08); color: rgba(255,255,255,.6); }
+    .reservas-modal-cap { font-size: .72rem; opacity: .6; margin-bottom: 18px; }
     @keyframes shake {
       0%,100%{transform:translateX(0)}
       20%{transform:translateX(-5px)}
@@ -3530,6 +3608,11 @@
       <button class="plan-btn" data-plan="avanzado">Plan Avanzado</button>
     </div>
     <p class="plan-info-badge" id="plan-info">Plan seleccionado: <strong>Medio</strong> — Selecciona hasta <strong>5 clases</strong> por semana</p>
+    <!-- Barra STAFF/MISS: control de vista del calendario (T3-F). Oculta para alumnos. -->
+    <div class="horario-staff-bar" id="horario-staff-bar">
+      <span class="staff-bar-txt"><strong>Modo staff:</strong> toca cualquier clase para ver quién la apartó. Cupo máximo: 6 por clase.</span>
+      <button class="staff-filtro-btn" id="staff-filtro-btn" onclick="toggleFiltroMisClases()">Ver solo mis clases</button>
+    </div>
     <div style="overflow-x:auto;">
       <table class="horario-grid">
         <thead>
@@ -3572,6 +3655,18 @@
     <div class="nombre-modal-btns">
       <button class="nombre-modal-cancel" onclick="cerrarNombreModal()">Cancelar</button>
       <button class="nombre-modal-ok" onclick="continuarAlPago()">Continuar al pago →</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal STAFF: quién apartó esta clase (T3-F) -->
+<div id="reservas-slot-modal" class="nombre-modal-bg">
+  <div class="nombre-modal" style="max-width:460px;">
+    <h3 class="nombre-modal-titulo" id="reservas-slot-titulo">Reservas</h3>
+    <p class="reservas-modal-cap" id="reservas-slot-cap">—</p>
+    <div class="reservas-lista" id="reservas-slot-lista"></div>
+    <div class="nombre-modal-btns">
+      <button class="nombre-modal-ok" onclick="cerrarReservasSlotModal()">Cerrar</button>
     </div>
   </div>
 </div>
@@ -4268,6 +4363,9 @@
   let _misSlots     = new Set();  // slotIds que el ALUMNO ya apartó (reserva propia)
   let _misAsistidos = new Set();  // slotIds donde una miss le marcó asistencia
   let _cuposCache   = {};         // slotId -> conteo de cupo (agregado público)
+  let _reservasPorSlot = {};      // STAFF: slotId -> [{nombre,estado,uid}] (quién apartó)
+  let _misDiasStaff = new Set();  // STAFF: columnas (1-5) donde imparto clase
+  let _filtroMisClases = false;   // STAFF: filtro "solo mis clases" activo
 
   let slotsSeleccionados = new Set();
   let planActual = 'medio';
@@ -4307,6 +4405,11 @@
           div.appendChild(span);
 
           div.addEventListener('click', () => {
+            // STAFF/MISS: la celda es informativa -> abre "quién apartó", no selecciona.
+            if (window._miRank != null && window._miRank <= 2) {
+              abrirReservasSlot(div.dataset.slotId, row[0], i, tipo);
+              return;
+            }
             // Capa de seguimiento: celdas bloqueadas (ya apartada / llena) no se seleccionan.
             if(div.dataset.bloqueado === '1'){
               div.style.animation = 'shake .4s';
@@ -4340,12 +4443,29 @@
   function decorarHorario() {
     const cells = document.querySelectorAll('#horario-body .clase-cell.disponible');
     cells.forEach(div => {
-      div.classList.remove('mi-reserva', 'asistida', 'lleno');
+      div.classList.remove('mi-reserva', 'asistida', 'lleno', 'staff-view', 'fuera-mis-dias');
       div.dataset.bloqueado = '';
-      div.querySelectorAll('.mi-reserva-tag, .cupo-badge').forEach(n => n.remove());
+      div.querySelectorAll('.mi-reserva-tag, .cupo-badge, .staff-reservas-badge').forEach(n => n.remove());
 
       const sid = div.dataset.slotId;
+      const dia = Number(div.dataset.dia);
       const esStaff = (window._miRank != null && window._miRank <= 2);
+
+      // ── VISTA STAFF/MISS: cuántos apartaron + filtro de "mis días" ──
+      // La celda es informativa (no se selecciona). El click abre "quién apartó".
+      if (esStaff) {
+        div.classList.add('staff-view');
+        const lista = _reservasPorSlot[sid] || [];
+        const badge = document.createElement('span');
+        badge.className = 'staff-reservas-badge' + (lista.length ? '' : ' vacio');
+        badge.textContent = lista.length ? (lista.length + (lista.length === 1 ? ' apartó' : ' apartaron')) : 'libre';
+        div.appendChild(badge);
+        div.title = 'Toca para ver quién apartó esta clase';
+        if (_filtroMisClases && _misDiasStaff.size && !_misDiasStaff.has(dia)) {
+          div.classList.add('fuera-mis-dias');
+        }
+        return; // staff no usa selección de compra / cupo / mi-reserva
+      }
 
       // Cupo para TODOS ("n/6" o "Lleno"), solo si hay dato agregado público.
       const n = _cuposCache[sid];
@@ -4381,21 +4501,72 @@
   // Si una pieza aún no existe (p.ej. reglas de 'cupos' sin publicar), se omite.
   async function cargarOverlayHorario() {
     _misSlots = new Set(); _misAsistidos = new Set(); _cuposCache = {};
+    _reservasPorSlot = {}; _misDiasStaff = new Set();
+    const esStaff = (window._miRank != null && window._miRank <= 2);
     try {
       if (window.cargarCupos) {
         const cupos = await window.cargarCupos();
         if (cupos) _cuposCache = cupos;
       }
       const u = window.usuarioActual;
+      // STAFF/MISS: quién apartó cada clase + días que imparto (para el filtro).
+      if (esStaff && window.cargarReservasPorSlot) {
+        _reservasPorSlot = await window.cargarReservasPorSlot() || {};
+      }
+      if (esStaff && u && window.cargarMisDiasStaff) {
+        const dd = await window.cargarMisDiasStaff(u.uid) || [];
+        dd.forEach(di => _misDiasStaff.add(di + 1)); // diaIdx 0=Lun -> columna 1
+      }
+      // ALUMNO (o staff que también reserva): lo que apartó / asistió.
       if (u && window.cargarMisSlots) {
         const r = await window.cargarMisSlots(u.uid) || {};
         (r.apartados || []).forEach(s => _misSlots.add(s));
         (r.asistidos || []).forEach(s => _misAsistidos.add(s));
       }
     } catch (e) { console.warn('overlay horario:', e); }
+    // Mostrar la barra de control solo a staff.
+    const bar = document.getElementById('horario-staff-bar');
+    if (bar) bar.style.display = esStaff ? 'flex' : 'none';
     decorarHorario();
   }
   window.cargarOverlayHorario = cargarOverlayHorario;
+
+  // ── STAFF/MISS: modal "quién apartó esta clase" + filtro de mis días (T3-F) ──
+  const _ESTADO_LBL = { pendiente_pago:'Pendiente', pago_reportado:'En confirmación', activa:'Activa' };
+  function abrirReservasSlot(sid, hora, dia, tipo) {
+    const modal = document.getElementById('reservas-slot-modal');
+    const tit   = document.getElementById('reservas-slot-titulo');
+    const cap   = document.getElementById('reservas-slot-cap');
+    const lista = document.getElementById('reservas-slot-lista');
+    if (!modal || !lista) return;
+    const reservas = _reservasPorSlot[sid] || [];
+    if (tit) tit.textContent = (claseNombres[tipo] || 'Clase') + ' · ' + (DIAS_NOMBRE[dia] || '') + ' · ' + hora;
+    if (cap) cap.textContent = reservas.length + ' de ' + CUPO_MAX + ' lugares apartados';
+    if (!reservas.length) {
+      lista.innerHTML = '<p class="vacio">Nadie ha apartado esta clase todavía.</p>';
+    } else {
+      lista.innerHTML = reservas.map(r => {
+        const est = r.estado || 'pendiente_pago';
+        const nom = String(r.nombre || 'Alumno').replace(/[<>&]/g, '');
+        return '<div class="reserva-fila"><span class="r-nombre">' + nom +
+               '</span><span class="r-estado ' + est + '">' + (_ESTADO_LBL[est] || est) + '</span></div>';
+      }).join('');
+    }
+    modal.style.display = 'flex';
+  }
+  window.cerrarReservasSlotModal = () => {
+    const m = document.getElementById('reservas-slot-modal');
+    if (m) m.style.display = 'none';
+  };
+  window.toggleFiltroMisClases = () => {
+    _filtroMisClases = !_filtroMisClases;
+    const btn = document.getElementById('staff-filtro-btn');
+    if (btn) {
+      btn.classList.toggle('activo', _filtroMisClases);
+      btn.textContent = _filtroMisClases ? 'Ver todas las clases' : 'Ver solo mis clases';
+    }
+    decorarHorario();
+  };
 
   function actualizarContador() {
     const max = planHoras[planActual] || 5;
