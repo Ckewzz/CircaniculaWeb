@@ -241,6 +241,34 @@ service cloud.firestore {
              || (isStaffClase() && myRank() < resource.data.rank) );
     }
 
+    // ── CUPO AGREGADO POR CLASE (T3-H) ────────────────────────────────
+    //  cupos/{slotId} = { count, max, updatedAt }. Es un AGREGADO PÚBLICO para
+    //  que el ALUMNO vea "lleno"/cupo SIN poder leer las reservas ajenas (su
+    //  privacidad sigue intacta: solo lee SUS reservas). Lo recalcula y escribe
+    //  el staff (Rank ≤ 2) desde las reservas reales (idempotente).
+    match /cupos/{slotId} {
+      allow read: if signedIn();
+      allow create, update: if isStaffClase()
+        && request.resource.data.count is int
+        && request.resource.data.count >= 0;
+      allow delete: if isStaffClase();
+    }
+
+    // ── PASE DE LISTA / ASISTENCIAS (T3-E) ────────────────────────────
+    //  asistencias/{uid_slotId_fecha} = { uid, slotId, fecha, marcadoPor, ts }.
+    //  La marca el STAFF (Rank ≤ 2); 'marcadoPor' debe ser quien la crea. El
+    //  alumno LEE SOLO LAS SUYAS (no ve la lista de nadie más). Inmutable: para
+    //  corregir se borra y se vuelve a marcar.
+    match /asistencias/{id} {
+      allow read: if signedIn() && (resource.data.uid == request.auth.uid || isStaffClase());
+      allow create: if isStaffClase()
+        && request.resource.data.marcadoPor == request.auth.uid
+        && request.resource.data.uid is string
+        && request.resource.data.slotId is string;
+      allow update: if false;
+      allow delete: if isStaffClase();
+    }
+
     // Todo lo demás: denegado.
     match /{document=**} {
       allow read, write: if false;

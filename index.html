@@ -1936,6 +1936,7 @@
       try {
         await updateDoc(doc(db, "reservas", id),
           { estado: "activa", fechaPago: serverTimestamp(), confirmadaPor: usuarioActual.uid });
+        if (window.sincronizarCupos) window.sincronizarCupos(); // mantiene el cupo publico al dia
         cargarReservasStaff();
       } catch (e) { console.error('confirmarPagoReserva:', e); alert('No se pudo confirmar: ' + e.message); }
     };
@@ -1943,10 +1944,61 @@
       if (!confirm('¿Cancelar esta reserva?')) return;
       try {
         await updateDoc(doc(db, "reservas", id), { estado: "cancelada" });
+        if (window.sincronizarCupos) window.sincronizarCupos(); // libera el lugar en el cupo
         cargarReservasStaff();
       } catch (e) { console.error('cancelarReservaStaff:', e); alert('No se pudo cancelar: ' + e.message); }
     };
     window.cargarReservasStaff = cargarReservasStaff;
+
+    // ── CUPO AGREGADO PUBLICO (T3-H) ──────────────────────────────────────
+    // Los ALUMNOS no pueden leer reservas ajenas; para que vean "lleno" sin ver
+    // quien, el staff mantiene un agregado publico cupos/{slotId}={count,max}.
+    // Lectura: cualquiera autenticado. Recalculo/escritura: solo staff (reglas).
+    window.cargarCupos = async () => {
+      const mapa = {};
+      try {
+        const snap = await getDocs(collection(db, "cupos"));
+        snap.docs.forEach(d => { const c = d.data(); if (c && typeof c.count === 'number') mapa[d.id] = c.count; });
+      } catch (e) { /* coleccion/reglas de 'cupos' aun no publicadas */ }
+      return mapa;
+    };
+    // STAFF: recalcula el cupo de TODAS las clases desde las reservas reales
+    // (no canceladas) y lo escribe. Idempotente; seguro de re-correr. Escribe 0
+    // en las clases sin reservas para "liberar" cupos que quedaron en alto.
+    window.sincronizarCupos = async () => {
+      try {
+        const snap = await getDocs(collection(db, "reservas"));
+        const conteo = {};
+        snap.docs.forEach(d => {
+          const r = d.data();
+          if (r.estado === 'cancelada') return;
+          (r.slots || []).forEach(s => { if (s && s.slotId) conteo[s.slotId] = (conteo[s.slotId] || 0) + 1; });
+        });
+        const todos = new Set(Object.keys(conteo));
+        if (window.slotIdsTodos) window.slotIdsTodos().forEach(id => todos.add(id));
+        const escrituras = [];
+        todos.forEach(id => escrituras.push(
+          setDoc(doc(db, "cupos", id), { count: conteo[id] || 0, max: 6, updatedAt: serverTimestamp() })
+        ));
+        await Promise.all(escrituras);
+        return true;
+      } catch (e) { console.warn('sincronizarCupos:', e); return false; }
+    };
+
+    // ── PASE DE LISTA / ASISTENCIAS (T3-E) ────────────────────────────────
+    // STAFF marca que un alumno asistio a una clase (slotId) HOY. Id determinista
+    // uid_slotId_fecha -> idempotente. Inmutable por reglas (para "desmarcar" se
+    // borra). El alumno ve su propia asistencia via cargarMisSlots.
+    window.marcarAsistencia = async (uid, slotId) => {
+      try {
+        const fecha = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+        await setDoc(doc(db, "asistencias", uid + '_' + slotId + '_' + fecha), {
+          uid, slotId, fecha, marcadoPor: usuarioActual.uid, ts: serverTimestamp()
+        });
+        return true;
+      } catch (e) { console.warn('marcarAsistencia:', e); return false; }
+    };
+  </script>
   </script>
 
   <style>
@@ -2495,6 +2547,15 @@
     .r-estado.pago_reportado { background: rgba(255,204,0,.15); color: var(--amarillo); }
     .r-estado.pendiente_pago { background: rgba(255,255,255,.08); color: rgba(255,255,255,.6); }
     .reservas-modal-cap { font-size: .72rem; opacity: .6; margin-bottom: 18px; }
+    .r-asist-btn {
+      padding: 5px 10px; border-radius: 5px; cursor: pointer; white-space: nowrap;
+      font-family: 'Cinzel', serif; font-size: .58rem; letter-spacing: .5px;
+      background: transparent; border: 1px solid rgba(124,252,154,.5); color: #7CFC9A;
+      transition: all .2s;
+    }
+    .r-asist-btn:hover { background: rgba(124,252,154,.15); }
+    .r-asist-btn:disabled { opacity: .6; cursor: default; }
+    .r-asist-btn.hecho { background: rgba(124,252,154,.2); border-color: #7CFC9A; }
     @keyframes shake {
       0%,100%{transform:translateX(0)}
       20%{transform:translateX(-5px)}
@@ -3610,8 +3671,9 @@
     <p class="plan-info-badge" id="plan-info">Plan seleccionado: <strong>Medio</strong> — Selecciona hasta <strong>5 clases</strong> por semana</p>
     <!-- Barra STAFF/MISS: control de vista del calendario (T3-F). Oculta para alumnos. -->
     <div class="horario-staff-bar" id="horario-staff-bar">
-      <span class="staff-bar-txt"><strong>Modo staff:</strong> toca cualquier clase para ver quién la apartó. Cupo máximo: 6 por clase.</span>
+      <span class="staff-bar-txt"><strong>Modo staff:</strong> toca cualquier clase para ver quién la apartó y pasar lista. Cupo máximo: 6 por clase.</span>
       <button class="staff-filtro-btn" id="staff-filtro-btn" onclick="toggleFiltroMisClases()">Ver solo mis clases</button>
+      <button class="staff-filtro-btn staff-cupo-btn" id="staff-cupo-btn" onclick="staffSincronizarCupos(this)">Actualizar cupos</button>
     </div>
     <div style="overflow-x:auto;">
       <table class="horario-grid">
@@ -4548,8 +4610,11 @@
       lista.innerHTML = reservas.map(r => {
         const est = r.estado || 'pendiente_pago';
         const nom = String(r.nombre || 'Alumno').replace(/[<>&]/g, '');
+        const btn = r.uid
+          ? '<button class="r-asist-btn" onclick="marcarAsistenciaUI(\'' + r.uid + '\',\'' + sid + '\',this)">Marcar</button>'
+          : '';
         return '<div class="reserva-fila"><span class="r-nombre">' + nom +
-               '</span><span class="r-estado ' + est + '">' + (_ESTADO_LBL[est] || est) + '</span></div>';
+               '</span><span class="r-estado ' + est + '">' + (_ESTADO_LBL[est] || est) + '</span>' + btn + '</div>';
       }).join('');
     }
     modal.style.display = 'flex';
@@ -4566,6 +4631,39 @@
       btn.textContent = _filtroMisClases ? 'Ver todas las clases' : 'Ver solo mis clases';
     }
     decorarHorario();
+  };
+
+  // Todos los slotIds reales de la rejilla (sin celdas 'empty'). Lo usa el staff
+  // para escribir cupo 0 en clases que se quedaron sin reservas (T3-H).
+  window.slotIdsTodos = function () {
+    const ids = [];
+    horarioBase.forEach(row => {
+      for (let i = 1; i <= 5; i++) { if (row[i] && row[i] !== 'empty') ids.push(slotIdDe(i, row[0])); }
+    });
+    return ids;
+  };
+
+  // STAFF: pase de lista desde el modal "quién apartó" (T3-E).
+  window.marcarAsistenciaUI = async (uid, sid, btn) => {
+    if (!window.marcarAsistencia || !btn) return;
+    btn.disabled = true; btn.textContent = '…';
+    const ok = await window.marcarAsistencia(uid, sid);
+    if (ok) { btn.textContent = 'Asistió ✓'; btn.classList.add('hecho'); }
+    else { btn.disabled = false; btn.textContent = 'Marcar'; alert('No se pudo marcar la asistencia. (¿Faltan publicar las reglas de "asistencias"?)'); }
+  };
+
+  // STAFF: recalcula y publica el cupo de todas las clases (T3-H).
+  window.staffSincronizarCupos = async (btn) => {
+    if (!window.sincronizarCupos) return;
+    const prev = btn ? btn.textContent : '';
+    if (btn) { btn.disabled = true; btn.textContent = 'Actualizando…'; }
+    const ok = await window.sincronizarCupos();
+    if (window.cargarOverlayHorario) await window.cargarOverlayHorario();
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = ok ? 'Cupos actualizados ✓' : 'Error (¿reglas?)';
+      setTimeout(() => { btn.textContent = prev || 'Actualizar cupos'; }, 2500);
+    }
   };
 
   function actualizarContador() {
