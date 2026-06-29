@@ -985,15 +985,25 @@
     async function guardarCamposPerfil(campos) {
       if (!usuarioActual) return 'sin-sesion';
       const ref = doc(db, "usuarios", usuarioActual.uid);
-      try { await updateDoc(ref, campos); return null; }
-      catch (e) {
-        const code = (e && (e.code || e.message)) || 'error';
-        if (/not-found|No document to update/i.test(code)) {
-          try { await bootstrapPerfil(usuarioActual); await updateDoc(ref, campos); return null; }
-          catch (e2) { console.error('guardarCamposPerfil retry:', e2.code || e2); return (e2 && (e2.code || 'error')); }
+      // Cuentas "fantasma" (existen en Auth pero SIN doc usuarios/{uid}, p.ej. las
+      // que nunca sincronizaron): un updateDoc directo las rechaza con
+      // 'permission-denied' —NO con 'not-found'— porque TODAS las reglas update
+      // referencian resource.data (que no existe) y eso evalúa a deny. Por eso
+      // ASEGURAMOS el doc (bootstrap = create con defaults válidos) ANTES de
+      // actualizar, en vez de adivinar por el texto del error.
+      try {
+        const snap = await getDoc(ref);
+        if (!snap.exists()) await bootstrapPerfil(usuarioActual);
+        await updateDoc(ref, campos);
+        return null;
+      } catch (e) {
+        // Último intento: re-asegura el doc base (carrera / doc parcial) y reintenta.
+        try { await bootstrapPerfil(usuarioActual); await updateDoc(ref, campos); return null; }
+        catch (e2) {
+          const code = (e2 && (e2.code || e2.message)) || 'error';
+          console.error('guardarCamposPerfil:', code);
+          return code;
         }
-        console.error('guardarCamposPerfil:', code);
-        return code;
       }
     }
     // Repinta el avatar en perfil, chip del nav y onboarding (si está abierto).
