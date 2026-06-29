@@ -51,7 +51,7 @@
              createUserWithEmailAndPassword, signInWithEmailAndPassword, updateProfile,
              EmailAuthProvider, reauthenticateWithCredential, reauthenticateWithPopup }
       from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
-    import { getFirestore, doc, getDoc, setDoc, collection, addDoc, query, where, getDocs, updateDoc, deleteDoc, serverTimestamp, arrayUnion }
+    import { getFirestore, doc, getDoc, setDoc, collection, addDoc, query, where, getDocs, updateDoc, deleteDoc, serverTimestamp, arrayUnion, runTransaction }
       from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
     // ════════════════════════════════════════════════════════════════════
@@ -308,6 +308,8 @@
             if (c.valor != null) inp.value = c.valor;
             if (c.placeholder) inp.placeholder = c.placeholder;
             if (c.maxlength) inp.maxLength = c.maxlength;
+            if (c.min != null) inp.min = c.min;   // p.ej. fecha mínima (hoy) en inputs date/number
+            if (c.max != null) inp.max = c.max;
             inputs[c.id] = inp; wrap.appendChild(inp); card.appendChild(wrap);
           });
           const btns = document.createElement('div'); btns.className = 'ui-dlg-btns';
@@ -1984,20 +1986,32 @@
     // Llamado desde confirmarHorario() tras seleccionar plan + horas + nombre.
     // Guarda la reserva pendiente (Firestore + localStorage) y redirige a Stripe
     // en el MISMO tab, para que el success vuelva aquí con ?pago=exitoso.
-    window.procesarPagoReserva = async ({ plan, clases, nombre, slots }) => {
+    window.procesarPagoReserva = async ({ plan, clases, nombre, slots, fecha }) => {
       if (!usuarioActual) { abrirLoginModal('login'); return; }
       const base = STRIPE_LINKS[plan];
       if (!base) { await uiAlert('Plan no válido.', { titulo: 'Error', peligro: true }); return; }
 
+      // CLASE SUELTA: aparta el cupo de la FECHA elegida de forma atómica ANTES de
+      // cobrar. Si justo se llenó (alguien tomó el último lugar), se aborta.
+      if (plan === 'individual') {
+        const fsid = (slots && slots[0] && slots[0].slotId) || '';
+        const res = await reservarCupoIndividual(fsid);
+        if (!res.ok) {
+          if (res.lleno) await uiAlert('Esa clase acaba de llenarse (máximo 6 personas). Elige otra fecha u horario.', { titulo: 'Clase Llena', peligro: true });
+          else await uiAlert('No se pudo apartar tu lugar. Vuelve a intentarlo.', { titulo: 'Error', peligro: true });
+          return;
+        }
+      }
+
       // Persistir selección completa (sobrevive el redirect de Stripe)
       localStorage.setItem('reserva_pendiente_full', JSON.stringify({
-        plan, clases, slots: slots || [], nombre,
+        plan, clases, slots: slots || [], nombre, fecha: fecha || null,
         email: usuarioActual.email, uid: usuarioActual.uid, ts: Date.now()
       }));
 
       // Guardar reserva pendiente en Firestore (no bloqueante para el redirect)
       try {
-        await addDoc(collection(db, "reservas"), {
+        const docReserva = {
           uid: usuarioActual.uid,
           nombre,
           plan,
@@ -2005,7 +2019,9 @@
           slots: slots || [],
           estado: "pendiente_pago",
           fechaReserva: serverTimestamp()
-        });
+        };
+        if (fecha) docReserva.fechaClase = fecha;   // clase suelta: día exacto elegido
+        await addDoc(collection(db, "reservas"), docReserva);
       } catch (e) { console.error('Firestore reserva:', e); }
 
       // Redirigir MISMO tab a Stripe
@@ -2411,6 +2427,40 @@
         await Promise.all(escrituras);
         return true;
       } catch (e) { console.warn('sincronizarCupos:', e); return false; }
+    };
+
+    // Lee el conteo público de UNA clase concreta (slotId con fecha para las
+    // clases sueltas: "YYYY-MM-DD_h-h"). Devuelve un número (0 si no hay doc).
+    window.cargarCupoDe = async (slotId) => {
+      try {
+        const s = await getDoc(doc(db, "cupos", slotId));
+        const n = s.exists() ? s.data().count : 0;
+        return typeof n === 'number' ? n : 0;
+      } catch (e) { console.warn('cargarCupoDe:', e); return 0; }
+    };
+
+    // CLASE SUELTA: aparta 1 lugar de una fecha concreta de forma ATÓMICA.
+    // Transacción: lee cupos/{fechaSlotId}; si ya hay 6 -> {ok:false,lleno:true}
+    // (Clase Llena); si no, escribe count+1 (tope duro 6 reforzado por reglas).
+    // Cuenta reservas pendientes/confirmadas por igual (evita sobrecupo físico);
+    // el staff puede recalcular con "Actualizar cupos" para liberar abandonos.
+    window.reservarCupoIndividual = async (fechaSlotId) => {
+      if (!fechaSlotId) return { ok: false };
+      try {
+        await runTransaction(db, async (tx) => {
+          const ref = doc(db, "cupos", fechaSlotId);
+          const snap = await tx.get(ref);
+          const actual = snap.exists() && typeof snap.data().count === 'number' ? snap.data().count : 0;
+          if (actual >= 6) { const e = new Error('lleno'); e._lleno = true; throw e; }
+          if (snap.exists()) tx.update(ref, { count: actual + 1, max: 6, updatedAt: serverTimestamp() });
+          else               tx.set(ref,    { count: 1,          max: 6, updatedAt: serverTimestamp() });
+        });
+        return { ok: true };
+      } catch (e) {
+        if (e && e._lleno) return { ok: false, lleno: true };
+        console.warn('reservarCupoIndividual:', e);
+        return { ok: false, error: (e && (e.code || e.message)) || 'error' };
+      }
     };
 
     // ── PASE DE LISTA / ASISTENCIAS (T3-E) ────────────────────────────────
@@ -4971,6 +5021,55 @@
   }
   window.slotsEstructurados = slotsEstructurados;
 
+  // ── FECHA EXACTA PARA CLASE SUELTA (#45) + TOPE POR FECHA (#46) ─────────
+  const DIAS_LARGO = { 1:'lunes', 2:'martes', 3:'miércoles', 4:'jueves', 5:'viernes' };
+  // "YYYY-MM-DD" en hora LOCAL (no UTC, para no desfasar el día en Hermosillo).
+  function ymdLocal(d) {
+    const y = d.getFullYear(), m = String(d.getMonth()+1).padStart(2,'0'), dd = String(d.getDate()).padStart(2,'0');
+    return `${y}-${m}-${dd}`;
+  }
+  // Día de la semana (0=Dom..6=Sáb) de un "YYYY-MM-DD" parseado en LOCAL.
+  function diaSemanaLocal(fechaStr) {
+    const [y,m,d] = fechaStr.split('-').map(Number);
+    return new Date(y, m-1, d).getDay();   // Lun=1..Vie=5 coincide con slot.dia
+  }
+  // "mié 15 jul 2026" para mostrar la fecha elegida.
+  function fechaBonita(fechaStr) {
+    const [y,m,d] = fechaStr.split('-').map(Number);
+    return new Date(y, m-1, d).toLocaleDateString('es-MX', { weekday:'short', day:'numeric', month:'short', year:'numeric' });
+  }
+  // Pide la fecha exacta de la clase suelta (debe caer en el día de la semana de
+  // la clase) y valida cupo de ESA fecha (máx 6 -> "Clase Llena"). Reintenta
+  // hasta una fecha válida o cancelar. Devuelve {fecha, fechaSlotId} | null.
+  async function pedirFechaIndividual(slot) {
+    const minStr = ymdLocal(new Date());
+    const horaCompacta = slotIdDe(slot.dia, slot.hora).split('_')[1]; // "8-9"
+    while (true) {
+      const r = await window.uiForm({
+        titulo: 'Elige el día de tu clase',
+        mensaje: `Tu clase de ${claseNombres[slot.tipo] || 'aéreos'} es los ${DIAS_LARGO[slot.dia] || ''} a las ${slot.hora}. Selecciona la fecha exacta a la que asistirás.`,
+        okText: 'Confirmar fecha',
+        campos: [{ id:'fecha', label:'Fecha de la clase', tipo:'date', min: minStr }]
+      });
+      if (r === null) return null; // canceló
+      const fecha = (r.fecha || '').trim();
+      if (!fecha)            { await window.uiAlert('Selecciona una fecha para tu clase.', { titulo:'Falta la fecha' }); continue; }
+      if (fecha < minStr)    { await window.uiAlert('Esa fecha ya pasó. Elige un día a futuro.', { titulo:'Fecha no válida' }); continue; }
+      if (diaSemanaLocal(fecha) !== slot.dia) {
+        await window.uiAlert(`Esa clase es en ${DIAS_LARGO[slot.dia]}. La fecha que elegiste cae en otro día; por favor elige un ${DIAS_LARGO[slot.dia]}.`, { titulo:'Día incorrecto' });
+        continue;
+      }
+      const fechaSlotId = `${fecha}_${horaCompacta}`;
+      let n = 0;
+      try { if (window.cargarCupoDe) n = await window.cargarCupoDe(fechaSlotId); } catch(_){}
+      if (n >= CUPO_MAX) {
+        await window.uiAlert('Esa fecha ya está LLENA (máximo 6 personas por clase). Por favor elige otro día.', { titulo:'Clase Llena', peligro:true });
+        continue;
+      }
+      return { fecha, fechaSlotId };
+    }
+  }
+
   // Cachés de la capa de seguimiento (se llenan tras login; siempre defensivas).
   let _misSlots     = new Set();  // slotIds que el ALUMNO ya apartó (reserva propia)
   let _misAsistidos = new Set();  // slotIds donde una miss le marcó asistencia
@@ -5296,12 +5395,23 @@
       return;
     }
 
-    // 3) Guardar selección y abrir modal para confirmar el nombre
+    // 3) CLASE SUELTA: pedir la FECHA exacta (día de la semana correcto) y validar
+    //    el cupo de esa fecha (máx 6 -> "Clase Llena"). El slot pasa a llevar fecha.
+    const slots = slotsEstructurados();
+    let fecha = null;
+    if (plan === 'individual') {
+      const elegido = await pedirFechaIndividual(slots[0]);
+      if (!elegido) return;  // canceló o no hubo fecha válida
+      fecha = elegido.fecha;
+      slots[0] = { ...slots[0], slotId: elegido.fechaSlotId, fecha };
+    }
+
+    // 4) Guardar selección y abrir modal para confirmar el nombre
     const clases = slotsFormateados();
-    _reservaPendiente = { plan, clases, slots: slotsEstructurados() };
+    _reservaPendiente = { plan, clases, slots, fecha };
 
     document.getElementById('nombre-modal-resumen').textContent =
-      `${planNombres[plan]} · ${clases}`;
+      `${planNombres[plan]} · ${clases}` + (fecha ? ` · ${fechaBonita(fecha)}` : '');
     const input = document.getElementById('nombre-modal-input');
     input.value = window.usuarioActual.displayName || '';
     document.getElementById('nombre-modal').style.display = 'flex';

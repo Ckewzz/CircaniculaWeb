@@ -256,9 +256,20 @@ service cloud.firestore {
     //  el staff (Rank ≤ 2) desde las reservas reales (idempotente).
     match /cupos/{slotId} {
       allow read: if signedIn();
+      // STAFF: recálculo libre e idempotente desde las reservas reales.
       allow create, update: if isStaffClase()
         && request.resource.data.count is int
         && request.resource.data.count >= 0;
+      // ALUMNO (clase suelta): aparta SU lugar con un +1 ATÓMICO (transacción).
+      // TOPE DURO de 6: el 7º intento (6 -> 7) lo rechaza esta regla aunque el
+      // cliente fallara. No puede fijar valores arbitrarios ni saltarse el conteo.
+      allow create: if signedIn()
+        && request.resource.data.count == 1
+        && request.resource.data.max == 6;
+      allow update: if signedIn()
+        && request.resource.data.count == resource.data.count + 1
+        && request.resource.data.count <= 6
+        && request.resource.data.max == 6;
       allow delete: if isStaffClase();
     }
 
