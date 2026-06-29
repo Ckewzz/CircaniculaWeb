@@ -811,18 +811,32 @@
       if (!usuarioActual) return;
       const nombre = (document.getElementById('onb-nombre').value || '').trim().slice(0, 40);
       const tel    = (document.getElementById('onb-tel').value || '').trim().slice(0, 20);
-      try {
-        const patch = { onboardingHecho: true };
-        if (nombre) patch.nombreVisible = nombre;
-        await updateDoc(doc(db, "usuarios", usuarioActual.uid), patch);
-        // Teléfono va al doc PRIVADO (oculto para otros usuarios)
-        if (tel) await setDoc(doc(db, "usuarios_priv", usuarioActual.uid), { telefono: tel }, { merge: true });
-        // PUSH al registrarse: si todavía no decidió, se le pide aquí mismo (este
-        // click es un gesto válido para mostrar el prompt del navegador).
-        await pedirPermisoPush();
-        document.getElementById('onboarding-modal').style.display = 'none';
-        cargarPerfil(usuarioActual.uid);
-      } catch(e) { console.error('guardarOnboarding:', e); alert('No se pudo guardar. Intenta de nuevo.'); }
+      // El perfil usuarios/{uid} puede NO existir todavía: hay cuentas creadas en
+      // Auth cuyo doc nunca se persistió (las "cuentas que no sincronizaban").
+      // updateDoc fallaría con "No document to update". guardarCamposPerfil ASEGURA
+      // el doc (bootstrap + reintento) y devuelve el código REAL si algo falla
+      // (p. ej. 'permission-denied' = App Check/reglas), para poder diagnosticar.
+      const patch = { onboardingHecho: true };
+      if (nombre) patch.nombreVisible = nombre;
+      const err = await guardarCamposPerfil(patch);
+      if (err) {
+        console.error('guardarOnboarding:', err);
+        alert('No se pudo guardar (' + err + ').' +
+          (/permission-denied/i.test(err)
+            ? '\n\nParece App Check o permisos. Reintenta; si sigue, avísame.'
+            : '\n\nReintenta. Si persiste, cierra sesión y vuelve a entrar.'));
+        return;
+      }
+      // Teléfono va al doc PRIVADO (oculto para otros usuarios). No bloquea el cierre.
+      if (tel) {
+        try { await setDoc(doc(db, "usuarios_priv", usuarioActual.uid), { telefono: tel }, { merge: true }); }
+        catch(e) { console.error('onb tel:', e); }
+      }
+      // PUSH al registrarse: si todavía no decidió, se le pide aquí mismo (este
+      // click es un gesto válido para mostrar el prompt del navegador).
+      try { await pedirPermisoPush(); } catch(e) { console.error('onb push:', e); }
+      document.getElementById('onboarding-modal').style.display = 'none';
+      cargarPerfil(usuarioActual.uid);
     };
 
     // ── PUSH (notificaciones) ─────────────────────────────────────────────
@@ -1896,36 +1910,111 @@
     // ── PANEL STAFF: confirmar pagos de reservas (Rank ≤ 2) ───────────────
     // El staff VERIFICA el pago en el Stripe Dashboard y luego confirma aquí
     // (→ 'activa'). Es el paso humano interino hasta que el webhook lo automatice.
+
+    // Detalle legible de cada plan (para staff/reportes). Fuente: tarjetas de
+    // precios + planHoras/planNombres del grid. Aclara mensualidad vs clase suelta.
+    const PLAN_DETALLE = {
+      individual: { nombre:'Individual', sesiones:'1 clase suelta', precio:'$250',   periodo:'pago único' },
+      basico:     { nombre:'Básico',     sesiones:'2 clases/sem',   precio:'$800',   periodo:'mensualidad' },
+      medio:      { nombre:'Medio',      sesiones:'5 clases/sem',   precio:'$1,200', periodo:'mensualidad' },
+      avanzado:   { nombre:'Avanzado',   sesiones:'7 clases/sem',   precio:'$1,600', periodo:'mensualidad' },
+    };
+    function planTexto(plan) {
+      const p = PLAN_DETALLE[plan];
+      return p ? `${p.nombre} · ${p.sesiones} · ${p.precio} ${p.periodo}` : (plan || '—');
+    }
+    // Días/horas legibles desde los slots estructurados (respaldo: texto 'clases').
+    const _DIAS_SR   = {1:'Lun',2:'Mar',3:'Mié',4:'Jue',5:'Vie'};
+    const _CLASES_SR = {kids:'Kids',flow:'Telas',fit:'Telas',flex:'Flex',aro:'Aro',open:'Open Gym'};
+    function slotsTexto(r) {
+      if (Array.isArray(r.slots) && r.slots.length) {
+        return r.slots.map(s => {
+          const m = String(s.hora || '').match(/(\d+):\d+\s*[–-]\s*(\d+):\d+/);
+          const h = m ? `${m[1]}-${m[2]}` : (s.hora || '');
+          const cl = _CLASES_SR[s.tipo] || '';
+          return `${_DIAS_SR[s.dia] || '?'} ${h}${cl ? ` (${cl})` : ''}`;
+        }).join(' · ');
+      }
+      return String(r.clases || '').trim() || '⚠️ sin clases en la reserva';
+    }
+    // Fecha + hora legible de un Timestamp de Firestore (o '—').
+    function fechaHoraTxt(ts) {
+      const d = ts && ts.toDate ? ts.toDate() : null;
+      return d ? d.toLocaleString('es-MX',
+        { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' }) : '—';
+    }
+    // Tarjeta de una reserva (para "por confirmar" y para el historial/reporte).
+    function _reservaCard(d) {
+      const r = d.data();
+      const id = escapeHtml(d.id);
+      const estado = r.estado || '';
+      const rep = estado === 'pago_reportado';
+      const activa = estado === 'activa';
+      const cancelada = estado === 'cancelada';
+      const estadoCls = activa ? 'sr-estado-activa' : (cancelada ? 'sr-estado-cancelada' : '');
+      // Confirmar/Cancelar solo si aún no está activa/cancelada; activa permite cancelar.
+      let acciones = '';
+      if (!activa && !cancelada) {
+        acciones = `<div class="sr-acciones">
+            <button class="sr-btn sr-ok" onclick="confirmarPagoReserva('${id}')">Confirmar pago ✅</button>
+            <button class="sr-btn sr-no" onclick="cancelarReservaStaff('${id}')">Cancelar</button>
+          </div>`;
+      } else if (activa) {
+        acciones = `<div class="sr-acciones">
+            <button class="sr-btn sr-no" onclick="cancelarReservaStaff('${id}')">Cancelar</button>
+          </div>`;
+      }
+      const fechas = `<div class="sr-fechas">
+          <span>🕒 Reservó: <b>${escapeHtml(fechaHoraTxt(r.fechaReserva))}</b></span>
+          ${r.pagoReportadoTs ? `<span>💳 Reportó pago: <b>${escapeHtml(fechaHoraTxt(r.pagoReportadoTs))}</b></span>` : ''}
+          ${r.fechaPago ? `<span>✅ Confirmada: <b>${escapeHtml(fechaHoraTxt(r.fechaPago))}</b></span>` : ''}
+        </div>`;
+      return `<div class="sr-item ${rep ? 'sr-item-rep' : ''}">
+          <div class="sr-info">
+            <div class="sr-nombre">${escapeHtml(r.nombre || '(sin nombre)')}</div>
+            <div class="sr-plan-badge">${escapeHtml(planTexto(r.plan))}</div>
+            <div class="sr-clases">📅 ${escapeHtml(slotsTexto(r))}</div>
+            ${fechas}
+            <div class="sr-estado-line ${estadoCls}"><b>${estadoLabel(estado)}</b></div>
+          </div>
+          ${acciones}
+        </div>`;
+    }
+    // Modo del panel: 'pendientes' (por confirmar) o 'todas' (historial/reporte).
+    let _srModo = 'pendientes';
+    window.staffReservasModo = (modo) => {
+      _srModo = (modo === 'todas') ? 'todas' : 'pendientes';
+      document.querySelectorAll('.sr-toggle-btn').forEach(b =>
+        b.classList.toggle('activo', b.dataset.modo === _srModo));
+      cargarReservasStaff();
+    };
     async function cargarReservasStaff() {
       const cont = document.getElementById('staff-reservas-lista');
       if (!cont) return;
       cont.innerHTML = '<p class="sr-empty">Cargando…</p>';
       try {
-        const q = query(collection(db, "reservas"),
-          where("estado", "in", ["pago_reportado", "pendiente_pago"]));
+        // 'todas' = historial completo (las reglas dejan al staff leer toda la
+        // colección); 'pendientes' = solo lo que urge confirmar.
+        const q = (_srModo === 'todas')
+          ? query(collection(db, "reservas"))
+          : query(collection(db, "reservas"), where("estado", "in", ["pago_reportado", "pendiente_pago"]));
         const snap = await getDocs(q);
         if (snap.empty) {
-          cont.innerHTML = '<p class="sr-empty">No hay reservas por confirmar. ✅</p>';
+          cont.innerHTML = (_srModo === 'todas')
+            ? '<p class="sr-empty">No hay reservas registradas todavía.</p>'
+            : '<p class="sr-empty">No hay reservas por confirmar. ✅</p>';
           return;
         }
-        // Primero las que ya reportaron pago (las que urge verificar).
-        const docs = snap.docs.slice().sort((a, b) =>
-          (a.data().estado === 'pago_reportado' ? 0 : 1) - (b.data().estado === 'pago_reportado' ? 0 : 1));
-        cont.innerHTML = docs.map(d => {
-          const r = d.data();
-          const rep = r.estado === 'pago_reportado';
-          const id = escapeHtml(d.id);
-          return `<div class="sr-item ${rep ? 'sr-item-rep' : ''}">
-            <div class="sr-info">
-              <div class="sr-nombre">${escapeHtml(r.nombre || '(sin nombre)')}</div>
-              <div class="sr-meta">${escapeHtml(r.plan || '')} · ${escapeHtml(String(r.clases || ''))} · <b>${estadoLabel(r.estado)}</b></div>
-            </div>
-            <div class="sr-acciones">
-              <button class="sr-btn sr-ok" onclick="confirmarPagoReserva('${id}')">Confirmar pago ✅</button>
-              <button class="sr-btn sr-no" onclick="cancelarReservaStaff('${id}')">Cancelar</button>
-            </div>
-          </div>`;
-        }).join('');
+        const ms = t => (t && t.toDate ? t.toDate().getTime() : 0);
+        const docs = snap.docs.slice();
+        if (_srModo === 'todas') {
+          docs.sort((a, b) => ms(b.data().fechaReserva) - ms(a.data().fechaReserva)); // recientes primero
+        } else {
+          // Primero las que ya reportaron pago (las que urge verificar).
+          docs.sort((a, b) =>
+            (a.data().estado === 'pago_reportado' ? 0 : 1) - (b.data().estado === 'pago_reportado' ? 0 : 1));
+        }
+        cont.innerHTML = docs.map(_reservaCard).join('');
       } catch (e) {
         console.error('cargarReservasStaff:', e);
         cont.innerHTML = '<p class="sr-empty">Error al cargar. Revisa la consola (F12).</p>';
@@ -2817,6 +2906,25 @@
     .sr-ok { background:linear-gradient(135deg,#1db954,#0e7a37); color:#fff; }
     .sr-no { background:rgba(255,255,255,.10); color:rgba(255,255,255,.85); }
     .sr-empty { text-align:center; color:rgba(255,255,255,.5); font-size:.85rem; padding:14px 0; }
+    /* Tarjeta de reserva enriquecida (plan legible + horarios + fechas) */
+    .sr-plan-badge { display:inline-block; margin-top:4px; font-size:.74rem; font-weight:700;
+      color:var(--amarillo); background:rgba(255,204,0,.10); border:1px solid rgba(255,204,0,.25);
+      border-radius:6px; padding:2px 8px; }
+    .sr-clases { color:rgba(255,255,255,.82); font-size:.8rem; margin-top:5px; line-height:1.4; }
+    .sr-fechas { display:flex; flex-direction:column; gap:1px; margin-top:5px;
+      font-size:.72rem; color:rgba(255,255,255,.5); }
+    .sr-fechas b { color:rgba(255,255,255,.82); font-weight:600; }
+    .sr-estado-line { margin-top:5px; font-size:.76rem; }
+    .sr-estado-line b { color:var(--amarillo); }
+    .sr-estado-activa b { color:#36d77a; }
+    .sr-estado-cancelada b { color:rgba(255,120,120,.92); }
+    .sr-toggle-bar { display:flex; gap:8px; flex-wrap:wrap; margin:0 0 12px; }
+    .sr-toggle-btn { background:rgba(255,255,255,.08); color:rgba(255,255,255,.8);
+      border:1px solid rgba(255,255,255,.14); border-radius:8px; padding:6px 12px;
+      font-size:.76rem; font-weight:700; cursor:pointer; transition:filter .1s ease; }
+    .sr-toggle-btn:hover { filter:brightness(1.12); }
+    .sr-toggle-btn.activo { background:rgba(255,204,0,.16); color:var(--amarillo);
+      border-color:rgba(255,204,0,.45); }
 
     /* ===== CALENDARIO DE HORARIOS ===== */
     .cal-toolbar { display:flex; flex-wrap:wrap; gap:12px; align-items:center; justify-content:center; max-width:1100px; margin:0 auto 18px; }
@@ -3905,6 +4013,10 @@
       <h3 class="perfil-sub">💳 Reservas por confirmar</h3>
       <p class="sr-hint">⚠️ <b>Verifica el pago en tu Stripe Dashboard</b> antes de confirmar.
         Solo pulsa «Confirmar pago» cuando el dinero realmente haya llegado — eso activa la reserva.</p>
+      <div class="sr-toggle-bar">
+        <button class="sr-toggle-btn activo" data-modo="pendientes" onclick="staffReservasModo('pendientes')">Por confirmar</button>
+        <button class="sr-toggle-btn" data-modo="todas" onclick="staffReservasModo('todas')">Historial (todas)</button>
+      </div>
       <div id="staff-reservas-lista">
         <p class="sr-empty">Cargando…</p>
       </div>
