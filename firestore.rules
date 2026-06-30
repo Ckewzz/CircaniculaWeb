@@ -114,7 +114,8 @@ service cloud.firestore {
       // DUEÑO (Rank 0 / super-admin): edita cualquier perfil —incluido rank y los
       // flags de rol— pero NUNCA los créditos (solo backend/Cloud Function).
       allow update: if isDueno()
-        && request.resource.data.creditos == resource.data.creditos;
+        && request.resource.data.creditos == resource.data.creditos
+        && unchangedOrNew('creditosExpiran');
 
       // ADMINISTRACIÓN (Rank 1): gestiona perfiles (stats, títulos, eventos, flags
       // de rol, apodo, semblanza…), pero NO toca rank ni créditos. Tampoco
@@ -122,6 +123,7 @@ service cloud.firestore {
       allow update: if isAdmin()
         && request.resource.data.rank == resource.data.rank
         && request.resource.data.creditos == resource.data.creditos
+        && unchangedOrNew('creditosExpiran')
         && unchangedOrNew('cuentaActiva');
 
       // INSTRUCTORAS (Rank 2): otorgan stats RPG (nivel/títulos/eventos) y nada
@@ -129,6 +131,7 @@ service cloud.firestore {
       allow update: if isStaffClase()
         && request.resource.data.rank == resource.data.rank
         && request.resource.data.creditos == resource.data.creditos
+        && unchangedOrNew('creditosExpiran')
         && unchangedOrNew('imparteClases')
         && unchangedOrNew('colaborador')
         && unchangedOrNew('userIdCorto')
@@ -143,6 +146,7 @@ service cloud.firestore {
       allow update: if isOwner(uid)
         && request.resource.data.rank == resource.data.rank
         && request.resource.data.creditos == resource.data.creditos
+        && unchangedOrNew('creditosExpiran')
         && unchangedOrNew('nivel')
         && unchangedOrNew('titulos')
         && unchangedOrNew('eventos')

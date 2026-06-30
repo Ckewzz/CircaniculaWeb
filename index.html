@@ -225,7 +225,35 @@
     ];
 
     // ESTRELLAS (créditos) — DESACTIVADAS hasta Agosto. Solo lectura/visual.
-    const ESTRELLAS_ACTIVAS = false;
+    // Cuando el backend esté desplegado y probado, poner en true para activar
+    // compra/canje de créditos.
+    const ESTRELLAS_ACTIVAS = true;
+
+    // URL pública del backend de pagos/créditos (VPS + Coolify). Mientras no esté
+    // el dominio con SSL, déjalo vacío: las funciones de compra/agendar avisarán
+    // "no disponible" en vez de fallar. Ej: 'https://webhook.circanicula.com'
+    const BACKEND_URL = 'https://webhook.circanicula.com';
+
+    // Tope de créditos (espejo del backend pricing.js → MAX_CREDITOS).
+    const MAX_CREDITOS = 40;
+
+    // Precio TOTAL en pesos para N créditos. ESPEJO EXACTO de pricing.js (solo
+    // para MOSTRAR el precio en la UI; el monto real lo calcula y cobra el
+    // servidor, nunca el cliente).
+    function precioCreditosCliente(cantidad) {
+      const ANCLAS = [[1,250],[8,800],[20,1200],[28,1600],[32,1800]];
+      const PEND = 50, r5 = n => Math.round(n/5)*5;
+      const n = parseInt(cantidad, 10);
+      if (!Number.isInteger(n) || n < 1) return null;
+      const u = ANCLAS[ANCLAS.length-1];
+      if (n >= u[0]) return r5(u[1] + (n-u[0])*PEND);
+      if (n <= ANCLAS[0][0]) return ANCLAS[0][1];
+      for (let i=0;i<ANCLAS.length-1;i++){
+        const [c1,t1]=ANCLAS[i],[c2,t2]=ANCLAS[i+1];
+        if (n>=c1 && n<=c2) return r5(t1 + ((n-c1)*(t2-t1))/(c2-c1));
+      }
+      return null;
+    }
 
     function rankDeUsuario(user) {
       const r = OVERRIDE_RANGOS[(user.email || '').toLowerCase()];
@@ -875,7 +903,91 @@
         await uiAlert('Las Estrellas estarán disponibles a partir de Agosto. ¡Muy pronto podrás comprarlas y canjearlas!', { titulo: '⭐ Estrellas' });
         return;
       }
-      // (Futuro) abrir sección/compra de Estrellas
+      // Abrir el flujo de compra de créditos.
+      window.abrirCompraCreditos();
+    };
+
+    // ── COMPRA DE CRÉDITOS (Estrellas) vía backend (checkout dinámico) ─────
+    // Pide cuántos créditos, muestra el precio (espejo) y manda al checkout de
+    // Stripe que CREA el backend (el monto lo calcula el servidor, no el cliente).
+    window.abrirCompraCreditos = async () => {
+      if (!usuarioActual) { abrirLoginModal('login'); return; }
+      if (!ESTRELLAS_ACTIVAS) { await uiAlert('Las Estrellas estarán disponibles a partir de Agosto.', { titulo: '⭐ Estrellas' }); return; }
+      if (!BACKEND_URL) { await uiAlert('La compra de créditos aún no está disponible (backend en configuración).', { titulo: '⭐ Estrellas' }); return; }
+
+      const txt = await uiPrompt('¿Cuántos créditos quieres comprar?', {
+        titulo: '⭐ Comprar créditos',
+        mensaje: '1 crédito = 1 clase. Entre más compras, más barato cada uno. Máx ' + MAX_CREDITOS + '. Vencen el día 2 del mes siguiente.',
+        valor: '8', tipo: 'number', placeholder: 'Ej. 8',
+      });
+      if (txt === null) return;
+      const cantidad = parseInt(txt, 10);
+      if (!Number.isInteger(cantidad) || cantidad < 1 || cantidad > MAX_CREDITOS) {
+        await uiAlert('Cantidad inválida (1 a ' + MAX_CREDITOS + ').', { titulo: 'Error', peligro: true }); return;
+      }
+      const precio = precioCreditosCliente(cantidad);
+      const ok = await uiConfirm(
+        cantidad + ' créditos por $' + precio.toLocaleString('es-MX') + ' MXN ($' + Math.round(precio/cantidad) + ' c/u). ¿Continuar al pago?',
+        { titulo: '⭐ Confirmar compra', okText: 'Ir a pagar', cancelText: 'Cancelar' });
+      if (!ok) return;
+
+      try {
+        const idToken = await usuarioActual.getIdToken();
+        const resp = await fetch(BACKEND_URL + '/crear-checkout', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + idToken },
+          body: JSON.stringify({ tipo: 'creditos', cantidad }),
+        });
+        const out = await resp.json();
+        if (!resp.ok || !out.url) throw new Error(out.error || 'No se pudo crear el checkout.');
+        window.location.href = out.url; // a Stripe; al volver, el webhook ya acreditó.
+      } catch (e) {
+        console.error('compra créditos:', e);
+        await uiAlert('No se pudo iniciar la compra. ' + (e.message || ''), { titulo: 'Error', peligro: true });
+      }
+    };
+
+    // ── AGENDAR CLASE GASTANDO 1 CRÉDITO (vía backend, atómico) ───────────
+    // slots = [{ slotId, fecha, ... }]. El backend valida saldo + cupo + crea la
+    // reserva ACTIVA, todo o nada. Devuelve { ok, nuevoSaldo } o el motivo.
+    window.agendarConCredito = async (slots, opts = {}) => {
+      if (!usuarioActual) { abrirLoginModal('login'); return { ok:false }; }
+      if (!BACKEND_URL) { await uiAlert('Agendar con créditos aún no está disponible (backend en configuración).', { titulo: 'Créditos' }); return { ok:false }; }
+      try {
+        const idToken = await usuarioActual.getIdToken();
+        const resp = await fetch(BACKEND_URL + '/agendar', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + idToken },
+          body: JSON.stringify({ slots, nombre: opts.nombre || null, plan: opts.plan || 'creditos', fecha: opts.fecha || null }),
+        });
+        const out = await resp.json();
+        if (!resp.ok || !out.ok) {
+          if (out.motivo === 'sin_creditos') await uiAlert('No tienes créditos suficientes. Compra más para agendar.', { titulo: '⭐ Sin créditos' });
+          else if (out.motivo === 'lleno') await uiAlert('Esa clase ya está llena (máx 6). Elige otra.', { titulo: 'Clase Llena', peligro: true });
+          else await uiAlert(out.error || 'No se pudo agendar.', { titulo: 'Error', peligro: true });
+          return { ok:false, motivo: out.motivo };
+        }
+        if (usuarioActual) cargarPerfil(usuarioActual.uid);            // refresca saldo visible
+        if (typeof out.nuevoSaldo === 'number') alertaUltimosCreditos(out.nuevoSaldo);
+        return out;
+      } catch (e) {
+        console.error('agendar con crédito:', e);
+        await uiAlert('No se pudo agendar. ' + (e.message || ''), { titulo: 'Error', peligro: true });
+        return { ok:false };
+      }
+    };
+
+    // Alerta "últimos créditos" — LISTA pero inerte hasta Agosto (candado ESTRELLAS_ACTIVAS).
+    // Llamar tras descontar un crédito al apartar clase, pasando cuántos QUEDAN.
+    // Cuando la alumna usa el penúltimo (queda 1), brota el recuadro nativo de la PWA.
+    window.alertaUltimosCreditos = async (creditosRestantes) => {
+      if (!ESTRELLAS_ACTIVAS) return;                 // candado de Agosto: inerte por ahora
+      if (Number(creditosRestantes) !== 1) return;    // solo al quedar el último crédito
+      const comprar = await uiConfirm(
+        'Estás usando tus últimos créditos. ¿Deseas renovar tus créditos ahora?',
+        { titulo: '⭐ Últimos créditos', okText: 'Comprar más créditos ahora', cancelText: 'Recordar más tarde' });
+      if (comprar) window.accionEstrellas();          // (Agosto) abre compra/renovación de Estrellas
+      // 'Recordar más tarde' = no hace nada; volverá a avisar la próxima vez que quede 1.
     };
 
     // ── ONBOARDING (primera vez tras login) ───────────────
@@ -1912,6 +2024,18 @@
       if (user && new URLSearchParams(window.location.search).get('pago') === 'exitoso') {
         reportarPagoTrasStripe(user.uid);
       }
+      // Regreso de compra de CRÉDITOS: el webhook ya los acreditó en el servidor;
+      // aquí solo refrescamos el saldo visible y avisamos.
+      if (user) {
+        const compra = new URLSearchParams(window.location.search).get('compra');
+        if (compra === 'creditos_ok') {
+          setTimeout(() => cargarPerfil(user.uid), 1500); // dar margen al webhook
+          uiAlert('¡Compra recibida! Tus créditos se reflejarán en unos segundos.', { titulo: '⭐ Estrellas' });
+          history.replaceState({}, '', '/');
+        } else if (compra === 'cancelada') {
+          history.replaceState({}, '', '/');
+        }
+      }
     });
 
     function actualizarUI(user) {
@@ -2010,6 +2134,9 @@
       }));
 
       // Guardar reserva pendiente en Firestore (no bloqueante para el redirect)
+      // Capturamos el ID del documento: es la LLAVE que pegamos al link de Stripe
+      // (client_reference_id) para que el WEBHOOK empareje pago <-> reserva exacta.
+      let reservaId = null;
       try {
         const docReserva = {
           uid: usuarioActual.uid,
@@ -2021,11 +2148,17 @@
           fechaReserva: serverTimestamp()
         };
         if (fecha) docReserva.fechaClase = fecha;   // clase suelta: día exacto elegido
-        await addDoc(collection(db, "reservas"), docReserva);
+        const refReserva = await addDoc(collection(db, "reservas"), docReserva);
+        reservaId = refReserva.id;
+        localStorage.setItem('reserva_pendiente_id', reservaId); // por si Stripe no propaga el param
       } catch (e) { console.error('Firestore reserva:', e); }
 
-      // Redirigir MISMO tab a Stripe
-      window.location.href = `${base}?prefilled_email=${encodeURIComponent(usuarioActual.email)}`;
+      // Redirigir MISMO tab a Stripe.
+      // Pegamos client_reference_id = ID del doc de la reserva. Stripe lo devuelve
+      // tal cual en el evento checkout.session.completed -> el webhook activa ESTA reserva.
+      let url = `${base}?prefilled_email=${encodeURIComponent(usuarioActual.email)}`;
+      if (reservaId) url += `&client_reference_id=${encodeURIComponent(reservaId)}`;
+      window.location.href = url;
     };
 
     // Envía el correo a Formspree (vía AJAX, sin abandonar la página)
@@ -2133,6 +2266,7 @@
             (mapa[s.slotId] = mapa[s.slotId] || []).push({
               nombre: r.nombre || 'Alumno',
               estado: r.estado || 'pendiente_pago',
+              plan: r.plan || '',
               uid: r.uid || ''
             });
           });
@@ -2233,16 +2367,35 @@
     // autoactivación — las reglas rechazarían un intento de marcar 'activa' aquí.
     async function reportarPagoTrasStripe(uid) {
       try {
-        const q = query(
-          collection(db, "reservas"),
-          where("uid", "==", uid),
-          where("estado", "==", "pendiente_pago")
-        );
-        const snap = await getDocs(q);
-        if (!snap.empty) {
-          const docRef = snap.docs[snap.docs.length - 1].ref;
-          await updateDoc(docRef, { estado: "pago_reportado", pagoReportadoTs: serverTimestamp() });
-          cargarMisReservas(uid);
+        // Preferimos el ID EXACTO de la reserva que guardamos antes del redirect.
+        // Guarda clave: SOLO bajamos a 'pago_reportado' si sigue en 'pendiente_pago'.
+        // Si el webhook ya la puso 'activa', NO la tocamos (no revertir un pago real).
+        let reportada = false;
+        const idExacto = localStorage.getItem('reserva_pendiente_id');
+        if (idExacto) {
+          const refExacta = doc(db, "reservas", idExacto);
+          const snapExacta = await getDoc(refExacta);
+          if (snapExacta.exists() && snapExacta.data().estado === "pendiente_pago") {
+            await updateDoc(refExacta, { estado: "pago_reportado", pagoReportadoTs: serverTimestamp() });
+            cargarMisReservas(uid);
+          }
+          reportada = true; // ya tratamos la reserva exacta (activa o reportada): no usar el fallback
+          localStorage.removeItem('reserva_pendiente_id');
+        }
+
+        // Fallback (compat): si no había ID exacto, usamos la última pendiente del usuario.
+        if (!reportada) {
+          const q = query(
+            collection(db, "reservas"),
+            where("uid", "==", uid),
+            where("estado", "==", "pendiente_pago")
+          );
+          const snap = await getDocs(q);
+          if (!snap.empty) {
+            const docRef = snap.docs[snap.docs.length - 1].ref;
+            await updateDoc(docRef, { estado: "pago_reportado", pagoReportadoTs: serverTimestamp() });
+            cargarMisReservas(uid);
+          }
         }
 
         // Avisar al staff por correo para que verifique en Stripe y confirme.
@@ -2278,6 +2431,11 @@
       const p = PLAN_DETALLE[plan];
       return p ? `${p.nombre} · ${p.sesiones} · ${p.precio} ${p.periodo}` : (plan || '—');
     }
+    // Clase CSS de color por plan (shading consistente en tarjetas y tags del calendario).
+    function planCls(plan) { return PLAN_DETALLE[plan] ? ('plan-' + plan) : ''; }
+    // Exponer a window: el calendario vive en otro <script> (no-módulo) y los usa.
+    window.planCls = planCls;
+    window.PLAN_DETALLE = PLAN_DETALLE;
     // Días/horas legibles desde los slots estructurados (respaldo: texto 'clases').
     const _DIAS_SR   = {1:'Lun',2:'Mar',3:'Mié',4:'Jue',5:'Vie'};
     const _CLASES_SR = {kids:'Kids',flow:'Telas',fit:'Telas',flex:'Flex',aro:'Aro',open:'Open Gym'};
@@ -2327,7 +2485,7 @@
       return `<div class="sr-item ${rep ? 'sr-item-rep' : ''}">
           <div class="sr-info">
             <div class="sr-nombre">${escapeHtml(r.nombre || '(sin nombre)')}</div>
-            <div class="sr-plan-badge">${escapeHtml(planTexto(r.plan))}</div>
+            <div class="sr-plan-badge ${planCls(r.plan)}">${escapeHtml(planTexto(r.plan))}</div>
             <div class="sr-clases">📅 ${escapeHtml(slotsTexto(r))}</div>
             ${fechas}
             <div class="sr-estado-line ${estadoCls}"><b>${estadoLabel(estado)}</b></div>
@@ -2335,10 +2493,11 @@
           ${acciones}
         </div>`;
     }
-    // Modo del panel: 'pendientes' (por confirmar) o 'todas' (historial/reporte).
-    let _srModo = 'pendientes';
+    // Modo del panel: 'procesando' (pago_reportado/pendiente) o 'confirmadas' (activa).
+    // Las canceladas no se muestran (salen de la cola al cancelarlas y liberan cupo).
+    let _srModo = 'procesando';
     window.staffReservasModo = (modo) => {
-      _srModo = (modo === 'todas') ? 'todas' : 'pendientes';
+      _srModo = (modo === 'confirmadas') ? 'confirmadas' : 'procesando';
       document.querySelectorAll('.sr-toggle-btn').forEach(b =>
         b.classList.toggle('activo', b.dataset.modo === _srModo));
       cargarReservasStaff();
@@ -2348,26 +2507,38 @@
       if (!cont) return;
       cont.innerHTML = '<p class="sr-empty">Cargando…</p>';
       try {
-        // 'todas' = historial completo (las reglas dejan al staff leer toda la
-        // colección); 'pendientes' = solo lo que urge confirmar.
-        const q = (_srModo === 'todas')
-          ? query(collection(db, "reservas"))
-          : query(collection(db, "reservas"), where("estado", "in", ["pago_reportado", "pendiente_pago"]));
-        const snap = await getDocs(q);
-        if (snap.empty) {
-          cont.innerHTML = (_srModo === 'todas')
-            ? '<p class="sr-empty">No hay reservas registradas todavía.</p>'
-            : '<p class="sr-empty">No hay reservas por confirmar. ✅</p>';
-          return;
-        }
+        // Una sola lectura (colección pequeña); filtramos en cliente para poder
+        // contar "Procesando" y auto-ocultar esa pestaña cuando esté vacía.
+        const snap = await getDocs(query(collection(db, "reservas")));
+        const all = snap.docs.slice();
         const ms = t => (t && t.toDate ? t.toDate().getTime() : 0);
-        const docs = snap.docs.slice();
-        if (_srModo === 'todas') {
-          docs.sort((a, b) => ms(b.data().fechaReserva) - ms(a.data().fechaReserva)); // recientes primero
+        const esProc = d => ['pago_reportado', 'pendiente_pago'].includes(d.data().estado);
+        const esConf = d => d.data().estado === 'activa';
+        const nProc = all.filter(esProc).length;
+        // Auto-ocultar "Procesando" cuando no hay nada pendiente (con webhook quedará así siempre).
+        const btnProc = document.querySelector('.sr-toggle-btn[data-modo="procesando"]');
+        if (btnProc) {
+          btnProc.style.display = nProc ? '' : 'none';
+          btnProc.textContent = nProc ? `Procesando (${nProc})` : 'Procesando';
+          if (!nProc && _srModo === 'procesando') _srModo = 'confirmadas';
+        }
+        document.querySelectorAll('.sr-toggle-btn').forEach(b =>
+          b.classList.toggle('activo', b.dataset.modo === _srModo));
+
+        let docs;
+        if (_srModo === 'confirmadas') {
+          docs = all.filter(esConf).sort((a, b) =>
+            ms(b.data().fechaPago || b.data().fechaReserva) - ms(a.data().fechaPago || a.data().fechaReserva));
         } else {
           // Primero las que ya reportaron pago (las que urge verificar).
-          docs.sort((a, b) =>
+          docs = all.filter(esProc).sort((a, b) =>
             (a.data().estado === 'pago_reportado' ? 0 : 1) - (b.data().estado === 'pago_reportado' ? 0 : 1));
+        }
+        if (!docs.length) {
+          cont.innerHTML = (_srModo === 'confirmadas')
+            ? '<p class="sr-empty">Aún no hay reservas confirmadas.</p>'
+            : '<p class="sr-empty">No hay reservas por procesar. ✅</p>';
+          return;
         }
         cont.innerHTML = docs.map(_reservaCard).join('');
       } catch (e) {
@@ -3009,6 +3180,8 @@
     }
     .staff-filtro-btn:hover { background: rgba(255,204,0,.12); }
     .staff-filtro-btn.activo { background: var(--amarillo); color: var(--negro); font-weight: 800; border-color: var(--amarillo); }
+    /* "Solo apartadas": clases sin reservas se atenúan para destacar las que sí tienen alumnas */
+    .clase-cell.staff-view.sin-apartar { opacity: .26; filter: grayscale(.7); }
     /* Modal "quién apartó": lista de reservas. */
     .reservas-lista { text-align: left; max-height: 320px; overflow-y: auto; margin: 4px 0 20px; }
     .reservas-lista .vacio { text-align: center; opacity: .5; font-size: .82rem; padding: 22px 0; }
@@ -3299,6 +3472,18 @@
     .sr-plan-badge { display:inline-block; margin-top:4px; font-size:.74rem; font-weight:700;
       color:var(--amarillo); background:rgba(255,204,0,.10); border:1px solid rgba(255,204,0,.25);
       border-radius:6px; padding:2px 8px; }
+    /* Shading por plan (consistente en tarjetas de pago y tags del calendario staff) */
+    .plan-individual { color:#7fe3e8 !important; background:rgba(63,208,214,.12) !important; border-color:rgba(63,208,214,.38) !important; }
+    .plan-basico     { color:#7ff0b6 !important; background:rgba(74,217,145,.12) !important; border-color:rgba(74,217,145,.38) !important; }
+    .plan-medio      { color:#ffd24a !important; background:rgba(255,210,74,.12) !important; border-color:rgba(255,210,74,.40) !important; }
+    .plan-avanzado   { color:#d7aaff !important; background:rgba(201,139,255,.14) !important; border-color:rgba(201,139,255,.40) !important; }
+    /* Fila de "quién apartó" coloreada por plan (borde izquierdo) */
+    .reserva-fila { position:relative; }
+    .reserva-fila.plan-individual { border-left:3px solid #3fd0d6; }
+    .reserva-fila.plan-basico     { border-left:3px solid #4ad991; }
+    .reserva-fila.plan-medio      { border-left:3px solid #ffd24a; }
+    .reserva-fila.plan-avanzado   { border-left:3px solid #c98bff; }
+    .reserva-fila .r-plan-tag { font-size:.66rem; font-weight:700; border-radius:5px; padding:1px 6px; margin-left:6px; }
     .sr-clases { color:rgba(255,255,255,.82); font-size:.8rem; margin-top:5px; line-height:1.4; }
     .sr-fechas { display:flex; flex-direction:column; gap:1px; margin-top:5px;
       font-size:.72rem; color:rgba(255,255,255,.5); }
@@ -4233,6 +4418,7 @@
     <!-- Barra STAFF/MISS: control de vista del calendario (T3-F). Oculta para alumnos. -->
     <div class="horario-staff-bar" id="horario-staff-bar">
       <span class="staff-bar-txt"><strong>Modo staff:</strong> toca cualquier clase para ver quién la apartó y pasar lista. Cupo máximo: 6 por clase.</span>
+      <button class="staff-filtro-btn" id="staff-apartadas-btn" onclick="toggleSoloApartadas()">Solo apartadas</button>
       <button class="staff-filtro-btn" id="staff-filtro-btn" onclick="toggleFiltroMisClases()">Ver solo mis clases</button>
       <button class="staff-filtro-btn staff-cupo-btn" id="staff-cupo-btn" onclick="staffSincronizarCupos(this)">Actualizar cupos</button>
     </div>
@@ -4498,12 +4684,12 @@
 
     <!-- PANEL STAFF · CONFIRMAR PAGOS (Rank ≤ 2 · Instructora/Admin/Dueño) -->
     <div id="staff-reservas-panel" class="sr-panel" style="display:none;">
-      <h3 class="perfil-sub">💳 Reservas por confirmar</h3>
+      <h3 class="perfil-sub">💳 Reservas y pagos</h3>
       <p class="sr-hint">⚠️ <b>Verifica el pago en tu Stripe Dashboard</b> antes de confirmar.
         Solo pulsa «Confirmar pago» cuando el dinero realmente haya llegado — eso activa la reserva.</p>
       <div class="sr-toggle-bar">
-        <button class="sr-toggle-btn activo" data-modo="pendientes" onclick="staffReservasModo('pendientes')">Por confirmar</button>
-        <button class="sr-toggle-btn" data-modo="todas" onclick="staffReservasModo('todas')">Historial (todas)</button>
+        <button class="sr-toggle-btn activo" data-modo="procesando" onclick="staffReservasModo('procesando')">Procesando</button>
+        <button class="sr-toggle-btn" data-modo="confirmadas" onclick="staffReservasModo('confirmadas')">Confirmadas</button>
       </div>
       <div id="staff-reservas-lista">
         <p class="sr-empty">Cargando…</p>
@@ -5077,6 +5263,7 @@
   let _reservasPorSlot = {};      // STAFF: slotId -> [{nombre,estado,uid}] (quién apartó)
   let _misDiasStaff = new Set();  // STAFF: columnas (1-5) donde imparto clase
   let _filtroMisClases = false;   // STAFF: filtro "solo mis clases" activo
+  let _soloApartadas   = false;   // STAFF: ocultar clases vacías (ver solo apartadas)
 
   let slotsSeleccionados = new Set();
   let planActual = 'medio';
@@ -5175,6 +5362,11 @@
         if (_filtroMisClases && _misDiasStaff.size && !_misDiasStaff.has(dia)) {
           div.classList.add('fuera-mis-dias');
         }
+        // "Solo apartadas": atenúa las clases sin reservas para que las misses
+        // vean de un vistazo solo lo que tiene alumnas.
+        if (_soloApartadas && !lista.length) {
+          div.classList.add('sin-apartar');
+        }
         return; // staff no usa selección de compra / cupo / mi-reserva
       }
 
@@ -5238,6 +5430,8 @@
     // Mostrar la barra de control solo a staff.
     const bar = document.getElementById('horario-staff-bar');
     if (bar) bar.style.display = esStaff ? 'flex' : 'none';
+    // Las MISSES (rank 2) arrancan viendo solo clases apartadas; dueño/admin ven todo.
+    if (esStaff) { _soloApartadas = (window._miRank === 2); _syncSoloApartadasBtn(); }
     decorarHorario();
   }
   window.cargarOverlayHorario = cargarOverlayHorario;
@@ -5259,10 +5453,13 @@
       lista.innerHTML = reservas.map(r => {
         const est = r.estado || 'pendiente_pago';
         const nom = String(r.nombre || 'Alumno').replace(/[<>&]/g, '');
+        const pcls = (window.planCls ? window.planCls(r.plan) : '');
+        const pnom = (r.plan && window.PLAN_DETALLE && window.PLAN_DETALLE[r.plan]) ? window.PLAN_DETALLE[r.plan].nombre : '';
+        const ptag = pnom ? '<span class="r-plan-tag ' + pcls + '">' + pnom + '</span>' : '';
         const btn = r.uid
           ? '<button class="r-asist-btn" onclick="marcarAsistenciaUI(\'' + r.uid + '\',\'' + sid + '\',this)">Marcar</button>'
           : '';
-        return '<div class="reserva-fila"><span class="r-nombre">' + nom +
+        return '<div class="reserva-fila ' + pcls + '"><span class="r-nombre">' + nom + ptag +
                '</span><span class="r-estado ' + est + '">' + (_ESTADO_LBL[est] || est) + '</span>' + btn + '</div>';
       }).join('');
     }
@@ -5279,6 +5476,18 @@
       btn.classList.toggle('activo', _filtroMisClases);
       btn.textContent = _filtroMisClases ? 'Ver todas las clases' : 'Ver solo mis clases';
     }
+    decorarHorario();
+  };
+  function _syncSoloApartadasBtn() {
+    const btn = document.getElementById('staff-apartadas-btn');
+    if (btn) {
+      btn.classList.toggle('activo', _soloApartadas);
+      btn.textContent = _soloApartadas ? 'Ver todas las clases' : 'Solo apartadas';
+    }
+  }
+  window.toggleSoloApartadas = () => {
+    _soloApartadas = !_soloApartadas;
+    _syncSoloApartadasBtn();
     decorarHorario();
   };
 
