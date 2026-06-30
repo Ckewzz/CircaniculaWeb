@@ -102,12 +102,6 @@
           messagingSenderId: "465761059184",
           appId:             "1:465761059184:web:8623539f525f8ec6aecfb5"
         },
-        stripe: {
-          individual: "https://buy.stripe.com/14A00i2ZT4G4dWi2eyao801",
-          basico:     "https://buy.stripe.com/5kQ00i2ZTc8w19w06qao802",
-          medio:      "https://buy.stripe.com/28E9AS43X3C06tQ1auao803",
-          avanzado:   "https://buy.stripe.com/28EeVceIB3C07xU1auao804"
-        },
         // App Check (anti-bot/abuso): SITE KEY de reCAPTCHA v3 de ESTA academia.
         // VACÍO = App Check NO se inicializa (no rompe el sitio vivo ni la
         // validación local). Pega la site key y despliega; activa el enforcement
@@ -138,7 +132,6 @@
 
     // Alias retrocompatibles (el resto del código sigue usándolos).
     const firebaseConfig = TENANT.firebase;
-    const STRIPE_LINKS    = TENANT.stripe;
 
     // Aplica la identidad del tenant al DOM: enlaces, tema y variables de color.
     // (Los textos/colores literales se irán migrando a estas variables por fases.)
@@ -394,6 +387,22 @@
 
    let usuarioActual = null;
    window.usuarioActual = null;
+
+    // ── BIENVENIDA: anuncio de Estrellas (se muestra una sola vez) ─────────
+    (function anuncioEstrellas() {
+      if (!ESTRELLAS_ACTIVAS) return;
+      try { if (localStorage.getItem('bienvenida_estrellas_v1')) return; } catch (_) {}
+      setTimeout(() => {
+        window.uiAlert(
+          'Las Estrellas son los créditos que cambias por clases. Una vez que las tienes, ¡agendas tus clases A TU GUSTO! ⭐\n\n' +
+          '1 ⭐ = 1 clase.\n\n' +
+          'Vencen el día 2 de cada mes. Si las compras dentro de los 7 días previos al vencimiento, se programan para el mes siguiente.\n\n' +
+          'Ejemplo: si compras el 29 de enero, tus Estrellas vencen el 2 de marzo.',
+          { titulo: '✨ ¡Ya tenemos Estrellas!', okText: '¡Entendido!' }
+        );
+        try { localStorage.setItem('bienvenida_estrellas_v1', '1'); } catch (_) {}
+      }, 1200);
+    })();
 
     // ── LOGIN ─────────────────────────────────────────────
     // El perfil se crea/parchea en onAuthStateChanged → bootstrapPerfil.
@@ -910,24 +919,29 @@
     // ── COMPRA DE CRÉDITOS (Estrellas) vía backend (checkout dinámico) ─────
     // Pide cuántos créditos, muestra el precio (espejo) y manda al checkout de
     // Stripe que CREA el backend (el monto lo calcula el servidor, no el cliente).
-    window.abrirCompraCreditos = async () => {
+    window.abrirCompraCreditos = async (preset) => {
       if (!usuarioActual) { abrirLoginModal('login'); return; }
       if (!ESTRELLAS_ACTIVAS) { await uiAlert('Las Estrellas estarán disponibles a partir de Agosto.', { titulo: '⭐ Estrellas' }); return; }
       if (!BACKEND_URL) { await uiAlert('La compra de créditos aún no está disponible (backend en configuración).', { titulo: '⭐ Estrellas' }); return; }
 
-      const txt = await uiPrompt('¿Cuántos créditos quieres comprar?', {
-        titulo: '⭐ Comprar créditos',
-        mensaje: '1 crédito = 1 clase. Entre más compras, más barato cada uno. Máx ' + MAX_CREDITOS + '. Vencen el día 2 del mes siguiente.',
-        valor: '8', tipo: 'number', placeholder: 'Ej. 8',
-      });
-      if (txt === null) return;
-      const cantidad = parseInt(txt, 10);
+      let cantidad;
+      if (Number.isInteger(preset) && preset >= 1) {
+        cantidad = preset;                              // paquete preestablecido (tarjetas de precios)
+      } else {
+        const txt = await uiPrompt('¿Cuántas Estrellas quieres comprar?', {
+          titulo: '⭐ Comprar Estrellas',
+          mensaje: '1 ⭐ = 1 clase. Entre más compras, más barato cada una. Máx ' + MAX_CREDITOS + '. Vencen el día 2 del mes siguiente.',
+          valor: '8', tipo: 'number', placeholder: 'Ej. 8',
+        });
+        if (txt === null) return;
+        cantidad = parseInt(txt, 10);
+      }
       if (!Number.isInteger(cantidad) || cantidad < 1 || cantidad > MAX_CREDITOS) {
         await uiAlert('Cantidad inválida (1 a ' + MAX_CREDITOS + ').', { titulo: 'Error', peligro: true }); return;
       }
       const precio = precioCreditosCliente(cantidad);
       const ok = await uiConfirm(
-        cantidad + ' créditos por $' + precio.toLocaleString('es-MX') + ' MXN ($' + Math.round(precio/cantidad) + ' c/u). ¿Continuar al pago?',
+        cantidad + ' ⭐ Estrellas por $' + precio.toLocaleString('es-MX') + ' MXN ($' + Math.round(precio/cantidad) + ' c/u). ¿Continuar al pago?',
         { titulo: '⭐ Confirmar compra', okText: 'Ir a pagar', cancelText: 'Cancelar' });
       if (!ok) return;
 
@@ -952,7 +966,7 @@
     // reserva ACTIVA, todo o nada. Devuelve { ok, nuevoSaldo } o el motivo.
     window.agendarConCredito = async (slots, opts = {}) => {
       if (!usuarioActual) { abrirLoginModal('login'); return { ok:false }; }
-      if (!BACKEND_URL) { await uiAlert('Agendar con créditos aún no está disponible (backend en configuración).', { titulo: 'Créditos' }); return { ok:false }; }
+      if (!BACKEND_URL) { await uiAlert('Agendar con Estrellas aún no está disponible (backend en configuración).', { titulo: '⭐ Estrellas' }); return { ok:false }; }
       try {
         const idToken = await usuarioActual.getIdToken();
         const resp = await fetch(BACKEND_URL + '/agendar', {
@@ -962,7 +976,10 @@
         });
         const out = await resp.json();
         if (!resp.ok || !out.ok) {
-          if (out.motivo === 'sin_creditos') await uiAlert('No tienes créditos suficientes. Compra más para agendar.', { titulo: '⭐ Sin créditos' });
+          if (out.motivo === 'sin_creditos') {
+            const ir = await uiConfirm('No te alcanzan las Estrellas para esta reserva. ¿Comprar más ahora?', { titulo: '⭐ Sin Estrellas', okText: 'Comprar Estrellas', cancelText: 'Ahora no' });
+            if (ir) window.abrirCompraCreditos();
+          }
           else if (out.motivo === 'lleno') await uiAlert('Esa clase ya está llena (máx 6). Elige otra.', { titulo: 'Clase Llena', peligro: true });
           else await uiAlert(out.error || 'No se pudo agendar.', { titulo: 'Error', peligro: true });
           return { ok:false, motivo: out.motivo };
@@ -2020,10 +2037,6 @@
       usuarioActual = user;
       window.usuarioActual = user;
       actualizarUI(user);
-      // Si viene de Stripe, el alumno REPORTA su pago (no lo activa él mismo).
-      if (user && new URLSearchParams(window.location.search).get('pago') === 'exitoso') {
-        reportarPagoTrasStripe(user.uid);
-      }
       // Regreso de compra de CRÉDITOS: el webhook ya los acreditó en el servidor;
       // aquí solo refrescamos el saldo visible y avisamos.
       if (user) {
@@ -2105,80 +2118,6 @@
         videoCards.forEach(c => c.style.pointerEvents = 'none');
       }
     }
-
-    // ── FLUJO UNIFICADO: RESERVA → PAGO ──────────────────
-    // Llamado desde confirmarHorario() tras seleccionar plan + horas + nombre.
-    // Guarda la reserva pendiente (Firestore + localStorage) y redirige a Stripe
-    // en el MISMO tab, para que el success vuelva aquí con ?pago=exitoso.
-    window.procesarPagoReserva = async ({ plan, clases, nombre, slots, fecha }) => {
-      if (!usuarioActual) { abrirLoginModal('login'); return; }
-      const base = STRIPE_LINKS[plan];
-      if (!base) { await uiAlert('Plan no válido.', { titulo: 'Error', peligro: true }); return; }
-
-      // CLASE SUELTA: aparta el cupo de la FECHA elegida de forma atómica ANTES de
-      // cobrar. Si justo se llenó (alguien tomó el último lugar), se aborta.
-      if (plan === 'individual') {
-        const fsid = (slots && slots[0] && slots[0].slotId) || '';
-        const res = await reservarCupoIndividual(fsid);
-        if (!res.ok) {
-          if (res.lleno) await uiAlert('Esa clase acaba de llenarse (máximo 6 personas). Elige otra fecha u horario.', { titulo: 'Clase Llena', peligro: true });
-          else await uiAlert('No se pudo apartar tu lugar. Vuelve a intentarlo.', { titulo: 'Error', peligro: true });
-          return;
-        }
-      }
-
-      // Persistir selección completa (sobrevive el redirect de Stripe)
-      localStorage.setItem('reserva_pendiente_full', JSON.stringify({
-        plan, clases, slots: slots || [], nombre, fecha: fecha || null,
-        email: usuarioActual.email, uid: usuarioActual.uid, ts: Date.now()
-      }));
-
-      // Guardar reserva pendiente en Firestore (no bloqueante para el redirect)
-      // Capturamos el ID del documento: es la LLAVE que pegamos al link de Stripe
-      // (client_reference_id) para que el WEBHOOK empareje pago <-> reserva exacta.
-      let reservaId = null;
-      try {
-        const docReserva = {
-          uid: usuarioActual.uid,
-          nombre,
-          plan,
-          clases,
-          slots: slots || [],
-          estado: "pendiente_pago",
-          fechaReserva: serverTimestamp()
-        };
-        if (fecha) docReserva.fechaClase = fecha;   // clase suelta: día exacto elegido
-        const refReserva = await addDoc(collection(db, "reservas"), docReserva);
-        reservaId = refReserva.id;
-        localStorage.setItem('reserva_pendiente_id', reservaId); // por si Stripe no propaga el param
-      } catch (e) { console.error('Firestore reserva:', e); }
-
-      // Redirigir MISMO tab a Stripe.
-      // Pegamos client_reference_id = ID del doc de la reserva. Stripe lo devuelve
-      // tal cual en el evento checkout.session.completed -> el webhook activa ESTA reserva.
-      let url = `${base}?prefilled_email=${encodeURIComponent(usuarioActual.email)}`;
-      if (reservaId) url += `&client_reference_id=${encodeURIComponent(reservaId)}`;
-      window.location.href = url;
-    };
-
-    // Envía el correo a Formspree (vía AJAX, sin abandonar la página)
-    async function enviarReservaFormspree(data) {
-      try {
-        await fetch(TENANT.contacto.formspree, {
-          method: 'POST',
-          headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            _subject: `🎟 Pago REPORTADO (verificar en Stripe) — ${TENANT.marca.nombre}`,
-            estado:  'PAGO REPORTADO — verifica en Stripe y confírmalo en el panel de staff',
-            plan:    data.plan,
-            nombre:  data.nombre,
-            email:   data.email,
-            clases:  data.clases
-          })
-        });
-      } catch (e) { console.error('Formspree:', e); }
-    }
-    window.enviarReservaFormspree = enviarReservaFormspree;
 
     // ── MIS RESERVAS ──────────────────────────────────────
     async function cargarMisReservas(uid) {
@@ -2359,60 +2298,6 @@
         if (banner) { banner.style.display = 'flex'; setTimeout(() => banner.style.display = 'none', 8000); }
         history.replaceState({}, '', '/');
       } catch(e) { console.error('Error registrando boleto:', e); }
-    }
-
-    // Stripe success: al volver con ?pago=exitoso, el alumno REPORTA su pago
-    // (estado → 'pago_reportado'). NO lo activa él mismo: 'activa' solo lo pone el
-    // staff (verificando en Stripe) o el webhook. Esto cierra el P0 de
-    // autoactivación — las reglas rechazarían un intento de marcar 'activa' aquí.
-    async function reportarPagoTrasStripe(uid) {
-      try {
-        // Preferimos el ID EXACTO de la reserva que guardamos antes del redirect.
-        // Guarda clave: SOLO bajamos a 'pago_reportado' si sigue en 'pendiente_pago'.
-        // Si el webhook ya la puso 'activa', NO la tocamos (no revertir un pago real).
-        let reportada = false;
-        const idExacto = localStorage.getItem('reserva_pendiente_id');
-        if (idExacto) {
-          const refExacta = doc(db, "reservas", idExacto);
-          const snapExacta = await getDoc(refExacta);
-          if (snapExacta.exists() && snapExacta.data().estado === "pendiente_pago") {
-            await updateDoc(refExacta, { estado: "pago_reportado", pagoReportadoTs: serverTimestamp() });
-            cargarMisReservas(uid);
-          }
-          reportada = true; // ya tratamos la reserva exacta (activa o reportada): no usar el fallback
-          localStorage.removeItem('reserva_pendiente_id');
-        }
-
-        // Fallback (compat): si no había ID exacto, usamos la última pendiente del usuario.
-        if (!reportada) {
-          const q = query(
-            collection(db, "reservas"),
-            where("uid", "==", uid),
-            where("estado", "==", "pendiente_pago")
-          );
-          const snap = await getDocs(q);
-          if (!snap.empty) {
-            const docRef = snap.docs[snap.docs.length - 1].ref;
-            await updateDoc(docRef, { estado: "pago_reportado", pagoReportadoTs: serverTimestamp() });
-            cargarMisReservas(uid);
-          }
-        }
-
-        // Avisar al staff por correo para que verifique en Stripe y confirme.
-        const pend = JSON.parse(localStorage.getItem('reserva_pendiente_full') || 'null');
-        if (pend && (Date.now() - (pend.ts || 0) < 2 * 60 * 60 * 1000)) {
-          await enviarReservaFormspree(pend);
-        }
-
-        const banner = document.getElementById('pago-exitoso-banner');
-        if (banner) {
-          banner.style.display = 'flex';
-          setTimeout(() => banner.style.display = 'none', 9000);
-        }
-        localStorage.removeItem('reserva_pendiente_full');
-        sessionStorage.removeItem('reserva_pendiente');
-        history.replaceState({}, '', '/');
-      } catch(e) { console.error('Error reportando pago:', e); }
     }
 
     // ── PANEL STAFF: confirmar pagos de reservas (Rank ≤ 2) ───────────────
@@ -4485,39 +4370,39 @@
   <!-- PRECIOS -->
   <section id="precios" class="seccion">
     <div class="seccion-header">
-      <span class="seccion-eyebrow">Elige tu ritmo</span>
-      <h2 class="seccion-titulo">Planes & Precios</h2>
+      <span class="seccion-eyebrow">1 ⭐ = 1 clase</span>
+      <h2 class="seccion-titulo">Compra tus Estrellas</h2>
       <div class="titulo-linea"></div>
     </div>
     <div class="precios-grid">
       <div class="precio-card">
-        <p class="precio-plan-nombre">Individual</p>
+        <p class="precio-plan-nombre">1 ⭐ Estrella</p>
         <p class="precio-monto">$250</p>
-        <p class="precio-periodo">por clase</p>
+        <p class="precio-periodo">por estrella</p>
         <p class="precio-horas"><strong>1 clase</strong> a tu elección</p>
-        <button class="btn-plan" onclick="elegirPlanScroll('individual')">Elegir Individual</button>
+        <button class="btn-plan" onclick="abrirCompraCreditos(1)">Comprar Estrellas</button>
       </div>
       <div class="precio-card">
-        <p class="precio-plan-nombre">Plan Básico</p>
+        <p class="precio-plan-nombre">8 ⭐ Estrellas</p>
         <p class="precio-monto">$800</p>
-        <p class="precio-periodo">al mes</p>
-        <p class="precio-horas"><strong>2 clases</strong> semanales</p>
-        <button class="btn-plan" onclick="elegirPlanScroll('basico')">Elegir Básico</button>
+        <p class="precio-periodo">$100 c/u</p>
+        <p class="precio-horas"><strong>8 clases</strong> a tu ritmo</p>
+        <button class="btn-plan" onclick="abrirCompraCreditos(8)">Comprar Estrellas</button>
       </div>
       <div class="precio-card destacado">
         <span class="precio-badge">Más Popular</span>
-        <p class="precio-plan-nombre">Plan Medio</p>
+        <p class="precio-plan-nombre">20 ⭐ Estrellas</p>
         <p class="precio-monto">$1,200</p>
-        <p class="precio-periodo">al mes</p>
-        <p class="precio-horas"><strong>5 clases</strong> semanales</p>
-        <button class="btn-plan" onclick="elegirPlanScroll('medio')">Elegir Medio</button>
+        <p class="precio-periodo">$60 c/u</p>
+        <p class="precio-horas"><strong>20 clases</strong> a tu ritmo</p>
+        <button class="btn-plan" onclick="abrirCompraCreditos(20)">Comprar Estrellas</button>
       </div>
       <div class="precio-card">
-        <p class="precio-plan-nombre">Plan Avanzado</p>
+        <p class="precio-plan-nombre">28 ⭐ Estrellas</p>
         <p class="precio-monto">$1,600</p>
-        <p class="precio-periodo">al mes</p>
-        <p class="precio-horas"><strong>7 clases</strong> semanales</p>
-        <button class="btn-plan" onclick="elegirPlanScroll('avanzado')">Elegir Avanzado</button>
+        <p class="precio-periodo">$57 c/u</p>
+        <p class="precio-horas"><strong>28 clases</strong> a tu ritmo</p>
+        <button class="btn-plan" onclick="abrirCompraCreditos(28)">Comprar Estrellas</button>
       </div>
     </div>
   </section>
@@ -4551,11 +4436,10 @@
           <span class="perfil-id-tag">ID: <span id="perfil-id">—</span></span>
           <span id="perfil-tel" class="perfil-tel" onclick="abrirEditarTelefono()" title="Solo tú y las instructoras lo ven"></span>
         </div>
-        <div class="perfil-creditos-box" onclick="accionEstrellas()" title="Disponible en Agosto">
-          <span class="perfil-creditos-candado">🔒</span>
+        <div class="perfil-creditos-box" onclick="accionEstrellas()" title="Toca para comprar Estrellas">
           <span id="perfil-creditos" class="perfil-creditos-num">0</span>
           <span class="perfil-creditos-lbl">⭐ Estrellas</span>
-          <span class="perfil-creditos-soon">Disponible en Agosto</span>
+          <span class="perfil-creditos-soon">Toca para comprar</span>
         </div>
       </div>
 
@@ -5637,19 +5521,21 @@
     if (!nombre) { await window.uiAlert('Por favor escribe tu nombre completo.', { titulo: 'Falta tu nombre' }); return; }
     if (!_reservaPendiente) { cerrarNombreModal(); return; }
     cerrarNombreModal();
-    // Entrega al módulo Firebase: guarda pendiente + redirige a Stripe
-    window.procesarPagoReserva({ ...(_reservaPendiente), nombre });
+    // Reservar GASTANDO Estrellas (1 ⭐ por clase). El backend valida saldo + cupo
+    // de forma atómica y deja la reserva ACTIVA. Sin redirecciones ni Payment Links.
+    const { plan, slots, fecha } = _reservaPendiente;
+    const out = await window.agendarConCredito(slots, { nombre, plan, fecha });
+    if (out && out.ok) {
+      const n = (slots && slots.length) || 1;
+      await window.uiAlert(
+        '¡Listo! Agendaste ' + n + (n === 1 ? ' clase' : ' clases') + ' con tus Estrellas.' +
+        (typeof out.nuevoSaldo === 'number' ? ' Te quedan ' + out.nuevoSaldo + ' ⭐.' : ''),
+        { titulo: '✨ Clase agendada' });
+      _reservaPendiente = null;
+    }
+    // sin_creditos / lleno / error: agendarConCredito ya mostró el aviso correspondiente.
   }
   window.continuarAlPago = continuarAlPago;
-
-  // Desde las tarjetas de Precios: preselecciona el plan y baja al calendario
-  function elegirPlanScroll(plan) {
-    const btn = document.querySelector(`.plan-btn[data-plan="${plan}"]`);
-    if (btn) btn.click();
-    const sec = document.getElementById('horarios');
-    if (sec) sec.scrollIntoView({ behavior: 'smooth' });
-  }
-  window.elegirPlanScroll = elegirPlanScroll;
 </script>
 
 <script>
