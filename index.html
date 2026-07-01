@@ -49,6 +49,7 @@
     import { initializeApp, deleteApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
     import { getAuth, signInWithPopup, signOut, onAuthStateChanged, GoogleAuthProvider,
              createUserWithEmailAndPassword, signInWithEmailAndPassword, updateProfile,
+             signInAnonymously,
              EmailAuthProvider, reauthenticateWithCredential, reauthenticateWithPopup }
       from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
     import { getFirestore, doc, getDoc, setDoc, collection, addDoc, query, where, getDocs, updateDoc, deleteDoc, serverTimestamp, arrayUnion, runTransaction, onSnapshot }
@@ -572,26 +573,63 @@
     };
 
     window.registrarNativo = async () => {
+      const nombre = _val('reg-nombre');
       const u  = _val('reg-user');
       const p  = document.getElementById('reg-pass').value;
       const p2 = document.getElementById('reg-pass2').value;
       const correo = _val('reg-email');
       const tel    = _val('reg-tel');
+      if (nombre.length < 3) { _loginErr('Escribe tu nombre completo (obligatorio, mín. 3 caracteres).'); return; }
       if (u.length < 3) { _loginErr('El usuario debe tener al menos 3 caracteres.'); return; }
       if (p.length < 6) { _loginErr('La contraseña debe tener al menos 6 caracteres.'); return; }
       if (p !== p2)     { _loginErr('Las contraseñas no coinciden.'); return; }
       const email = usuarioAEmail(u);
       if (!email) { _loginErr('Usa solo letras, números, punto, guion o guion bajo en el usuario.'); return; }
-      _pendingRegister = { nombreVisible: u.slice(0,40), correo: correo.slice(0,80), tel: tel.slice(0,20) };
+      _pendingRegister = { nombreVisible: nombre.slice(0,40), correo: correo.slice(0,80), tel: tel.slice(0,20) };
       _loginErr('Creando tu cuenta…', TENANT.marca.colorPrimario);
       try {
         const cred = await createUserWithEmailAndPassword(auth, email, p);
-        try { await updateProfile(cred.user, { displayName: u.slice(0,40) }); } catch {}
+        try { await updateProfile(cred.user, { displayName: nombre.slice(0,40) }); } catch {}
         // onAuthStateChanged → bootstrapPerfil usará _pendingRegister.
         cerrarLoginModal();
       } catch(e) {
         _pendingRegister = null;
         _loginErr(_msgErrorAuth(e.code));
+      }
+    };
+
+    // ── INVITADA / CLASE DE PRUEBA (sin registro) ─────────────
+    // Las alumnas nuevas que vienen "a probar" NO tienen que crear cuenta: entran
+    // de forma ANÓNIMA (Firebase Anonymous Auth) para reutilizar toda la infra de
+    // Estrellas/pago/reservas (el webhook necesita un idToken de Firebase). Lo ÚNICO
+    // que les pedimos —obligatorio— es su NOMBRE, para saber quién asiste/aparta.
+    // ⚠️ Requiere activar el proveedor "Anónimo" en Firebase Console → Authentication.
+    window.entrarComoInvitada = async () => {
+      const nombre = await uiPrompt('Escribe tu nombre completo', {
+        titulo: '✨ Vengo a probar',
+        mensaje: 'Sin crear cuenta puedes comprar tu clase de prueba con Estrellas. Solo necesitamos tu nombre para saber quién asiste. Después podrás registrarte con el mismo nombre.',
+        valor: '',
+        placeholder: 'Nombre y apellido'
+      });
+      if (nombre === null) return;  // canceló
+      const limpio = nombre.trim().slice(0, 40);
+      if (limpio.length < 3) { await uiAlert('Necesitamos tu nombre completo (mín. 3 caracteres) para continuar.', { titulo: 'Falta tu nombre' }); return; }
+      _loginErr('Entrando como invitada…', TENANT.marca.colorPrimario);
+      // bootstrapPerfil usará _pendingRegister → nombreVisible = nombre, salta onboarding.
+      _pendingRegister = { nombreVisible: limpio, correo: '', tel: '' };
+      try {
+        const cred = await signInAnonymously(auth);
+        try { await updateProfile(cred.user, { displayName: limpio }); } catch {}
+        cerrarLoginModal();
+      } catch(e) {
+        _pendingRegister = null;
+        console.error('anon:', e);
+        const code = (e && e.code) || '';
+        if (code === 'auth/operation-not-allowed' || code === 'auth/admin-restricted-operation') {
+          _loginErr('El modo invitada aún no está activo. Avísale a la academia (falta habilitar "Anónimo" en Firebase).');
+        } else {
+          _loginErr('No se pudo entrar como invitada. Inténtalo de nuevo.');
+        }
       }
     };
 
@@ -659,7 +697,11 @@
       if (data.colaborador === undefined) patch.colaborador = false;
       if (!data.colab) patch.colab = { tipo:'', descripcion:'', enlace:'' };
       // visibilidad: el perfil es visible, pero la persona decide qué muestra.
-      if (!data.visibilidad) patch.visibilidad = { perfilPublico:true, mostrarStats:true, mostrarSemblanza:true };
+      // INVITADAS (anónimas / clase de prueba): NO aparecen en el directorio público
+      // para no llenarlo de cuentas temporales; quedan marcadas con esInvitada.
+      const esInvitada = !!(user && user.isAnonymous);
+      if (esInvitada && data.esInvitada === undefined) patch.esInvitada = true;
+      if (!data.visibilidad) patch.visibilidad = { perfilPublico: !esInvitada, mostrarStats:true, mostrarSemblanza:true };
       // El registro nativo ya pidió nombre/correo/teléfono → no repetir onboarding.
       if (data.onboardingHecho === undefined) patch.onboardingHecho = regPend ? true : false;
       // RANK: el override por correo (solo Dueño) manda en el alta. Los demás
@@ -1044,6 +1086,10 @@
       if (!usuarioActual) return;
       const nombre = (document.getElementById('onb-nombre').value || '').trim().slice(0, 40);
       const tel    = (document.getElementById('onb-tel').value || '').trim().slice(0, 20);
+      if (nombre.length < 3) {
+        await uiAlert('Escribe tu nombre (obligatorio, mín. 3 caracteres) para que la academia sepa quién eres.', { titulo: 'Falta tu nombre' });
+        return;
+      }
       // El perfil usuarios/{uid} puede NO existir todavía: hay cuentas creadas en
       // Auth cuyo doc nunca se persistió (las "cuentas que no sincronizaban").
       // updateDoc fallaría con "No document to update". guardarCamposPerfil ASEGURA
@@ -4720,6 +4766,8 @@
 
       <!-- CREAR CUENTA -->
       <div id="login-pane-reg" style="display:none;">
+        <label class="onb-label">Nombre completo <span class="onb-opt">(obligatorio · para saber quién asiste)</span></label>
+        <input id="reg-nombre" class="onb-input" type="text" autocomplete="name" maxlength="40" placeholder="Nombre y apellido">
         <label class="onb-label">Usuario <span class="onb-opt">(con esto inicias sesión)</span></label>
         <input id="reg-user" class="onb-input" type="text" autocomplete="username" placeholder="Ej. luna_aerial">
         <label class="onb-label">Contraseña <span class="onb-opt">(mín. 6 · es única, no la olvides)</span></label>
@@ -4746,6 +4794,11 @@
         Entrar con Google
       </button>
 
+      <button class="login-google" onclick="entrarComoInvitada()" style="margin-top:8px;">
+        ✨ Vengo a probar (sin registrarme)
+      </button>
+      <p class="login-nota" style="margin-top:6px;">¿Primera vez? Compra tu clase de prueba sin crear cuenta. Solo te pedimos tu nombre.</p>
+
       <button class="login-close" onclick="cerrarLoginModal()">Cerrar</button>
       <p class="login-nota">🔒 Tu correo y teléfono nunca son visibles para otras personas. Los pedimos solo por tu seguridad y para emergencias.</p>
     </div>
@@ -4758,8 +4811,8 @@
       <img id="onb-foto" class="onb-foto" src="" alt="Foto">
       <div id="onb-foto-emoji" class="onb-foto avatar-emoji" style="display:none;margin-left:auto;margin-right:auto;"></div>
       <button type="button" class="onb-avatar-btn" onclick="abrirEditarFoto()">Elegir avatar ✨</button>
-      <label class="onb-label">Nombre de usuario</label>
-      <input id="onb-nombre" class="onb-input" type="text" maxlength="40" placeholder="Tu nombre visible">
+      <label class="onb-label">Nombre completo <span class="onb-opt">(obligatorio)</span></label>
+      <input id="onb-nombre" class="onb-input" type="text" maxlength="40" placeholder="Nombre y apellido">
       <label class="onb-label">Teléfono <span class="onb-opt">(opcional · privado, solo lo ven las instructoras)</span></label>
       <input id="onb-tel" class="onb-input" type="tel" maxlength="20" placeholder="Ej. 662 123 4567">
       <div class="onb-push">
@@ -5669,7 +5722,7 @@
 
   async function continuarAlPago() {
     const nombre = document.getElementById('nombre-modal-input').value.trim();
-    if (!nombre) { await window.uiAlert('Por favor escribe tu nombre completo.', { titulo: 'Falta tu nombre' }); return; }
+    if (nombre.length < 3) { await window.uiAlert('Por favor escribe tu nombre completo (mín. 3 caracteres) para validar tu reserva.', { titulo: 'Falta tu nombre' }); return; }
     if (!_reservaPendiente) { cerrarNombreModal(); return; }
     cerrarNombreModal();
     // Reservar GASTANDO Estrellas (1 ⭐ por clase). El backend valida saldo + cupo
