@@ -2154,7 +2154,7 @@
       const lbl=document.getElementById('hm-semana');
       if (lbl) lbl.textContent = `Agendando en la semana del ${L.getDate()} ${MES_CORTO[L.getMonth()]} al ${fin.getDate()} ${MES_CORTO[fin.getMonth()]}`;
       ['hm-inicio','hm-fin','hm-nota'].forEach(id=>{ const e=document.getElementById(id); if(e) e.value=''; });
-      document.getElementById('hm-dia').value='0';
+      document.querySelectorAll('#hm-dias input[type=checkbox]').forEach(c=> c.checked=false);
       document.getElementById('hm-tipo').value='clase';
       document.getElementById('hm-rec').value='semanal';
       document.getElementById('horario-modal').style.display='flex';
@@ -2167,38 +2167,45 @@
       const uid = sel.value;
       const opt = sel.selectedOptions[0];
       const targetRank = opt ? Number(opt.dataset.rank) : RANK_DEFAULT;
-      const diaIdx = Number(document.getElementById('hm-dia').value);
+      const dias = Array.from(document.querySelectorAll('#hm-dias input[type=checkbox]:checked')).map(c=>Number(c.value)).sort((a,b)=>a-b);
       const inicio = document.getElementById('hm-inicio').value;
       const fin    = document.getElementById('hm-fin').value;
       const tipo   = document.getElementById('hm-tipo').value;
       const nota   = document.getElementById('hm-nota').value.trim().slice(0,60);
       const rec    = document.getElementById('hm-rec').value;
       if (!uid){ await uiAlert('Elige para quién es el horario.', { titulo: 'Falta un dato' }); return; }
+      if (!dias.length){ await uiAlert('Elige al menos un día (puedes marcar varios).', { titulo: 'Falta un dato' }); return; }
       if (!inicio || !fin){ await uiAlert('Pon hora de inicio y de fin.', { titulo: 'Falta un dato' }); return; }
       if (fin <= inicio){ await uiAlert('La hora de fin debe ser posterior a la de inicio.', { titulo: 'Horas inválidas' }); return; }
       if (!calPuedoEditar(targetRank, uid)){ await uiAlert('No tienes permiso para editar ese calendario.', { titulo: 'Sin permiso', peligro: true }); return; }
-      const fechaDate = calAddDays(_calAncla || calLunes(new Date()), diaIdx);
-      const fecha = calFechaISO(fechaDate);
-      const mes = calMes(fechaDate);
       const persona = _calStaff.find(p=>p.uid===uid);
       const nombre = (uid===usuarioActual.uid)
         ? (document.getElementById('perfil-nombre')?.textContent || usuarioActual.displayName || 'Staff')
         : (persona ? persona.nombre : 'Staff');
       const alcance = rec==='mensual' ? 'TODO el mes' : 'SOLO esta semana';
+      const diasTxt = dias.map(d=>DIAS_LARGO[d].toLowerCase()).join(', ');
       if (!(await uiConfirm(
-        `Guardar ${inicio}–${fin}, ${DIAS_LARGO[diaIdx].toLowerCase()} (${alcance}).\n\n⚠️ Una vez guardada, esta hora NO se puede modificar. Solo podrás CANCELARLA.`,
+        `Guardar ${inicio}–${fin} en ${dias.length} día(s): ${diasTxt} (${alcance}).\n\n⚠️ Una vez guardada, cada hora NO se puede modificar. Solo podrás CANCELARLA (día por día).`,
         { titulo: 'Confirmar horario', okText: 'Guardar', cancelText: 'Volver' }))) return;
       try {
-        await addDoc(collection(db, "horarios"), {
-          uid, rank: targetRank, nombre,
-          diaIdx, inicio, fin, tipo, nota,
-          recurrencia: rec, fecha, mes,
-          creadoPor: usuarioActual.uid,
-          creadoPorRank: (window._miRank ?? RANK_DEFAULT),
-          createdAt: serverTimestamp(), esquema: 1
-        });
+        let ok = 0, fail = 0;
+        for (const diaIdx of dias) {
+          const fechaDate = calAddDays(_calAncla || calLunes(new Date()), diaIdx);
+          try {
+            await addDoc(collection(db, "horarios"), {
+              uid, rank: targetRank, nombre,
+              diaIdx, inicio, fin, tipo, nota,
+              recurrencia: rec, fecha: calFechaISO(fechaDate), mes: calMes(fechaDate),
+              creadoPor: usuarioActual.uid,
+              creadoPorRank: (window._miRank ?? RANK_DEFAULT),
+              createdAt: serverTimestamp(), esquema: 1
+            });
+            ok++;
+          } catch(e){ console.error('guardarHorario (día '+diaIdx+'):', e); fail++; }
+        }
         cerrarHorarioModal();
         await calCargarHorarios();
+        if (fail) await uiAlert('Se guardaron ' + ok + ' de ' + dias.length + ' días. ' + fail + ' con error (revisa permisos).', { titulo: fail===dias.length?'Error':'Guardado parcial', peligro: fail===dias.length });
       } catch(e){
         console.error('guardarHorario:', e);
         await uiAlert('No se pudo guardar (revisa permisos o conexión).', { titulo: 'Error', peligro: true });
@@ -3714,6 +3721,12 @@
       color:#fff; font-size:.76rem; font-weight:600; }
     .cal-fijo-nota { color:rgba(255,255,255,.6); font-size:.68rem; }
     .cal-pie { text-align:center; color:rgba(255,255,255,.4); font-size:.75rem; margin-top:14px; }
+    .hm-dias { display:flex; flex-wrap:wrap; gap:6px; margin:2px 0 4px; }
+    .hm-diachk { display:inline-flex; align-items:center; gap:5px; cursor:pointer; user-select:none;
+      background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.14); border-radius:8px;
+      padding:6px 10px; font-size:.82rem; color:rgba(255,255,255,.9); }
+    .hm-diachk:hover { border-color:rgba(255,204,0,.5); }
+    .hm-diachk input { accent-color:var(--amarillo); }
     .hm-warn { background:rgba(255,180,0,.12); border:1px solid rgba(255,180,0,.3); border-radius:8px;
       color:#ffd98a; font-size:.74rem; line-height:1.5; padding:9px 11px; margin:14px 0 0; text-align:left; }
 
@@ -5032,16 +5045,16 @@
       <p class="onb-sub" id="hm-semana">Semana…</p>
       <label class="onb-label">¿Para quién?</label>
       <select id="hm-uid" class="onb-input"></select>
-      <label class="onb-label">Día</label>
-      <select id="hm-dia" class="onb-input">
-        <option value="0">Lunes</option>
-        <option value="1">Martes</option>
-        <option value="2">Miércoles</option>
-        <option value="3">Jueves</option>
-        <option value="4">Viernes</option>
-        <option value="5">Sábado</option>
-        <option value="6">Domingo</option>
-      </select>
+      <label class="onb-label">Días <span class="onb-opt">(marca uno o varios: se crea la misma hora en cada día)</span></label>
+      <div id="hm-dias" class="hm-dias">
+        <label class="hm-diachk"><input type="checkbox" value="0"> Lun</label>
+        <label class="hm-diachk"><input type="checkbox" value="1"> Mar</label>
+        <label class="hm-diachk"><input type="checkbox" value="2"> Mié</label>
+        <label class="hm-diachk"><input type="checkbox" value="3"> Jue</label>
+        <label class="hm-diachk"><input type="checkbox" value="4"> Vie</label>
+        <label class="hm-diachk"><input type="checkbox" value="5"> Sáb</label>
+        <label class="hm-diachk"><input type="checkbox" value="6"> Dom</label>
+      </div>
       <div style="display:flex; gap:10px;">
         <div style="flex:1;">
           <label class="onb-label">Inicio</label>
