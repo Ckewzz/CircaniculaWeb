@@ -19,8 +19,9 @@ rules_version = '2';
 //     0 Dueño · 1 Administración · 2 Instructora · 3 Asistente · 4 Alumno · 5 Viewer
 //
 //  Principios:
-//   • Créditos (Estrellas): NADIE los edita desde el cliente (ni el Dueño).
-//     Inmutables hasta que exista un backend/Cloud Function que los otorgue.
+//   • Créditos (Estrellas): la vía normal es el backend (webhook de Stripe).
+//     Desde el cliente SOLO el Dueño (Rank 0) puede otorgarlos a mano (regalo/
+//     ajuste); Admin/Instructoras/alumnas NO los tocan. Antes eran inmutables.
 //   • rank: solo el Dueño (Rank 0 / super-admin) lo cambia.
 //   • imparteClases / colaborador: ETIQUETAS de rol curadas por admin (Rank ≤ 1).
 //     El propio dueño del perfil solo puede inicializarlas en false (anti-autoascenso).
@@ -112,10 +113,13 @@ service cloud.firestore {
         && (!('colaborador'   in request.resource.data) || request.resource.data.colaborador   == false);
 
       // DUEÑO (Rank 0 / super-admin): edita cualquier perfil —incluido rank y los
-      // flags de rol— pero NUNCA los créditos (solo backend/Cloud Function).
+      // flags de rol. AHORA TAMBIÉN puede OTORGAR Estrellas (creditos) a mano a
+      // cualquier usuaria/miss/asistente (regalo, ajuste, cortesía). El Dueño es
+      // de confianza; el backend sigue siendo la vía normal de compra. Solo se
+      // valida que 'creditos' sea un entero no negativo (creditosExpiran libre).
       allow update: if isDueno()
-        && request.resource.data.creditos == resource.data.creditos
-        && unchangedOrNew('creditosExpiran');
+        && request.resource.data.creditos is int
+        && request.resource.data.creditos >= 0;
 
       // ADMINISTRACIÓN (Rank 1): gestiona perfiles (stats, títulos, eventos, flags
       // de rol, apodo, semblanza…), pero NO toca rank ni créditos. Tampoco

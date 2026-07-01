@@ -51,7 +51,7 @@
              createUserWithEmailAndPassword, signInWithEmailAndPassword, updateProfile,
              EmailAuthProvider, reauthenticateWithCredential, reauthenticateWithPopup }
       from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
-    import { getFirestore, doc, getDoc, setDoc, collection, addDoc, query, where, getDocs, updateDoc, deleteDoc, serverTimestamp, arrayUnion, runTransaction }
+    import { getFirestore, doc, getDoc, setDoc, collection, addDoc, query, where, getDocs, updateDoc, deleteDoc, serverTimestamp, arrayUnion, runTransaction, onSnapshot }
       from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
     // ════════════════════════════════════════════════════════════════════
@@ -747,6 +747,10 @@
         const rank = d.rank ?? RANK_DEFAULT;
         window._miRank = rank;            // rank propio (lo usa el calendario)
         if (window.calRefrescarControles) calRefrescarControles();
+        // Ya que _miRank quedó fijado, refresca el overlay del calendario para que
+        // la barra de staff (y el botón "Reservar mi clase"), la vista por rol y los
+        // listeners en tiempo real se apliquen con el rank correcto (no como alumna).
+        if (window.cargarOverlayHorario) window.cargarOverlayHorario();
         const rk = RANKS[rank] || RANKS[RANK_DEFAULT];
         const set = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
 
@@ -1129,6 +1133,60 @@
       } catch(e) {
         console.error('otorgarRank:', e);
         out.textContent = '❌ Error (¿permisos? Revisa que seas Dueño).';
+      }
+    };
+
+    // Caducidad de las Estrellas: DÍA 2 del mes siguiente, con gracia de 7 días
+    // (si faltan <7 días para ese día 2, ruedan al día 2 del mes que sigue).
+    // Réplica del backend (pricing.js calcularExpiracion) para que el conteo
+    // coincida cuando el Dueño otorga Estrellas a mano. Devuelve un Date.
+    function calcularExpiracionEstrellas(desde = new Date()) {
+      const d = new Date(desde);
+      const y = d.getFullYear(), m = d.getMonth();
+      let exp = new Date(y, m + 1, 2, 23, 59, 59, 0);
+      if ((exp.getTime() - d.getTime()) / 86400000 < 7) exp = new Date(y, m + 2, 2, 23, 59, 59, 0);
+      return exp;
+    }
+
+    // ── PANEL DUEÑO: otorgar Estrellas (créditos) a cualquier usuario/miss/asistente ──
+    // El Rank 0 SÍ puede acreditar Estrellas a mano (regalo, ajuste, cortesía). Suma
+    // sobre el saldo vigente (si ya venció, parte de 0) y refresca la caducidad al
+    // día 2 más lejano. Respeta el tope MAX_CREDITOS. Las reglas solo lo permiten al Dueño.
+    window.otorgarEstrellas = async () => {
+      if (!usuarioActual) return;
+      const idInput = (document.getElementById('admin-id-input').value || '').trim().toUpperCase();
+      const out = document.getElementById('admin-estrellas-out');
+      if (!idInput) { if (out) out.textContent = 'Escribe el ID corto arriba.'; return; }
+      const txt = await uiPrompt('¿Cuántas Estrellas quieres otorgar?', {
+        titulo: '⭐ Otorgar Estrellas',
+        mensaje: 'Se suman al saldo vigente de la persona (ID ' + idInput + '). Máx ' + MAX_CREDITOS + '. Vencen el día 2 del mes siguiente.',
+        valor: '4', tipo: 'number', placeholder: 'Ej. 4',
+      });
+      if (txt === null) return;
+      const cantidad = parseInt(txt, 10);
+      if (!Number.isInteger(cantidad) || cantidad < 1 || cantidad > MAX_CREDITOS) {
+        if (out) out.textContent = '❌ Cantidad inválida (1 a ' + MAX_CREDITOS + ').'; return;
+      }
+      if (out) out.textContent = 'Otorgando…';
+      try {
+        const q = query(collection(db, "usuarios"), where("userIdCorto", "==", idInput));
+        const snap = await getDocs(q);
+        if (snap.empty) { if (out) out.textContent = '❌ No se encontró ningún usuario con ese ID.'; return; }
+        const target = snap.docs[0];
+        const data = target.data();
+        const ahora = new Date();
+        const expActual = data.creditosExpiran && data.creditosExpiran.toMillis ? data.creditosExpiran.toMillis() : 0;
+        const vigente = expActual >= ahora.getTime();
+        let nuevo = (vigente ? (data.creditos || 0) : 0) + cantidad;
+        if (nuevo > MAX_CREDITOS) nuevo = MAX_CREDITOS;
+        const nuevaExp = calcularExpiracionEstrellas(ahora);
+        const expFinal = (vigente && data.creditosExpiran.toDate() > nuevaExp) ? data.creditosExpiran.toDate() : nuevaExp;
+        await updateDoc(doc(db, "usuarios", target.id), { creditos: nuevo, creditosExpiran: expFinal });
+        if (out) out.textContent = `✅ ${data.nombreVisible || idInput} ahora tiene ${nuevo} ⭐ (vencen ${expFinal.toLocaleDateString('es-MX', { day:'numeric', month:'short', year:'numeric' })}).`;
+        if (target.id === usuarioActual.uid) cargarPerfil(usuarioActual.uid);
+      } catch(e) {
+        console.error('otorgarEstrellas:', e);
+        if (out) out.textContent = '❌ Error (¿permisos? Revisa que seas Dueño y que las reglas nuevas estén publicadas).';
       }
     };
 
@@ -2461,6 +2519,41 @@
         snap.docs.forEach(d => { const c = d.data(); if (c && typeof c.count === 'number') mapa[d.id] = c.count; });
       } catch (e) { /* coleccion/reglas de 'cupos' aun no publicadas */ }
       return mapa;
+    };
+
+    // ── TIEMPO REAL ───────────────────────────────────────────────────────
+    // Suscripción viva al cupo agregado PÚBLICO: cualquiera (alumnas incluidas)
+    // ve "n/6"/"Lleno" actualizarse al instante cuando alguien aparta. Devuelve
+    // la función de baja (unsubscribe) o null si no se pudo suscribir.
+    window.suscribirCupos = (cb) => {
+      try {
+        return onSnapshot(collection(db, "cupos"), (snap) => {
+          const mapa = {};
+          snap.forEach(d => { const c = d.data(); if (c && typeof c.count === 'number') mapa[d.id] = c.count; });
+          cb(mapa);
+        }, (e) => console.warn('suscribirCupos:', e));
+      } catch (e) { console.warn('suscribirCupos:', e); return null; }
+    };
+    // STAFF: suscripción viva a TODAS las reservas (quién apartó cada clase).
+    // Solo la usa el staff (Rank ≤ 2), que sí puede leer la colección completa.
+    window.suscribirReservas = (cb) => {
+      try {
+        return onSnapshot(collection(db, "reservas"), (snap) => {
+          const mapa = {};
+          snap.forEach(d => {
+            const r = d.data();
+            if (r.estado === 'cancelada') return;
+            (r.slots || []).forEach(s => {
+              if (!s || !s.slotId) return;
+              (mapa[s.slotId] = mapa[s.slotId] || []).push({
+                nombre: r.nombre || 'Alumno', estado: r.estado || 'pendiente_pago',
+                plan: r.plan || '', uid: r.uid || ''
+              });
+            });
+          });
+          cb(mapa);
+        }, (e) => console.warn('suscribirReservas:', e));
+      } catch (e) { console.warn('suscribirReservas:', e); return null; }
     };
     // STAFF: recalcula el cupo de TODAS las clases desde las reservas reales
     // (no canceladas) y lo escribe. Idempotente; seguro de re-correr. Escribe 0
@@ -4303,6 +4396,7 @@
     <!-- Barra STAFF/MISS: control de vista del calendario (T3-F). Oculta para alumnos. -->
     <div class="horario-staff-bar" id="horario-staff-bar">
       <span class="staff-bar-txt"><strong>Modo staff:</strong> toca cualquier clase para ver quién la apartó y pasar lista. Cupo máximo: 6 por clase.</span>
+      <button class="staff-filtro-btn" id="staff-reservar-btn" onclick="toggleModoReservaStaff()">⭐ Reservar mi clase</button>
       <button class="staff-filtro-btn" id="staff-apartadas-btn" onclick="toggleSoloApartadas()">Solo apartadas</button>
       <button class="staff-filtro-btn" id="staff-filtro-btn" onclick="toggleFiltroMisClases()">Ver solo mis clases</button>
       <button class="staff-filtro-btn staff-cupo-btn" id="staff-cupo-btn" onclick="staffSincronizarCupos(this)">Actualizar cupos</button>
@@ -4508,6 +4602,17 @@
         <button class="admin-btn" onclick="otorgarRank()">Otorgar</button>
       </div>
       <p id="admin-resultado" class="admin-resultado"></p>
+
+      <!-- Otorgar Estrellas (créditos) a mano — exclusivo del Dueño (Rank 0) -->
+      <div class="admin-estrellas">
+        <p class="admin-hint" style="margin-top:14px;">
+          ⭐ <strong>Otorgar Estrellas</strong> — escribe el ID corto arriba y regala/ajusta
+          créditos a cualquier usuaria, miss o asistente. Se suman a su saldo vigente y
+          vencen el día 2 del mes siguiente (con gracia de 7 días).
+        </p>
+        <button class="admin-btn" onclick="otorgarEstrellas()">Otorgar Estrellas ⭐</button>
+        <p id="admin-estrellas-out" class="admin-resultado" style="white-space:pre-line; text-align:left;"></p>
+      </div>
 
       <!-- Etiquetas de rol (curadas por admin, independientes del rank) -->
       <div class="admin-roles">
@@ -5148,6 +5253,7 @@
   let _misDiasStaff = new Set();  // STAFF: columnas (1-5) donde imparto clase
   let _filtroMisClases = false;   // STAFF: filtro "solo mis clases" activo
   let _soloApartadas   = false;   // STAFF: ocultar clases vacías (ver solo apartadas)
+  let _modoReservaStaff = false;  // STAFF: cuando true, el staff reserva como alumna (gasta ⭐)
 
   let slotsSeleccionados = new Set();
   let planActual = 'medio';
@@ -5187,8 +5293,9 @@
           div.appendChild(span);
 
           div.addEventListener('click', () => {
-            // STAFF/MISS: la celda es informativa -> abre "quién apartó", no selecciona.
-            if (window._miRank != null && window._miRank <= 2) {
+            // STAFF/MISS en modo staff: la celda es informativa -> abre "quién apartó".
+            // En "modo reservar" (_modoReservaStaff) el staff selecciona como alumna.
+            if (window._miRank != null && window._miRank <= 2 && !_modoReservaStaff) {
               abrirReservasSlot(div.dataset.slotId, row[0], i, tipo);
               return;
             }
@@ -5231,7 +5338,8 @@
 
       const sid = div.dataset.slotId;
       const dia = Number(div.dataset.dia);
-      const esStaff = (window._miRank != null && window._miRank <= 2);
+      // En "modo reservar" el staff se comporta como alumna (cupo + mi-reserva), no vista staff.
+      const esStaff = (window._miRank != null && window._miRank <= 2) && !_modoReservaStaff;
 
       // ── VISTA STAFF/MISS: cuántos apartaron + filtro de "mis días" ──
       // La celda es informativa (no se selecciona). El click abre "quién apartó".
@@ -5317,8 +5425,29 @@
     // Las MISSES (rank 2) arrancan viendo solo clases apartadas; dueño/admin ven todo.
     if (esStaff) { _soloApartadas = (window._miRank === 2); _syncSoloApartadasBtn(); }
     decorarHorario();
+    _iniciarListenersHorario(esStaff);   // TIEMPO REAL: cupos (todos) + reservas (staff)
   }
   window.cargarOverlayHorario = cargarOverlayHorario;
+
+  // ── TIEMPO REAL del calendario ─────────────────────────────────────────
+  // Suscribe cupos (todas) y reservas (staff) para que el "n/6"/"Lleno" y el
+  // "quién apartó" se refresquen en vivo cuando alguien aparta, sin recargar.
+  let _unsubCupos = null, _unsubReservas = null;
+  function _detenerListenersHorario() {
+    if (_unsubCupos)    { try { _unsubCupos(); }    catch(_){} _unsubCupos = null; }
+    if (_unsubReservas) { try { _unsubReservas(); } catch(_){} _unsubReservas = null; }
+  }
+  window._detenerListenersHorario = _detenerListenersHorario;
+  function _iniciarListenersHorario(esStaff) {
+    _detenerListenersHorario();
+    if (!window.usuarioActual) return;   // sin sesión no hay permiso de lectura (evita listener roto)
+    if (window.suscribirCupos) {
+      _unsubCupos = window.suscribirCupos((mapa) => { _cuposCache = mapa || {}; decorarHorario(); });
+    }
+    if (esStaff && window.suscribirReservas) {
+      _unsubReservas = window.suscribirReservas((mapa) => { _reservasPorSlot = mapa || {}; decorarHorario(); });
+    }
+  }
 
   // ── STAFF/MISS: modal "quién apartó esta clase" + filtro de mis días (T3-F) ──
   const _ESTADO_LBL = { pendiente_pago:'Pendiente', pago_reportado:'En confirmación', activa:'Activa' };
@@ -5373,6 +5502,28 @@
     _soloApartadas = !_soloApartadas;
     _syncSoloApartadasBtn();
     decorarHorario();
+  };
+
+  // STAFF: alterna entre "modo staff" (ver quién apartó / pasar lista) y
+  // "modo reservar" (apartar clases para sí misma gastando ⭐, como una alumna).
+  // Las misses también toman clases; esto les da el mismo flujo de reserva.
+  window.toggleModoReservaStaff = () => {
+    _modoReservaStaff = !_modoReservaStaff;
+    const btn = document.getElementById('staff-reservar-btn');
+    if (btn) {
+      btn.classList.toggle('activo', _modoReservaStaff);
+      btn.textContent = _modoReservaStaff ? '👀 Volver a modo staff' : '⭐ Reservar mi clase';
+    }
+    // Atenúa los filtros de staff cuando estás reservando (no aplican en ese modo).
+    ['staff-apartadas-btn','staff-filtro-btn','staff-cupo-btn'].forEach(id => {
+      const b = document.getElementById(id);
+      if (b) b.style.opacity = _modoReservaStaff ? '.4' : '';
+    });
+    const txt = document.querySelector('#horario-staff-bar .staff-bar-txt');
+    if (txt) txt.innerHTML = _modoReservaStaff
+      ? '<strong>Modo reservar:</strong> selecciona tus clases y confírmalas; se pagan con tus ⭐ Estrellas (1 ⭐ = 1 clase).'
+      : '<strong>Modo staff:</strong> toca cualquier clase para ver quién la apartó y pasar lista. Cupo máximo: 6 por clase.';
+    renderHorario(planActual);   // re-render limpia selección y aplica el modo
   };
 
   // Todos los slotIds reales de la rejilla (sin celdas 'empty'). Lo usa el staff
@@ -5532,6 +5683,7 @@
         (typeof out.nuevoSaldo === 'number' ? ' Te quedan ' + out.nuevoSaldo + ' ⭐.' : ''),
         { titulo: '✨ Clase agendada' });
       _reservaPendiente = null;
+      if (window.cargarOverlayHorario) window.cargarOverlayHorario();  // refresca "Apartada ✓" + cupo + re-suscribe en vivo
     }
     // sin_creditos / lleno / error: agendarConCredito ya mostró el aviso correspondiente.
   }
