@@ -1931,18 +1931,39 @@
     // publicado sus horas, se ven las clases disponibles de la academia (Lun–Vie).
     // Debe coincidir con `horarioBase` del grid de #horarios. inicio/fin + tipo por
     // día (0=Lun … 4=Vie). No son cancelables (son la parrilla base, informativa).
+    // `ini`/`fin` = etiqueta amistosa (12h, como el grid de #horarios). `min` =
+    // [inicioMin, finMin] en minutos 24h para poder EMPAREJAR con los horarios que
+    // publica el staff (el input usa 24h: "19:00"). Así, si una Miss se agenda a la
+    // misma franja de una clase, se UNE a esa clase en vez de salir en bloque aparte.
     const HORARIO_FIJO = [
-      ['8:00', '10:00', ['open','open','open','open','open']],
-      ['5:30', '7:00',  ['kids','kids','kids','kids','kids']],
-      ['7:00', '8:00',  ['flow','flex','flow','flex','flow']],
-      ['8:00', '9:00',  ['fit', 'aro', 'fit', 'aro', 'fit' ]],
+      { ini:'8:00', fin:'10:00', min:[8*60,      10*60], tipos:['open','open','open','open','open'] },
+      { ini:'5:30', fin:'7:00',  min:[17*60+30,  19*60], tipos:['kids','kids','kids','kids','kids'] },
+      { ini:'7:00', fin:'8:00',  min:[19*60,     20*60], tipos:['flow','flex','flow','flex','flow'] },
+      { ini:'8:00', fin:'9:00',  min:[20*60,     21*60], tipos:['fit', 'aro', 'fit', 'aro', 'fit' ] },
     ];
     const CLASE_NOMBRE_CAL = { kids:'Kids', flow:'Telas', fit:'Telas', flex:'Flex', aro:'Aro', open:'Open Gym' };
-    function renderBloqueFijo(inicio, fin, nombre){
-      return `<div class="cal-bloque cal-bloque-fijo">
+    // "19:00" / "7:00" / "5:30" → minutos desde medianoche (para comparar franjas).
+    function calMin(s){
+      const m = String(s||'').match(/(\d{1,2}):(\d{2})/);
+      return m ? (Number(m[1])*60 + Number(m[2])) : -1;
+    }
+    // `asignados` = horarios publicados (staff) que caen EXACTO en esta franja de clase.
+    function renderBloqueFijo(inicio, fin, nombre, asignados){
+      const misses = (asignados||[]).map(s=>{
+        const rk = RANKS[s.rank] || RANKS[RANK_DEFAULT];
+        const x = calPuedoCancelar(s)
+          ? `<button class="cal-x" title="Quitar a esta persona de la clase" onclick="cancelarHorario('${escapeHtml(s.id)}')">✕</button>` : '';
+        const nota = s.nota ? `<span class="cal-fijo-nota">${escapeHtml(s.nota)}</span>` : '';
+        return `<div class="cal-fijo-miss">
+            <span class="cal-fijo-miss-top">🦋 ${escapeHtml(s.nombre || 'Staff')}${x}</span>
+            <span class="rol-tag ${rk.clase}">${escapeHtml(rk.nombre)}</span>${nota}
+          </div>`;
+      }).join('');
+      const pie = misses || `<div class="cal-bloque-tag"><span class="cal-rec">clase</span></div>`;
+      return `<div class="cal-bloque cal-bloque-fijo${misses?' cal-bloque-conmiss':''}">
         <div class="cal-bloque-top"><span class="cal-bloque-hora">${escapeHtml(inicio)}–${escapeHtml(fin)}</span></div>
         <div class="cal-bloque-nombre">🎪 ${escapeHtml(nombre)}</div>
-        <div class="cal-bloque-tag"><span class="cal-rec">clase</span></div>
+        ${pie}
       </div>`;
     }
 
@@ -2007,14 +2028,23 @@
         const esHoy = calFechaISO(date) === hoyISO;
         const head = `<div class="cal-colhead ${esHoy?'cal-colhead-hoy':''}">${DIAS_LARGO[i].slice(0,3)}<span>${date.getDate()}/${date.getMonth()+1}</span></div>`;
         // Base fija de clases (Lun–Vie): se ve siempre, sin importar el filtro.
+        // Los horarios publicados que caen EXACTO en una franja de clase se UNEN a
+        // ella (la Miss aparece dentro de la clase); los demás van como bloque propio.
         let fijos = '';
+        const usados = new Set();
         if (i <= 4) {
           fijos = HORARIO_FIJO.map(r => {
-            const tipo = r[2][i];
-            return tipo ? renderBloqueFijo(r[0], r[1], CLASE_NOMBRE_CAL[tipo] || 'Clase') : '';
+            const tipo = r.tipos[i];
+            if (!tipo) return '';
+            const asignados = cols[i].filter(s => {
+              const ok = calMin(s.inicio) === r.min[0] && calMin(s.fin) === r.min[1];
+              if (ok) usados.add(s.id);
+              return ok;
+            });
+            return renderBloqueFijo(r.ini, r.fin, CLASE_NOMBRE_CAL[tipo] || 'Clase', asignados);
           }).join('');
         }
-        const publicados = cols[i].map(renderBloque).join('');
+        const publicados = cols[i].filter(s => !usados.has(s.id)).map(renderBloque).join('');
         const body = (fijos || publicados) ? (fijos + publicados) : `<div class="cal-vacio-dia">—</div>`;
         return `<div class="cal-col">${head}${body}</div>`;
       }).join('');
@@ -3676,6 +3706,13 @@
     .cal-bloque-fijo { background:rgba(255,204,0,.07); border:1px dashed rgba(255,204,0,.35); }
     .cal-bloque-fijo .cal-bloque-hora { color:var(--amarillo); font-size:.78rem; }
     .cal-bloque-fijo .cal-bloque-nombre { font-size:.76rem; }
+    /* Cuando la clase fija ya tiene Miss(es) asignada(s): borde sólido amarillo. */
+    .cal-bloque-conmiss { background:rgba(255,204,0,.12); border-style:solid; border-color:rgba(255,204,0,.5); }
+    .cal-fijo-miss { display:flex; flex-direction:column; gap:3px; margin-top:6px; padding-top:6px;
+      border-top:1px dashed rgba(255,204,0,.25); }
+    .cal-fijo-miss-top { display:flex; align-items:center; justify-content:space-between; gap:6px;
+      color:#fff; font-size:.76rem; font-weight:600; }
+    .cal-fijo-nota { color:rgba(255,255,255,.6); font-size:.68rem; }
     .cal-pie { text-align:center; color:rgba(255,255,255,.4); font-size:.75rem; margin-top:14px; }
     .hm-warn { background:rgba(255,180,0,.12); border:1px solid rgba(255,180,0,.3); border-radius:8px;
       color:#ffd98a; font-size:.74rem; line-height:1.5; padding:9px 11px; margin:14px 0 0; text-align:left; }
