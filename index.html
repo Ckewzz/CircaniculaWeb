@@ -2038,6 +2038,36 @@
       const abrir = body.style.display === 'none' || !body.style.display;
       body.style.display = abrir ? 'block' : 'none';
       if (btn) btn.textContent = abrir ? '⚙️ Cerrar Panel de Control ▴' : '⚙️ Abrir Panel de Control ▾';
+      if (abrir) poblarSelectAlumnas();   // llena el menú de alumnas (nombre + ID) al abrir
+    };
+
+    // Menú desplegable de alumnas (nombre + ID corto) para el panel del Dueño.
+    // Al elegir una, escribe su ID en #admin-id-input (que usan TODAS las acciones).
+    // Así no hay que teclear el ID a mano.
+    async function poblarSelectAlumnas() {
+      const sel = document.getElementById('admin-alumna-select');
+      if (!sel) return;
+      sel.innerHTML = '<option value="">Cargando alumnas…</option>';
+      try {
+        const snap = await getDocs(collection(db, "usuarios"));
+        const gente = snap.docs.map(d => {
+          const x = d.data();
+          return { id: x.userIdCorto || '', nombre: x.nombreVisible || x.handle || '(sin nombre)', rank: (typeof x.rank === 'number' ? x.rank : 4) };
+        }).filter(p => p.id)
+          .sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
+        if (!gente.length) { sel.innerHTML = '<option value="">No hay personas registradas</option>'; return; }
+        sel.innerHTML = '<option value="">— Elige a una persona —</option>' +
+          gente.map(p => `<option value="${escapeHtml(p.id)}">${escapeHtml(p.nombre)} · ${escapeHtml(p.id)}</option>`).join('');
+      } catch (e) {
+        console.error('poblarSelectAlumnas:', e);
+        sel.innerHTML = '<option value="">Error al cargar (usa el ID manual)</option>';
+      }
+    }
+    window.poblarSelectAlumnas = poblarSelectAlumnas;
+    // Al elegir del menú, copia el ID al campo de texto compartido.
+    window.seleccionarAlumna = (id) => {
+      const inp = document.getElementById('admin-id-input');
+      if (inp) inp.value = (id || '').trim().toUpperCase();
     };
 
     window.calCargarStaff = async () => {
@@ -2186,8 +2216,19 @@
         const compra = new URLSearchParams(window.location.search).get('compra');
         if (compra === 'creditos_ok') {
           setTimeout(() => cargarPerfil(user.uid), 1500); // dar margen al webhook
-          uiAlert('¡Compra recibida! Tus créditos se reflejarán en unos segundos.', { titulo: '⭐ Estrellas' });
           history.replaceState({}, '', '/');
+          // Flujo hoy: COMPRAR → luego SUGERIR APARTAR. Tras acreditar, invitamos a
+          // apartar sus clases (cada ⭐ = 1 clase; apartar gasta una Estrella ya en saldo).
+          (async () => {
+            const ir = await uiConfirm(
+              '¡Compra recibida! Tus Estrellas se reflejarán en unos segundos. ¿Quieres apartar tus clases ahora?',
+              { titulo: '⭐ ¡Listo!', okText: 'Ir a Apartar Clases', cancelText: 'Más tarde' });
+            if (ir) {
+              const s = document.getElementById('horarios');
+              if (s) { s.style.display = 'block'; s.scrollIntoView({ behavior: 'smooth' }); }
+              if (window.cargarOverlayHorario) window.cargarOverlayHorario();
+            }
+          })();
         } else if (compra === 'cancelada') {
           history.replaceState({}, '', '/');
         }
@@ -2499,6 +2540,7 @@
         acciones = `<div class="sr-acciones">
             <button class="sr-btn sr-ok" onclick="confirmarPagoReserva('${id}')">Confirmar pago ✅</button>
             <button class="sr-btn sr-no" onclick="cancelarReservaStaff('${id}')">Cancelar</button>
+            <button class="sr-btn sr-del" onclick="borrarReservaStaff('${id}')" title="Eliminar de la lista (reservas viejas que ya no se procesarán)">🗑️ Eliminar</button>
           </div>`;
       } else if (activa) {
         acciones = `<div class="sr-acciones">
@@ -2590,6 +2632,33 @@
         if (window.sincronizarCupos) window.sincronizarCupos(); // libera el lugar en el cupo
         cargarReservasStaff();
       } catch (e) { console.error('cancelarReservaStaff:', e); await uiAlert('No se pudo cancelar: ' + e.message, { titulo: 'Error', peligro: true }); }
+    };
+    // Eliminar DEFINITIVAMENTE una reserva (para las viejas del flujo de Google
+    // Calendar que ya no se procesarán). Libera cupo por si acaso.
+    window.borrarReservaStaff = async (id) => {
+      if (!(await uiConfirm('¿Eliminar esta reserva de forma permanente?\n\nÚsalo para reservas viejas que ya NO se van a procesar. Esta acción no se puede deshacer.', { titulo: 'Eliminar reserva', okText: 'Sí, eliminar', cancelText: 'No', peligro: true }))) return;
+      try {
+        await deleteDoc(doc(db, "reservas", id));
+        if (window.sincronizarCupos) window.sincronizarCupos(); // libera el lugar en el cupo
+        cargarReservasStaff();
+      } catch (e) { console.error('borrarReservaStaff:', e); await uiAlert('No se pudo eliminar: ' + e.message, { titulo: 'Error', peligro: true }); }
+    };
+    // Borrado masivo de TODAS las reservas por procesar (pendiente_pago + pago_reportado).
+    // Pensado para limpiar de un jalón las reservas viejas del calendario de Google.
+    window.borrarPendientesViejas = async () => {
+      try {
+        const snap = await getDocs(query(collection(db, "reservas")));
+        const viejas = snap.docs.filter(d => ['pendiente_pago', 'pago_reportado'].includes(d.data().estado));
+        if (!viejas.length) { await uiAlert('No hay reservas por procesar para eliminar.', { titulo: 'Nada que borrar' }); return; }
+        if (!(await uiConfirm('Se eliminarán DEFINITIVAMENTE ' + viejas.length + ' reserva(s) por procesar (pendientes y con pago reportado).\n\nÚsalo para limpiar las reservas viejas del calendario de Google. Esta acción no se puede deshacer.', { titulo: 'Eliminar pendientes viejas', okText: 'Sí, eliminar ' + viejas.length, cancelText: 'Cancelar', peligro: true }))) return;
+        let ok = 0, fail = 0;
+        for (const d of viejas) {
+          try { await deleteDoc(doc(db, "reservas", d.id)); ok++; } catch (e) { console.warn('del reserva:', d.id, e.code || e); fail++; }
+        }
+        if (window.sincronizarCupos) window.sincronizarCupos();
+        cargarReservasStaff();
+        await uiAlert('Listo. Eliminadas: ' + ok + (fail ? (' · Con error: ' + fail) : '') + '.', { titulo: 'Limpieza terminada' });
+      } catch (e) { console.error('borrarPendientesViejas:', e); await uiAlert('No se pudo completar: ' + e.message, { titulo: 'Error', peligro: true }); }
     };
     window.cargarReservasStaff = cargarReservasStaff;
 
@@ -3535,6 +3604,8 @@
     .sr-btn:hover { transform:translateY(-1px); filter:brightness(1.08); }
     .sr-ok { background:linear-gradient(135deg,#1db954,#0e7a37); color:#fff; }
     .sr-no { background:rgba(255,255,255,.10); color:rgba(255,255,255,.85); }
+    .sr-del { background:rgba(220,53,69,.16); color:#ff8a95; border:1px solid rgba(220,53,69,.35); }
+    .sr-btn-limpiar { background:rgba(220,53,69,.14); color:#ff8a95; border:1px solid rgba(220,53,69,.35); margin-left:6px; }
     .sr-empty { text-align:center; color:rgba(255,255,255,.5); font-size:.85rem; padding:14px 0; }
     /* Tarjeta de reserva enriquecida (plan legible + horarios + fechas) */
     .sr-plan-badge { display:inline-block; margin-top:4px; font-size:.74rem; font-weight:700;
@@ -4702,9 +4773,15 @@
       <button id="admin-toggle" class="admin-toggle" onclick="toggleAdminPanel()">⚙️ Abrir Panel de Control ▾</button>
       <div id="admin-panel-body" style="display:none;">
         <h3 class="perfil-sub" style="margin-top:6px;">⚙️ Panel del Dueño</h3>
-        <p class="admin-hint">Escribe el <strong>ID corto</strong> de la persona (lo ve en su perfil). Se usa en TODAS las acciones de abajo. Abre solo la sección que necesites.</p>
+        <p class="admin-hint">Elige a la persona en el <strong>menú de alumnas</strong> (nombre + ID) o escribe su <strong>ID corto</strong> a mano. Se usa en TODAS las acciones de abajo. Abre solo la sección que necesites.</p>
         <div class="admin-row">
-          <input id="admin-id-input" class="admin-input" type="text" placeholder="CIRCA-XXXXX" autocomplete="off">
+          <select id="admin-alumna-select" class="admin-input" onchange="seleccionarAlumna(this.value)">
+            <option value="">— Elige a una persona —</option>
+          </select>
+        </div>
+        <div class="admin-row">
+          <input id="admin-id-input" class="admin-input" type="text" placeholder="CIRCA-XXXXX (o elige arriba)" autocomplete="off">
+          <button class="admin-btn" onclick="poblarSelectAlumnas()" title="Recargar el menú de alumnas" style="flex:0 0 auto;">↻</button>
         </div>
 
         <!-- Otorgar rango -->
@@ -4799,6 +4876,7 @@
         <p class="sr-empty">Cargando…</p>
       </div>
       <button class="admin-btn" onclick="cargarReservasStaff()" style="margin-top:6px;">↻ Actualizar</button>
+      <button class="admin-btn sr-btn-limpiar" onclick="borrarPendientesViejas()" style="margin-top:6px;" title="Elimina de un jalón todas las reservas por procesar (viejas del calendario de Google)">🗑️ Eliminar pendientes viejas</button>
     </div>
 
     <div class="comunidad-links">
