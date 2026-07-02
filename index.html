@@ -2867,7 +2867,7 @@
       opacity: 0;
       transition: opacity 2.2s ease-in-out;
     }
-    .bg-slide.active { opacity: 1; }
+    .bg-slide.active { opacity: .9; }
     #bg-overlay {
       position: fixed;
       inset: 0;
@@ -3042,6 +3042,13 @@
 
     /* ===== SECCIÓN BASE ===== */
     .seccion { padding:90px 50px; position:relative; }
+    /* Línea de separación entre secciones (para que no se pierdan entre sí) */
+    .seccion::before {
+      content:''; position:absolute; top:0; left:50%; transform:translateX(-50%);
+      width:min(280px, 62%); height:1px;
+      background:linear-gradient(90deg, transparent, rgba(255,204,0,.4), transparent);
+      pointer-events:none;
+    }
     .seccion-header { margin-bottom:50px; }
     .seccion-eyebrow {
       font-family:'Cinzel',serif;
@@ -3254,18 +3261,29 @@
     .plan-btn:hover:not(.activo) { border-color:rgba(255,204,0,.4); color:var(--amarillo); }
     .plan-info-badge { margin-bottom:22px; font-size:.78rem; opacity:.5; }
     .plan-info-badge strong { color:var(--amarillo); font-weight:600; }
-    .horario-grid { width:100%; border-collapse:collapse; font-size:.72rem; }
+    .horario-wrap { width:100%; }
+    .horario-grid { width:100%; table-layout:fixed; border-collapse:collapse; font-size:.72rem; }
     .horario-grid th {
       font-family:'Cinzel',serif; font-size:.58rem;
-      letter-spacing:2px; text-transform:uppercase;
-      padding:11px 7px; border-bottom:1px solid rgba(255,204,0,.2);
+      letter-spacing:1.5px; text-transform:uppercase;
+      padding:11px 4px; border-bottom:1px solid rgba(255,204,0,.2);
       color:var(--amarillo); text-align:center; background:rgba(0,0,0,.3);
     }
-    .horario-grid td { border:1px solid rgba(255,255,255,.04); padding:8px 5px; text-align:center; vertical-align:middle; }
+    .horario-grid th.th-hora { width:52px; }
+    .horario-grid td { border:1px solid rgba(255,255,255,.04); padding:8px 4px; text-align:center; vertical-align:middle; }
     .horario-grid .hora-col {
-      font-family:'Cinzel',serif; font-size:.58rem;
-      letter-spacing:1px; color:rgba(240,237,230,.3);
-      background:rgba(0,0,0,.2); white-space:nowrap;
+      font-family:'Cinzel',serif; font-size:.55rem;
+      letter-spacing:0; color:rgba(240,237,230,.3);
+      background:rgba(0,0,0,.2); white-space:nowrap; width:52px;
+    }
+    /* Móvil / PWA: la tabla siempre cabe sin scroll lateral */
+    @media (max-width:560px) {
+      .horario-grid { font-size:.6rem; }
+      .horario-grid th { letter-spacing:.5px; padding:8px 2px; font-size:.5rem; }
+      .horario-grid th.th-hora { width:38px; }
+      .horario-grid td { padding:5px 2px; }
+      .horario-grid .hora-col { font-size:.46rem; width:38px; }
+      .clase-cell { padding:8px 2px !important; font-size:.52rem !important; min-height:44px !important; letter-spacing:0 !important; }
     }
     .clase-cell {
       border-radius:3px; padding:7px 5px;
@@ -4634,12 +4652,12 @@
       <button class="staff-filtro-btn" id="staff-filtro-btn" onclick="toggleFiltroMisClases()">Ver solo mis clases</button>
       <button class="staff-filtro-btn staff-cupo-btn" id="staff-cupo-btn" onclick="staffSincronizarCupos(this)">Actualizar cupos</button>
     </div>
-    <div style="overflow-x:auto;">
+    <div class="horario-wrap">
       <table class="horario-grid">
         <thead>
           <tr>
-            <th style="width:100px">Hora</th>
-            <th>Lunes</th><th>Martes</th><th>Miércoles</th><th>Jueves</th><th>Viernes</th>
+            <th class="th-hora">Hora</th>
+            <th>Lun</th><th>Mar</th><th>Mier</th><th>Jue</th><th>Vier</th>
           </tr>
         </thead>
         <tbody id="horario-body"></tbody>
@@ -4659,7 +4677,7 @@
   </p>
   <button class="btn-confirmar-horario" id="btn-confirmar" disabled
     onclick="confirmarHorario()">
-    Confirmar y continuar al pago →
+    Confirmar Reserva(s) →
   </button>
 </div>
 
@@ -4672,10 +4690,10 @@
     <label class="nombre-modal-label" for="nombre-modal-input">Tu nombre completo</label>
     <input id="nombre-modal-input" type="text" class="nombre-modal-input"
            placeholder="Nombre y apellido" autocomplete="name">
-    <p class="nombre-modal-nota">Al continuar serás redirigido a Stripe para completar el pago de forma segura.</p>
+    <p class="nombre-modal-nota">Tu reserva se agenda con tus Estrellas ⭐ (1 ⭐ por clase). El pago de Estrellas se realiza aparte, desde el botón <strong>⭐ Estrellas</strong> en tu perfil.</p>
     <div class="nombre-modal-btns">
       <button class="nombre-modal-cancel" onclick="cerrarNombreModal()">Cancelar</button>
-      <button class="nombre-modal-ok" onclick="continuarAlPago()">Continuar al pago →</button>
+      <button class="nombre-modal-ok" onclick="continuarAlPago()">Confirmar Reserva →</button>
     </div>
   </div>
 </div>
