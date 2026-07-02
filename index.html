@@ -3259,8 +3259,20 @@
     }
     .plan-btn.activo { background:var(--amarillo); color:var(--negro); border-color:var(--amarillo); }
     .plan-btn:hover:not(.activo) { border-color:rgba(255,204,0,.4); color:var(--amarillo); }
-    .plan-info-badge { margin-bottom:22px; font-size:.78rem; opacity:.5; }
+    .plan-info-badge { margin-bottom:12px; font-size:.78rem; opacity:.5; }
     .plan-info-badge strong { color:var(--amarillo); font-weight:600; }
+    /* Aviso de SEMANA ACTUAL — burbuja amarilla de marca, letras negras */
+    .semana-aviso {
+      display:inline-flex; align-items:center; gap:8px;
+      margin-bottom:22px; padding:8px 16px;
+      background:var(--amarillo); color:#111;
+      border-radius:999px; font-size:.76rem; font-weight:600;
+      letter-spacing:.2px; line-height:1.3;
+      box-shadow:0 4px 14px rgba(255,204,0,.28);
+    }
+    .semana-aviso .semana-aviso-txt strong { font-weight:800; }
+    .semana-aviso .semana-aviso-ico { font-size:.95rem; }
+    @media (max-width:560px) { .semana-aviso { font-size:.68rem; padding:7px 13px; } }
     .horario-wrap { width:100%; }
     .horario-grid { width:100%; table-layout:fixed; border-collapse:collapse; font-size:.72rem; }
     .horario-grid th {
@@ -4644,6 +4656,10 @@
       <button class="plan-btn" data-plan="avanzado">Plan Avanzado</button>
     </div>
     <p class="plan-info-badge" id="plan-info">Plan seleccionado: <strong>Medio</strong> — Selecciona hasta <strong>5 clases</strong> por semana</p>
+    <div class="semana-aviso" id="semana-aviso" title="Solo apartas las clases de esta semana">
+      <span class="semana-aviso-ico">📅</span>
+      <span class="semana-aviso-txt">Mostrando la <strong>semana actual</strong> · <span id="semana-rango">—</span></span>
+    </div>
     <!-- Barra STAFF/MISS: control de vista del calendario (T3-F). Oculta para alumnos. -->
     <div class="horario-staff-bar" id="horario-staff-bar">
       <span class="staff-bar-txt"><strong>Modo staff:</strong> toca cualquier clase para ver quién la apartó y pasar lista. Cupo máximo: 6 por clase.</span>
@@ -5526,10 +5542,29 @@
   let slotsSeleccionados = new Set();
   let planActual = 'medio';
 
+  // Aviso de SEMANA ACTUAL: calcula Lun–Vie de la semana en curso y lo pinta en la
+  // burbuja amarilla, para que quede claro que solo se apartan las clases de ESTA
+  // semana (no todos los martes/jueves del mes).
+  function actualizarAvisoSemana() {
+    const cont = document.getElementById('semana-rango');
+    if (!cont) return;
+    const lunes = (typeof calLunes === 'function') ? calLunes(new Date())
+      : (() => { const x=new Date(); const g=x.getDay(); x.setDate(x.getDate()+(g===0?-6:1-g)); x.setHours(0,0,0,0); return x; })();
+    const viernes = new Date(lunes); viernes.setDate(lunes.getDate() + 4);
+    const fmt = (d, conAnio) => d.toLocaleDateString('es-MX',
+      conAnio ? { day:'numeric', month:'short', year:'numeric' } : { day:'numeric', month:'short' });
+    const mismoMes = lunes.getMonth() === viernes.getMonth();
+    cont.textContent = mismoMes
+      ? `${lunes.getDate()}–${fmt(viernes, true)}`
+      : `${fmt(lunes)} al ${fmt(viernes, true)}`;
+  }
+  window.actualizarAvisoSemana = actualizarAvisoSemana;
+
   function renderHorario(plan) {
     planActual = plan;
     slotsSeleccionados.clear();
     actualizarContador();
+    actualizarAvisoSemana();
     const maxSlots = planHoras[plan];
     const body = document.getElementById('horario-body');
     body.innerHTML = '';
