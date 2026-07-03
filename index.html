@@ -1853,6 +1853,30 @@
         statsHtml = '<p class="pm-oculto">Esta persona mantiene sus stats en privado.</p>';
       }
 
+      // EDITOR DE STATS (solo staff de clase, Rank ≤ 2: Dueño/Admin/Instructoras).
+      // Las reglas de Firestore ya permiten a Rank ≤ 2 escribir 'nivel'. Sube/baja
+      // los 6 puntajes (0–10) de la alumna del perfil abierto.
+      let staffStatsHtml = '';
+      if (window._miRank != null && window._miRank <= 2) {
+        const nivelActual = { flexibilidad:0,fuerza:0,resistencia:0,tecnica:0,caida:0,interpretacion:0, ...(d.nivel||{}) };
+        const inputs = STATS_DEF.map(s => `
+          <label class="pm-stat-row">
+            <span class="pm-stat-lbl">${s.label}</span>
+            <input type="number" id="stat-edit-${s.key}" class="pm-stat-input"
+                   min="0" max="10" step="1" value="${Math.max(0,Math.min(10, nivelActual[s.key]||0))}">
+          </label>`).join('');
+        staffStatsHtml = `
+          <details class="pm-stats-editor">
+            <summary>✏️ Otorgar / editar stats</summary>
+            <div class="pm-stats-editor-body">
+              <p class="pm-stats-hint">Puntajes de 0 a 10. Se reflejan al instante en su radar y títulos.</p>
+              ${inputs}
+              <button class="admin-btn" onclick="otorgarStatsPerfil('${id}', this)">Guardar stats</button>
+              <p id="pm-stats-out" class="admin-resultado" style="text-align:center;"></p>
+            </div>
+          </details>`;
+      }
+
       const card = document.getElementById('perfil-modal-card');
       if (card) card.innerHTML = `
         <button class="pm-close" onclick="cerrarPerfilModal()" aria-label="Cerrar">×</button>
@@ -1860,9 +1884,38 @@
         <div class="pm-nombre">${nombre}</div>
         ${apodo}
         <div class="pm-tags">${tags}</div>
-        ${statsHtml}`;
+        ${statsHtml}
+        ${staffStatsHtml}`;
       const m = document.getElementById('perfil-modal');
       if (m) m.style.display = 'flex';
+    };
+
+    // STAFF (Rank ≤ 2): guarda los stats de la alumna del perfil abierto. Lee los 6
+    // inputs, arma el objeto nivel y hace updateDoc (las reglas validan Rank ≤ 2).
+    window.otorgarStatsPerfil = async (id, btn) => {
+      const out = document.getElementById('pm-stats-out');
+      const nivel = {};
+      for (const s of STATS_DEF) {
+        const el = document.getElementById('stat-edit-' + s.key);
+        let v = Math.round(Number(el && el.value) || 0);
+        nivel[s.key] = Math.max(0, Math.min(10, v));
+      }
+      if (btn) { btn.disabled = true; btn.textContent = 'Guardando...'; }
+      try {
+        await updateDoc(doc(db, "usuarios", id), { nivel });
+        if (out) out.textContent = '✅ Stats actualizados.';
+        // Refresca la caché local y el radar del modal sin cerrarlo.
+        const item = _dirCache.find(x => x._id === id);
+        if (item) item.nivel = nivel;
+        const radarEl = document.querySelector('#perfil-modal-card .pm-radar');
+        if (radarEl) radarEl.innerHTML = construirRadar(nivel);
+        if (window.buscarPerfiles) buscarPerfiles();
+      } catch (e) {
+        console.error('otorgarStatsPerfil:', e);
+        if (out) out.textContent = '❌ No se pudo guardar (' + ((e && (e.code||e.message)) || 'error') + ').';
+      } finally {
+        if (btn) { btn.disabled = false; btn.textContent = 'Guardar stats'; }
+      }
     };
     window.cerrarPerfilModal = () => {
       const m = document.getElementById('perfil-modal');
@@ -2292,6 +2345,7 @@
           else userFoto.style.display = 'none';
         }
         if(userName)  userName.textContent = (user.displayName || 'Mi cuenta').split(' ')[0];
+        const fabP = document.getElementById('fab-perfil'); if (fabP) fabP.style.display = 'inline-flex';
         if(misClases) misClases.style.display = 'block';
         // Comunidad (directorio + colaboradores): visibles y autocargados al entrar
         const comunidad = document.getElementById('comunidad');
@@ -2324,6 +2378,7 @@
         if(btnLogin)  btnLogin.style.display  = 'inline-flex';
         if(btnLogout) btnLogout.style.display = 'none';
         if(userInfo)  userInfo.style.display  = 'none';
+        const fabP = document.getElementById('fab-perfil'); if (fabP) fabP.style.display = 'none';
         if(misClases) misClases.style.display = 'none';
         const comunidad = document.getElementById('comunidad');
         const colabSec  = document.getElementById('colaboradores');
@@ -2884,6 +2939,21 @@
       display:flex; flex-direction:column; align-items:center; gap:14px;
     }
     @media (max-width:900px){ .nav-dots-float { display:none; } }
+    /* FAB "Mi Perfil" — botón amarillo flotante abajo a la derecha (colores de marca) */
+    .fab-perfil {
+      position:fixed; right:18px; bottom:20px; z-index:9000;
+      display:inline-flex; align-items:center; gap:8px;
+      padding:12px 20px; border:none; border-radius:999px; cursor:pointer;
+      background:var(--amarillo); color:#111;
+      font-family:'Cinzel',serif; font-weight:700; font-size:.82rem; letter-spacing:.5px;
+      box-shadow:0 8px 24px rgba(255,204,0,.35);
+      transition:transform .2s, box-shadow .2s;
+      padding-bottom:calc(12px + env(safe-area-inset-bottom));
+    }
+    .fab-perfil:hover { transform:translateY(-2px); box-shadow:0 12px 30px rgba(255,204,0,.5); }
+    .fab-perfil:active { transform:translateY(0); }
+    .fab-perfil .fab-perfil-ico { font-size:1.05rem; }
+    @media (max-width:560px){ .fab-perfil { right:14px; bottom:16px; padding:11px 17px; font-size:.74rem; } }
     .nav-dot {
       width:7px; height:7px;
       border-radius:50%;
@@ -3650,6 +3720,20 @@
     .pm-radar { margin:10px auto 0; max-width:300px; }
     .pm-titulos { display:flex; flex-wrap:wrap; gap:6px; justify-content:center; margin-top:12px; }
     .pm-oculto { color:rgba(255,255,255,.5); font-size:.82rem; margin-top:16px; }
+    /* Editor de stats (staff) dentro del modal de perfil */
+    .pm-stats-editor { margin-top:18px; text-align:left; border-top:1px solid rgba(255,204,0,.18); padding-top:14px; }
+    .pm-stats-editor > summary { cursor:pointer; color:var(--amarillo); font-family:'Cinzel',serif; font-size:.82rem; letter-spacing:.5px; list-style:none; }
+    .pm-stats-editor > summary::-webkit-details-marker { display:none; }
+    .pm-stats-editor-body { margin-top:12px; }
+    .pm-stats-hint { font-size:.72rem; opacity:.55; margin-bottom:10px; }
+    .pm-stat-row { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:8px; }
+    .pm-stat-lbl { font-size:.8rem; opacity:.85; }
+    .pm-stat-input {
+      width:70px; padding:7px 9px; text-align:center;
+      background:rgba(255,255,255,.06); border:1px solid rgba(255,204,0,.25);
+      border-radius:8px; color:var(--crema,#f0ede6); font-size:.85rem;
+    }
+    .pm-stat-input:focus { outline:none; border-color:var(--amarillo); }
 
     /* ===== PANEL STAFF · CONFIRMACIÓN DE PAGOS ===== */
     .sr-panel { max-width:560px; margin:1.4rem auto 0; background:rgba(255,255,255,.04);
@@ -4410,6 +4494,12 @@
       </div>
     </nav>
   </header>
+
+  <!-- BOTÓN FLOTANTE "MI PERFIL" (visible solo con sesión) -->
+  <button id="fab-perfil" class="fab-perfil" onclick="irAMiCuenta()" title="Ir a Mi Perfil" style="display:none;">
+    <span class="fab-perfil-ico">👤</span>
+    <span class="fab-perfil-txt">Mi Perfil</span>
+  </button>
 
   <!-- HERO -->
   <section id="inicio">
