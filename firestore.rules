@@ -161,6 +161,21 @@ service cloud.firestore {
         && unchangedOrNew('cuentaActiva')
         && (request.resource.data.apodo == resource.data.apodo || myRank() <= 3);
 
+      // TRANSFERIR ESTRELLAS (a una Alumna Externa): el staff de clase (Rank ≤ 2)
+      // puede REDUCIR su PROPIO saldo de créditos para transferirlo. Solo BAJA
+      // (nunca sube: no se pueden acuñar Estrellas), y no toca nada más. La otra
+      // mitad (sumar a la Externa) va en usuarios_manual, que es de este mismo staff.
+      allow update: if isOwner(uid) && isStaffClase()
+        && request.resource.data.creditos is int
+        && request.resource.data.creditos >= 0
+        && request.resource.data.creditos < resource.data.creditos
+        && request.resource.data.rank == resource.data.rank
+        && unchangedOrNew('creditosExpiran')
+        && unchangedOrNew('nivel') && unchangedOrNew('titulos') && unchangedOrNew('eventos')
+        && unchangedOrNew('userIdCorto') && unchangedOrNew('handle')
+        && unchangedOrNew('imparteClases') && unchangedOrNew('colaborador')
+        && unchangedOrNew('cuentaActiva') && unchangedOrNew('apodo');
+
       // ELIMINAR LA PROPIA CUENTA: cada quien puede borrar SU perfil (la opción
       // "Eliminar mi cuenta"). El Dueño NO se puede borrar a otro desde el cliente
       // (eso requiere Admin SDK); para "quitar" a un tercero usa cuentaActiva:false
@@ -304,8 +319,11 @@ service cloud.firestore {
     //  lo ve y lo edita; estas personas no pueden iniciar sesión ni tocar nada más.
     //  { nombre, telefono, email, notas, asistencias:[{fecha,clase}], creadoPor,
     //    creadoEn, tenantId, manual:true }
+    //  ALUMNAS EXTERNAS: las gestiona TODO el staff de clase (Rank ≤ 2: Dueño,
+    //  Administración e Instructoras). Crean, editan, les transfieren Estrellas y
+    //  les apartan lugares. Aisladas del flujo de pago real (colección aparte).
     match /usuarios_manual/{id} {
-      allow read, write: if isAdmin();
+      allow read, write: if isStaffClase();
     }
 
     // Todo lo demás: denegado.

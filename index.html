@@ -324,14 +324,26 @@
           (campos || []).forEach((c) => {
             const wrap = document.createElement('label'); wrap.className = 'ui-dlg-fieldwrap';
             if (c.label) { const lb = document.createElement('span'); lb.className = 'ui-dlg-label'; lb.textContent = c.label; wrap.appendChild(lb); }
-            const inp = c.multiline ? document.createElement('textarea') : document.createElement('input');
-            if (c.multiline) inp.rows = c.rows || 3; else inp.type = c.tipo || 'text';
+            let inp;
+            if (Array.isArray(c.opciones)) {           // campo tipo <select> (lista de opciones)
+              inp = document.createElement('select');
+              c.opciones.forEach(o => {
+                const op = document.createElement('option');
+                if (o && typeof o === 'object') { op.value = o.value; op.textContent = o.label != null ? o.label : o.value; }
+                else { op.value = o; op.textContent = o; }
+                inp.appendChild(op);
+              });
+              if (c.valor != null) inp.value = c.valor;
+            } else {
+              inp = c.multiline ? document.createElement('textarea') : document.createElement('input');
+              if (c.multiline) inp.rows = c.rows || 3; else inp.type = c.tipo || 'text';
+              if (c.valor != null) inp.value = c.valor;
+              if (c.placeholder) inp.placeholder = c.placeholder;
+              if (c.maxlength) inp.maxLength = c.maxlength;
+              if (c.min != null) inp.min = c.min;   // p.ej. fecha mínima (hoy) en inputs date/number
+              if (c.max != null) inp.max = c.max;
+            }
             inp.className = 'ui-dlg-input';
-            if (c.valor != null) inp.value = c.valor;
-            if (c.placeholder) inp.placeholder = c.placeholder;
-            if (c.maxlength) inp.maxLength = c.maxlength;
-            if (c.min != null) inp.min = c.min;   // p.ej. fecha mínima (hoy) en inputs date/number
-            if (c.max != null) inp.max = c.max;
             inputs[c.id] = inp; wrap.appendChild(inp); card.appendChild(wrap);
           });
           const btns = document.createElement('div'); btns.className = 'ui-dlg-btns';
@@ -902,6 +914,15 @@
           const verPanel = esStaffClase(rank);
           staffReservasPanel.style.display = verPanel ? 'block' : 'none';
           if (verPanel) cargarReservasStaff();
+        }
+
+        // Panel de Alumnas Externas: staff de clase (Rank ≤ 2). Aquí las misses
+        // crean/transfieren Estrellas/apartan/marcan asistencia a las externas.
+        const externasPanel = document.getElementById('externas-panel');
+        if (externasPanel) {
+          const verExt = esStaffClase(rank);
+          externasPanel.style.display = verExt ? 'block' : 'none';
+          if (verExt && window.listarAlumnasManual) listarAlumnasManual();
         }
 
         // Teléfono propio (desde doc privado). Solo lo ve el dueño aquí.
@@ -1685,14 +1706,14 @@
     window.crearAlumnaManual = async () => {
       const out = document.getElementById('admin-manual-out');
       const datos = await uiForm({
-        titulo: '🧾 Alumna de mostrador',
-        mensaje: 'Sin cuenta ni Estrellas. Solo para llevar su asistencia a mano.',
+        titulo: '🎟️ Alumna Externa',
+        mensaje: 'Para quien no crea su cuenta o no tiene teléfono. No inicia sesión; el staff le lleva asistencia y le aparta lugares (con Estrellas que tú le transfieres).',
         okText: 'Agregar',
         campos: [
           { id:'nombre',   label:'Nombre',   placeholder:'Ej. María González', maxlength:60 },
           { id:'telefono', label:'Teléfono (opcional)', placeholder:'6621234567', tipo:'tel', maxlength:20 },
           { id:'email',    label:'Correo (opcional)', placeholder:'correo@ejemplo.com', tipo:'email', maxlength:120 },
-          { id:'notas',    label:'Notas (opcional)', placeholder:'Ej. paga semanal', maxlength:200, multiline:true }
+          { id:'notas',    label:'Notas (opcional)', placeholder:'Ej. paga en efectivo', maxlength:200, multiline:true }
         ]
       });
       if (datos === null) return;
@@ -1700,18 +1721,25 @@
       if (!nombre) { if (out) out.textContent = '⚠️ Falta el nombre.'; return; }
       if (out) out.textContent = 'Guardando...';
       try {
+        const handle = '#EXT-' + Math.random().toString(36).slice(2, 6).toUpperCase();
         await addDoc(collection(db, "usuarios_manual"), {
           nombre,
           telefono: (datos.telefono||'').trim(),
           email:    (datos.email||'').trim(),
           notas:    (datos.notas||'').trim(),
+          handle,
+          creditos: 0,          // saldo de Estrellas (se lo transfiere el staff)
           asistencias: [],
+          reservas: [],
           manual: true,
+          externa: true,
           creadoPor: usuarioActual ? usuarioActual.uid : null,
+          creadoPorNombre: (usuarioActual && (usuarioActual.displayName || usuarioActual.email)) || 'staff',
+          creadoPorRank: (window._miRank != null ? window._miRank : null),
           creadoEn: serverTimestamp(),
           tenantId: TENANT.id
         });
-        if (out) out.textContent = '✅ «' + nombre + '» agregada.';
+        if (out) out.textContent = '✅ «' + nombre + '» agregada (' + handle + ').';
         listarAlumnasManual();
       } catch(e) {
         console.error('crearAlumnaManual:', e);
@@ -1727,19 +1755,28 @@
         const snap = await getDocs(query(collection(db, "usuarios_manual"), where("tenantId","==",TENANT.id)));
         _manualCache = snap.docs.map(d => ({ _id:d.id, ...d.data() }));
         _manualCache.sort((a,b)=> (a.nombre||'').localeCompare(b.nombre||'','es'));
-        if (!_manualCache.length) { cont.innerHTML = '<p class="manual-vacio">Aún no hay alumnas de mostrador.</p>'; return; }
+        if (!_manualCache.length) { cont.innerHTML = '<p class="manual-vacio">Aún no hay Alumnas Externas.</p>'; return; }
         cont.innerHTML = _manualCache.map(m => {
           const n = (m.asistencias||[]).length;
+          const nRes = (m.reservas||[]).length;
           const contacto = [m.telefono, m.email].filter(Boolean).map(escapeHtml).join(' · ');
+          const cred = (typeof m.creditos === 'number') ? m.creditos : 0;
           return `<div class="manual-card">
             <div class="manual-card-top">
               <span class="manual-nombre">${escapeHtml(m.nombre||'—')}</span>
               <span class="manual-asist-badge">${n} ✓</span>
             </div>
+            <div class="manual-meta">
+              ${m.handle ? `<span class="manual-handle">${escapeHtml(m.handle)}</span>` : ''}
+              <span class="manual-cred">${cred} ⭐</span>
+              ${nRes ? `<span class="manual-res">${nRes} 📅</span>` : ''}
+            </div>
             ${contacto ? `<div class="manual-contacto">${contacto}</div>` : ''}
             <div class="manual-acciones">
               <button class="sr-btn" onclick="editarAlumnaManual('${m._id}')">✏️ Datos</button>
-              <button class="sr-btn sr-ok" onclick="gestionarAsistenciasManual('${m._id}')">📅 Asistencias</button>
+              <button class="sr-btn sr-star" onclick="transferEstrellasExterna('${m._id}')">⭐ Transferir</button>
+              <button class="sr-btn sr-ok" onclick="reservarLugarExterna('${m._id}')">📅 Apartar</button>
+              <button class="sr-btn" onclick="gestionarAsistenciasManual('${m._id}')">✅ Asistencias</button>
               <button class="sr-btn sr-del" onclick="eliminarAlumnaManual('${m._id}')">🗑️</button>
             </div>
           </div>`;
@@ -1844,6 +1881,119 @@
       const modal = document.getElementById('manual-asist-modal');
       if (modal) modal.style.display = 'none';
       if (window.listarAlumnasManual) listarAlumnasManual();  // refresca contadores
+    };
+
+    // ── TRANSFERIR ESTRELLAS a una Alumna Externa (Rank ≤ 2) ──────────────
+    // El staff (Dueño/Administración/Instructora) le PASA N Estrellas de SU
+    // PROPIO saldo a la alumna externa para que pueda apartar clases. Es una
+    // transacción atómica: baja creditos en usuarios/{miUid} y sube en
+    // usuarios_manual/{id}. Las reglas solo dejan que el staff BAJE su propio
+    // saldo (nunca acuñar), así que esto no rompe la economía de Estrellas.
+    window.transferEstrellasExterna = async (id) => {
+      const m = _manualCache.find(x=>x._id===id); if (!m) return;
+      if (!usuarioActual) { await uiAlert('Inicia sesión.', {titulo:'Sesión'}); return; }
+      if (!(window._miRank != null && window._miRank <= 2)) {
+        await uiAlert('Solo Dueño, Administración e Instructora pueden transferir Estrellas.', {titulo:'Sin permiso'});
+        return;
+      }
+      // Saldo actual del staff.
+      let miSaldo = 0;
+      try {
+        const meSnap = await getDoc(doc(db,"usuarios",usuarioActual.uid));
+        miSaldo = (meSnap.exists() && typeof meSnap.data().creditos === 'number') ? meSnap.data().creditos : 0;
+      } catch(e){ console.warn('transferEstrellas saldo:', e); }
+      if (miSaldo <= 0) { await uiAlert('No tienes Estrellas disponibles para transferir.', {titulo:'Sin Estrellas ⭐'}); return; }
+      const datos = await uiForm({
+        titulo: '⭐ Transferir Estrellas',
+        mensaje: `Le pasarás Estrellas de TU saldo a «${m.nombre||'la alumna'}» (${m.handle||''}). Tu saldo: ${miSaldo} ⭐. Saldo de ella: ${m.creditos||0} ⭐.`,
+        okText: 'Transferir',
+        campos: [{ id:'n', label:'¿Cuántas Estrellas?', tipo:'number', valor:'1', min:1, max:miSaldo }]
+      });
+      if (datos === null) return;
+      const n = Math.floor(Number(datos.n)||0);
+      if (n <= 0) { await uiAlert('Cantidad no válida.', {titulo:'Revisa'}); return; }
+      if (n > miSaldo) { await uiAlert('No tienes tantas Estrellas.', {titulo:'Saldo insuficiente'}); return; }
+      try {
+        await runTransaction(db, async (tx) => {
+          const meRef = doc(db,"usuarios",usuarioActual.uid);
+          const exRef = doc(db,"usuarios_manual",id);
+          const meS = await tx.get(meRef);
+          const exS = await tx.get(exRef);
+          const meCred = (meS.exists() && typeof meS.data().creditos==='number') ? meS.data().creditos : 0;
+          const exCred = (exS.exists() && typeof exS.data().creditos==='number') ? exS.data().creditos : 0;
+          if (meCred < n) { const e = new Error('saldo'); e._saldo = true; throw e; }
+          tx.update(meRef, { creditos: meCred - n });
+          tx.update(exRef, { creditos: exCred + n });
+        });
+        m.creditos = (m.creditos||0) + n;
+        await uiAlert(`✅ Transferiste ${n} ⭐ a «${m.nombre||'la alumna'}». Ahora tiene ${m.creditos} ⭐.`, {titulo:'Estrellas enviadas'});
+        listarAlumnasManual();
+      } catch(e) {
+        console.error('transferEstrellasExterna:', e);
+        if (e && e._saldo) { await uiAlert('Tu saldo cambió; ya no alcanza.', {titulo:'Saldo insuficiente'}); }
+        else { await uiAlert('No se pudo transferir ('+((e&&(e.code||e.message))||'error')+'). ¿Publicaste las reglas?', {titulo:'Error', peligro:true}); }
+      }
+    };
+
+    // ── RESERVAR un lugar PARA una Alumna Externa (Rank ≤ 2) ──────────────
+    // Reusa el mismo flujo de clase suelta que las alumnas registradas:
+    //   1) elige clase (selector) → 2) pedirFechaIndividual (fecha + cupo)
+    //   → 3) reservarCupoIndividual (ocupa el MISMO cupo de 6) → 4) baja 1 ⭐
+    //   de SU saldo y registra la reserva en su arreglo reservas[].
+    window.reservarLugarExterna = async (id) => {
+      const m = _manualCache.find(x=>x._id===id); if (!m) return;
+      if (!(window._miRank != null && window._miRank <= 2)) {
+        await uiAlert('Solo el staff puede apartar lugares.', {titulo:'Sin permiso'});
+        return;
+      }
+      if ((m.creditos||0) < 1) {
+        await uiAlert(`«${m.nombre||'La alumna'}» no tiene Estrellas. Transfiérele al menos 1 ⭐ antes de apartar.`, {titulo:'Sin Estrellas ⭐'});
+        return;
+      }
+      // 1) Elegir clase.
+      const opciones = (window.opcionesClasesExterna ? window.opcionesClasesExterna() : []);
+      if (!opciones.length) { await uiAlert('No hay clases disponibles.', {titulo:'Horario'}); return; }
+      const sel = await uiForm({
+        titulo: '📅 Apartar lugar',
+        mensaje: `Reservarás una clase para «${m.nombre||'la alumna'}». Se descontará 1 ⭐ de su saldo (${m.creditos||0} ⭐).`,
+        okText: 'Elegir fecha',
+        campos: [{ id:'clase', label:'Clase', opciones }]
+      });
+      if (sel === null) return;
+      let slot; try { slot = JSON.parse(sel.clase); } catch(_){ return; }
+      if (!slot || !slot.dia || !slot.hora) return;
+      // 2) Fecha exacta + validación de cupo.
+      const fr = await window.pedirFechaIndividual(slot);
+      if (!fr) return;
+      // 3) Ocupar cupo (tope 6, atómico).
+      const cupo = await window.reservarCupoIndividual(fr.fechaSlotId);
+      if (!cupo.ok) {
+        if (cupo.lleno) await uiAlert('Esa clase ya está LLENA (6/6).', {titulo:'Clase Llena', peligro:true});
+        else await uiAlert('No se pudo apartar el cupo ('+(cupo.error||'error')+').', {titulo:'Error', peligro:true});
+        return;
+      }
+      // 4) Bajar 1 ⭐ y registrar la reserva en la alumna.
+      try {
+        const reserva = {
+          fecha: fr.fecha,
+          slotId: fr.fechaSlotId,
+          clase: (opciones.find(o=>o.value===sel.clase)||{}).label || '',
+          apartadoPor: usuarioActual ? usuarioActual.uid : null,
+          apartadoPorNombre: (usuarioActual && (usuarioActual.displayName||usuarioActual.email)) || 'staff',
+          ts: new Date().toISOString()
+        };
+        await updateDoc(doc(db,"usuarios_manual",id), {
+          creditos: Math.max(0, (m.creditos||0) - 1),
+          reservas: arrayUnion(reserva)
+        });
+        m.creditos = Math.max(0, (m.creditos||0) - 1);
+        m.reservas = [ ...(m.reservas||[]), reserva ];
+        await uiAlert(`✅ Lugar apartado para «${m.nombre||'la alumna'}» el ${window.fechaBonita ? window.fechaBonita(fr.fecha) : fr.fecha}. Le queda ${m.creditos} ⭐.`, {titulo:'Reservado'});
+        listarAlumnasManual();
+      } catch(e) {
+        console.error('reservarLugarExterna:', e);
+        await uiAlert('Se ocupó el cupo pero no se pudo guardar en la alumna ('+((e&&(e.code||e.message))||'error')+').', {titulo:'Error', peligro:true});
+      }
     };
 
     // ════════════════════════════════════════════════════════════════
@@ -3976,6 +4126,14 @@
     .manual-asist-badge { flex:0 0 auto; font-size:.74rem; font-weight:700; color:var(--amarillo);
       background:rgba(255,204,0,.12); border:1px solid rgba(255,204,0,.28); border-radius:999px; padding:2px 10px; }
     .manual-contacto { margin-top:4px; font-size:.78rem; color:rgba(255,255,255,.6); }
+    .manual-meta { display:flex; gap:6px; flex-wrap:wrap; align-items:center; margin-top:6px; }
+    .manual-handle { font-size:.7rem; font-weight:700; letter-spacing:.02em; color:#8fd3ff;
+      background:rgba(80,170,255,.12); border:1px solid rgba(80,170,255,.30); border-radius:999px; padding:2px 9px; }
+    .manual-cred { font-size:.72rem; font-weight:700; color:var(--amarillo);
+      background:rgba(255,204,0,.12); border:1px solid rgba(255,204,0,.28); border-radius:999px; padding:2px 9px; }
+    .manual-res { font-size:.72rem; font-weight:700; color:#c7b3ff;
+      background:rgba(150,120,255,.12); border:1px solid rgba(150,120,255,.30); border-radius:999px; padding:2px 9px; }
+    .sr-star { background:linear-gradient(135deg,#ffcc00,#e87400); color:#1a1200; }
     .manual-acciones { display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; }
     .manual-asist-lista { display:flex; flex-direction:column; gap:8px; margin:6px 0 14px;
       max-height:46vh; overflow-y:auto; }
@@ -5250,20 +5408,6 @@
           </div>
         </details>
 
-        <!-- Alumnas de mostrador (efectivo, SIN cuenta) — las lleva el Dueño a mano -->
-        <details class="admin-acordeon" id="acordeon-manual" ontoggle="if(this.open) listarAlumnasManual()">
-          <summary>🧾 Alumnas de mostrador (efectivo)</summary>
-          <div class="admin-acordeon-body">
-            <p class="admin-hint">Para quienes <strong>pagan en efectivo</strong> y no quieren/saben usar la app. NO crean cuenta ni gastan Estrellas: son un registro que <strong>tú</strong> llevas a mano para marcarles asistencia. Puedes ponerles nombre, teléfono y correo, y agregar/quitar sus fechas de clase.</p>
-            <div class="admin-row">
-              <button class="admin-btn" onclick="crearAlumnaManual()">➕ Agregar alumna de mostrador</button>
-              <button class="admin-btn" onclick="listarAlumnasManual()" title="Recargar lista" style="flex:0 0 auto;">↻</button>
-            </div>
-            <p id="admin-manual-out" class="admin-resultado" style="white-space:pre-line; text-align:left;"></p>
-            <div id="admin-manual-lista" class="manual-lista"></div>
-          </div>
-        </details>
-
         <!-- Migración de rangos al esquema v2 (se usa UNA sola vez · avanzado) -->
         <details class="admin-acordeon admin-acordeon-avanzado">
           <summary>🔁 Migración de rangos (avanzado · 1 sola vez)</summary>
@@ -5290,6 +5434,21 @@
       </div>
       <button class="admin-btn" onclick="cargarReservasStaff()" style="margin-top:6px;">↻ Actualizar</button>
       <button class="admin-btn sr-btn-limpiar" onclick="borrarPendientesViejas()" style="margin-top:6px;" title="Elimina de un jalón todas las reservas por procesar (viejas del calendario de Google)">🗑️ Eliminar pendientes viejas</button>
+    </div>
+
+    <!-- PANEL STAFF · ALUMNAS EXTERNAS (Rank ≤ 2 · Instructora/Admin/Dueño).
+         Alumnas que NO crean cuenta o no tienen teléfono. El staff las lleva a
+         mano: les transfiere Estrellas de su propio saldo, les aparta lugar
+         (mismo cupo de 6) y les marca asistencia. -->
+    <div id="externas-panel" class="sr-panel" style="display:none;">
+      <h3 class="perfil-sub">🎟️ Alumnas Externas</h3>
+      <p class="sr-hint">Para alumnas que <strong>no crean su cuenta o no tienen teléfono</strong>. Cada una tiene un <strong>hashtag</strong> (#EXT-…). Transfiéreles Estrellas de <strong>tu</strong> saldo (⭐), apártales lugar (ocupa el mismo cupo de 6) y márcales asistencia. Las creas tú desde aquí.</p>
+      <div class="admin-row">
+        <button class="admin-btn" onclick="crearAlumnaManual()">➕ Agregar Alumna Externa</button>
+        <button class="admin-btn" onclick="listarAlumnasManual()" title="Recargar lista" style="flex:0 0 auto;">↻</button>
+      </div>
+      <p id="admin-manual-out" class="admin-resultado" style="white-space:pre-line; text-align:left;"></p>
+      <div id="admin-manual-lista" class="manual-lista"></div>
     </div>
 
     <div class="comunidad-links">
@@ -5870,6 +6029,29 @@
       return { fecha, fechaSlotId };
     }
   }
+  // Expuesta para el módulo (Alumnas Externas reservan reusando este flujo).
+  window.pedirFechaIndividual = pedirFechaIndividual;
+  window.fechaBonita = fechaBonita;
+
+  // Opciones de clase para el selector de reserva de una Alumna Externa.
+  // Recorre horarioBase (filas=horas, columnas 1-5=Lun-Vie) y arma
+  // [{ value:JSON({dia,hora,tipo}), label:"Lun 8-9 · Telas" }, ...].
+  window.opcionesClasesExterna = function () {
+    const ops = [];
+    horarioBase.forEach(row => {
+      const hora = row[0];
+      for (let dia = 1; dia <= 5; dia++) {
+        const tipo = row[dia];
+        if (!tipo || tipo === 'empty') continue;
+        const compacta = slotIdDe(dia, hora).split('_')[1]; // "8-9"
+        ops.push({
+          value: JSON.stringify({ dia, hora, tipo }),
+          label: `${DIAS_NOMBRE[dia] || '?'} ${compacta} · ${claseNombres[tipo] || tipo}`
+        });
+      }
+    });
+    return ops;
+  };
 
   // Cachés de la capa de seguimiento (se llenan tras login; siempre defensivas).
   let _misSlots     = new Set();  // slotIds que el ALUMNO ya apartó (reserva propia)
