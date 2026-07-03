@@ -1668,6 +1668,180 @@
     };
 
     // ════════════════════════════════════════════════════════════════
+    //  ALUMNAS DE MOSTRADOR (efectivo, SIN cuenta de Auth)
+    //  Registro que el Dueño/Administración (Rank ≤ 1) lleva A MANO para gente
+    //  que paga en efectivo y no usa la app. Viven en la colección
+    //  usuarios_manual (solo Rank ≤ 1 las ve/edita). No hay Auth, no gastan
+    //  Estrellas: solo se les marca asistencia (arreglo de fechas). Resuelve el
+    //  caso de "usuario no registrado" sin depender del alta con correo/contraseña.
+    // ════════════════════════════════════════════════════════════════
+    let _manualCache = [];
+
+    window.crearAlumnaManual = async () => {
+      const out = document.getElementById('admin-manual-out');
+      const datos = await uiForm({
+        titulo: '🧾 Alumna de mostrador',
+        mensaje: 'Sin cuenta ni Estrellas. Solo para llevar su asistencia a mano.',
+        okText: 'Agregar',
+        campos: [
+          { id:'nombre',   label:'Nombre',   placeholder:'Ej. María González', maxlength:60 },
+          { id:'telefono', label:'Teléfono (opcional)', placeholder:'6621234567', tipo:'tel', maxlength:20 },
+          { id:'email',    label:'Correo (opcional)', placeholder:'correo@ejemplo.com', tipo:'email', maxlength:120 },
+          { id:'notas',    label:'Notas (opcional)', placeholder:'Ej. paga semanal', maxlength:200, multiline:true }
+        ]
+      });
+      if (datos === null) return;
+      const nombre = (datos.nombre||'').trim();
+      if (!nombre) { if (out) out.textContent = '⚠️ Falta el nombre.'; return; }
+      if (out) out.textContent = 'Guardando...';
+      try {
+        await addDoc(collection(db, "usuarios_manual"), {
+          nombre,
+          telefono: (datos.telefono||'').trim(),
+          email:    (datos.email||'').trim(),
+          notas:    (datos.notas||'').trim(),
+          asistencias: [],
+          manual: true,
+          creadoPor: usuarioActual ? usuarioActual.uid : null,
+          creadoEn: serverTimestamp(),
+          tenantId: TENANT.id
+        });
+        if (out) out.textContent = '✅ «' + nombre + '» agregada.';
+        listarAlumnasManual();
+      } catch(e) {
+        console.error('crearAlumnaManual:', e);
+        if (out) out.textContent = '❌ No se pudo (' + ((e&&(e.code||e.message))||'error') + '). ¿Publicaste las reglas de usuarios_manual?';
+      }
+    };
+
+    window.listarAlumnasManual = async () => {
+      const cont = document.getElementById('admin-manual-lista');
+      if (!cont) return;
+      cont.innerHTML = '<p class="manual-vacio">Cargando…</p>';
+      try {
+        const snap = await getDocs(query(collection(db, "usuarios_manual"), where("tenantId","==",TENANT.id)));
+        _manualCache = snap.docs.map(d => ({ _id:d.id, ...d.data() }));
+        _manualCache.sort((a,b)=> (a.nombre||'').localeCompare(b.nombre||'','es'));
+        if (!_manualCache.length) { cont.innerHTML = '<p class="manual-vacio">Aún no hay alumnas de mostrador.</p>'; return; }
+        cont.innerHTML = _manualCache.map(m => {
+          const n = (m.asistencias||[]).length;
+          const contacto = [m.telefono, m.email].filter(Boolean).map(escapeHtml).join(' · ');
+          return `<div class="manual-card">
+            <div class="manual-card-top">
+              <span class="manual-nombre">${escapeHtml(m.nombre||'—')}</span>
+              <span class="manual-asist-badge">${n} ✓</span>
+            </div>
+            ${contacto ? `<div class="manual-contacto">${contacto}</div>` : ''}
+            <div class="manual-acciones">
+              <button class="sr-btn" onclick="editarAlumnaManual('${m._id}')">✏️ Datos</button>
+              <button class="sr-btn sr-ok" onclick="gestionarAsistenciasManual('${m._id}')">📅 Asistencias</button>
+              <button class="sr-btn sr-del" onclick="eliminarAlumnaManual('${m._id}')">🗑️</button>
+            </div>
+          </div>`;
+        }).join('');
+      } catch(e) {
+        console.error('listarAlumnasManual:', e);
+        cont.innerHTML = '<p class="manual-vacio">No se pudo cargar ('+((e&&(e.code||e.message))||'error')+').</p>';
+      }
+    };
+
+    window.editarAlumnaManual = async (id) => {
+      const m = _manualCache.find(x=>x._id===id); if (!m) return;
+      const datos = await uiForm({
+        titulo: '✏️ Editar datos',
+        okText: 'Guardar',
+        campos: [
+          { id:'nombre',   label:'Nombre',   valor:m.nombre||'', maxlength:60 },
+          { id:'telefono', label:'Teléfono', valor:m.telefono||'', tipo:'tel', maxlength:20 },
+          { id:'email',    label:'Correo',   valor:m.email||'', tipo:'email', maxlength:120 },
+          { id:'notas',    label:'Notas',    valor:m.notas||'', maxlength:200, multiline:true }
+        ]
+      });
+      if (datos === null) return;
+      const nombre = (datos.nombre||'').trim();
+      if (!nombre) { await uiAlert('El nombre no puede quedar vacío.', {titulo:'Falta el nombre'}); return; }
+      try {
+        await updateDoc(doc(db,"usuarios_manual",id), {
+          nombre,
+          telefono:(datos.telefono||'').trim(),
+          email:(datos.email||'').trim(),
+          notas:(datos.notas||'').trim()
+        });
+        listarAlumnasManual();
+      } catch(e) { console.error('editarAlumnaManual:', e); await uiAlert('No se pudo guardar.', {titulo:'Error', peligro:true}); }
+    };
+
+    window.eliminarAlumnaManual = async (id) => {
+      const m = _manualCache.find(x=>x._id===id); if (!m) return;
+      if (!(await uiConfirm('¿Eliminar a «'+(m.nombre||'esta alumna')+'» y todo su registro de asistencias? No se puede deshacer.', {titulo:'Eliminar', okText:'Sí, eliminar', cancelText:'Cancelar', peligro:true}))) return;
+      try { await deleteDoc(doc(db,"usuarios_manual",id)); listarAlumnasManual(); }
+      catch(e){ console.error('eliminarAlumnaManual:', e); await uiAlert('No se pudo eliminar.', {titulo:'Error', peligro:true}); }
+    };
+
+    // Modal de asistencias: lista de fechas con ✕ para quitar + botón agregar.
+    window.gestionarAsistenciasManual = (id) => {
+      const modal = document.getElementById('manual-asist-modal');
+      if (!modal) return;
+      modal.dataset.id = id;
+      renderAsistenciasManual(id);
+      modal.style.display = 'flex';
+    };
+    function renderAsistenciasManual(id) {
+      const m = _manualCache.find(x=>x._id===id); if (!m) return;
+      const tit = document.getElementById('manual-asist-titulo');
+      if (tit) tit.textContent = 'Asistencias · ' + (m.nombre||'');
+      const cont = document.getElementById('manual-asist-lista');
+      const lista = (m.asistencias||[]).slice().sort((a,b)=> (b.fecha||'').localeCompare(a.fecha||''));
+      if (!cont) return;
+      cont.innerHTML = lista.length
+        ? lista.map((a) => {
+            const idxReal = (m.asistencias||[]).indexOf(a);
+            let bonita = a.fecha;
+            try { const [y,mo,d]=a.fecha.split('-'); bonita = new Date(y,mo-1,d).toLocaleDateString('es-MX',{weekday:'short',day:'numeric',month:'short'}); } catch(_){}
+            return `<div class="manual-asist-row">
+              <span class="manual-asist-fecha">${escapeHtml(bonita)}${a.clase?` · <span style="opacity:.6">${escapeHtml(a.clase)}</span>`:''}</span>
+              <button class="sr-btn sr-del" onclick="quitarFechaManual('${id}',${idxReal})" title="Quitar">✕</button>
+            </div>`;
+          }).join('')
+        : '<p class="manual-vacio">Sin fechas marcadas todavía.</p>';
+    }
+    window.agregarFechaManual = async (id) => {
+      const m = _manualCache.find(x=>x._id===id); if (!m) return;
+      const datos = await uiForm({
+        titulo: '📅 Marcar asistencia',
+        mensaje: 'Elige la fecha de la clase a la que asistió.',
+        okText: 'Agregar fecha',
+        campos: [
+          { id:'fecha', label:'Fecha de la clase', tipo:'date', valor: new Date().toISOString().slice(0,10) },
+          { id:'clase', label:'Clase (opcional)', placeholder:'Ej. Telas 7pm', maxlength:40 }
+        ]
+      });
+      if (datos === null) return;
+      const fecha = (datos.fecha||'').trim();
+      if (!fecha) return;
+      const asistencias = [ ...(m.asistencias||[]), { fecha, clase:(datos.clase||'').trim() } ];
+      try {
+        await updateDoc(doc(db,"usuarios_manual",id), { asistencias });
+        m.asistencias = asistencias;
+        renderAsistenciasManual(id);
+      } catch(e){ console.error('agregarFechaManual:', e); await uiAlert('No se pudo marcar.', {titulo:'Error', peligro:true}); }
+    };
+    window.quitarFechaManual = async (id, idx) => {
+      const m = _manualCache.find(x=>x._id===id); if (!m) return;
+      const asistencias = (m.asistencias||[]).filter((_,i)=> i!==idx);
+      try {
+        await updateDoc(doc(db,"usuarios_manual",id), { asistencias });
+        m.asistencias = asistencias;
+        renderAsistenciasManual(id);
+      } catch(e){ console.error('quitarFechaManual:', e); await uiAlert('No se pudo quitar.', {titulo:'Error', peligro:true}); }
+    };
+    window.cerrarAsistManual = () => {
+      const modal = document.getElementById('manual-asist-modal');
+      if (modal) modal.style.display = 'none';
+      if (window.listarAlumnasManual) listarAlumnasManual();  // refresca contadores
+    };
+
+    // ════════════════════════════════════════════════════════════════
     //  DIRECTORIO "Buscar Perfil" + COLABORADORES
     //  Perfiles VISIBLES por defecto; cada quien controla qué muestra
     //  (visibilidad.perfilPublico / mostrarStats / mostrarSemblanza).
@@ -3758,6 +3932,23 @@
     .sr-del { background:rgba(220,53,69,.16); color:#ff8a95; border:1px solid rgba(220,53,69,.35); }
     .sr-btn-limpiar { background:rgba(220,53,69,.14); color:#ff8a95; border:1px solid rgba(220,53,69,.35); margin-left:6px; }
     .sr-empty { text-align:center; color:rgba(255,255,255,.5); font-size:.85rem; padding:14px 0; }
+    /* Alumnas de mostrador (efectivo · registro manual del dueño) */
+    .manual-lista { display:flex; flex-direction:column; gap:10px; margin-top:10px; }
+    .manual-vacio { text-align:center; color:rgba(255,255,255,.5); font-size:.85rem; padding:12px 0; }
+    .manual-card { background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.10);
+      border-radius:12px; padding:12px 14px; }
+    .manual-card-top { display:flex; align-items:center; justify-content:space-between; gap:10px; }
+    .manual-nombre { font-weight:700; color:#fff; font-size:.95rem; }
+    .manual-asist-badge { flex:0 0 auto; font-size:.74rem; font-weight:700; color:var(--amarillo);
+      background:rgba(255,204,0,.12); border:1px solid rgba(255,204,0,.28); border-radius:999px; padding:2px 10px; }
+    .manual-contacto { margin-top:4px; font-size:.78rem; color:rgba(255,255,255,.6); }
+    .manual-acciones { display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; }
+    .manual-asist-lista { display:flex; flex-direction:column; gap:8px; margin:6px 0 14px;
+      max-height:46vh; overflow-y:auto; }
+    .manual-asist-row { display:flex; align-items:center; justify-content:space-between; gap:10px;
+      background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.10);
+      border-radius:9px; padding:8px 12px; }
+    .manual-asist-fecha { font-size:.82rem; color:#fff; text-transform:capitalize; }
     /* Tarjeta de reserva enriquecida (plan legible + horarios + fechas) */
     .sr-plan-badge { display:inline-block; margin-top:4px; font-size:.74rem; font-weight:700;
       color:var(--amarillo); background:rgba(255,204,0,.10); border:1px solid rgba(255,204,0,.25);
@@ -5025,6 +5216,20 @@
           </div>
         </details>
 
+        <!-- Alumnas de mostrador (efectivo, SIN cuenta) — las lleva el Dueño a mano -->
+        <details class="admin-acordeon" id="acordeon-manual" ontoggle="if(this.open) listarAlumnasManual()">
+          <summary>🧾 Alumnas de mostrador (efectivo)</summary>
+          <div class="admin-acordeon-body">
+            <p class="admin-hint">Para quienes <strong>pagan en efectivo</strong> y no quieren/saben usar la app. NO crean cuenta ni gastan Estrellas: son un registro que <strong>tú</strong> llevas a mano para marcarles asistencia. Puedes ponerles nombre, teléfono y correo, y agregar/quitar sus fechas de clase.</p>
+            <div class="admin-row">
+              <button class="admin-btn" onclick="crearAlumnaManual()">➕ Agregar alumna de mostrador</button>
+              <button class="admin-btn" onclick="listarAlumnasManual()" title="Recargar lista" style="flex:0 0 auto;">↻</button>
+            </div>
+            <p id="admin-manual-out" class="admin-resultado" style="white-space:pre-line; text-align:left;"></p>
+            <div id="admin-manual-lista" class="manual-lista"></div>
+          </div>
+        </details>
+
         <!-- Migración de rangos al esquema v2 (se usa UNA sola vez · avanzado) -->
         <details class="admin-acordeon admin-acordeon-avanzado">
           <summary>🔁 Migración de rangos (avanzado · 1 sola vez)</summary>
@@ -5213,6 +5418,19 @@
   <!-- MODAL: DETALLE DE PERFIL (click en una tarjeta del directorio) -->
   <div id="perfil-modal" class="onb-bg" style="display:none;" onclick="if(event.target===this)cerrarPerfilModal()">
     <div id="perfil-modal-card" class="onb-card pm-card"></div>
+  </div>
+
+  <!-- MODAL: ASISTENCIAS DE ALUMNA DE MOSTRADOR (efectivo · solo admin) -->
+  <div id="manual-asist-modal" class="onb-bg" style="display:none;" onclick="if(event.target===this)cerrarAsistManual()">
+    <div class="onb-card">
+      <h3 class="onb-title" id="manual-asist-titulo">Asistencias</h3>
+      <p class="onb-sub">Agrega o quita las fechas de clase a las que asistió. Tú llevas este registro a mano.</p>
+      <div id="manual-asist-lista" class="manual-asist-lista"></div>
+      <div class="onb-btns">
+        <button class="onb-skip" onclick="cerrarAsistManual()">Cerrar</button>
+        <button class="onb-save" onclick="agregarFechaManual(document.getElementById('manual-asist-modal').dataset.id)">➕ Agregar fecha</button>
+      </div>
+    </div>
   </div>
 
 

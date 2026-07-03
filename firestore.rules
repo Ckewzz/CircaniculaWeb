@@ -296,6 +296,18 @@ service cloud.firestore {
       allow delete: if isStaffClase();
     }
 
+    // ── ALUMNAS DE MOSTRADOR / EFECTIVO (usuarios NO registrados) ──────
+    //  Personas que pagan en efectivo y NO quieren/saben usar la app. NO tienen
+    //  cuenta de Auth: son un registro que el Dueño/Administración (Rank ≤ 1)
+    //  lleva A MANO para marcarles asistencia. El doc guarda contacto (tel/correo)
+    //  y un arreglo de asistencias (fechas). Solo el staff administrativo (Rank ≤ 1)
+    //  lo ve y lo edita; estas personas no pueden iniciar sesión ni tocar nada más.
+    //  { nombre, telefono, email, notas, asistencias:[{fecha,clase}], creadoPor,
+    //    creadoEn, tenantId, manual:true }
+    match /usuarios_manual/{id} {
+      allow read, write: if isAdmin();
+    }
+
     // Todo lo demás: denegado.
     match /{document=**} {
       allow read, write: if false;
