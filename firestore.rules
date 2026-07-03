@@ -326,6 +326,21 @@ service cloud.firestore {
       allow read, write: if isStaffClase();
     }
 
+    // ── BITÁCORA / AUDITORÍA DE ACCIONES DEL STAFF ────────────────────
+    //  actividad/{id} = { actor, actorNombre, actorRank, accion, detalle, ts, tenantId }
+    //  La ESCRIBE el propio staff (Rank ≤ 3: Administración, Instructoras y
+    //  Asistentes) dejando constancia de lo que hace; 'actor' debe ser quien la
+    //  crea (no se puede firmar como otra persona). Solo el DUEÑO (Rank 0) la LEE.
+    //  Inmutable: nadie edita ni borra su propio rastro (ni el de nadie) desde el
+    //  cliente — es un registro de auditoría.
+    match /actividad/{id} {
+      allow read: if isDueno();
+      allow create: if signedIn()
+        && request.resource.data.actor == request.auth.uid
+        && (isDueno() || myRank() <= 3);
+      allow update, delete: if false;
+    }
+
     // Todo lo demás: denegado.
     match /{document=**} {
       allow read, write: if false;
