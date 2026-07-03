@@ -1253,7 +1253,11 @@
           if (data.rankEsquema === RANK_ESQUEMA) return;        // ya migrado, se salta
           const viejo = data.rank ?? 3;                          // default viejo = 3 (Alumno)
           const nuevo = (viejo === 0) ? 0 : viejo + 1;
-          cambios.push({ id:d.id, nombre:(data.nombreVisible||data.handle||d.id), viejo, nuevo });
+          // La regla del Dueño exige creditos:int>=0 en el doc resultante. Si la
+          // cuenta no lo tiene (o es inválido), lo normalizamos a 0 en la misma
+          // escritura para que la migración NO sea rechazada (causa del "1 de 4").
+          const cred = (typeof data.creditos === 'number' && data.creditos >= 0) ? data.creditos : 0;
+          cambios.push({ id:d.id, nombre:(data.nombreVisible||data.handle||d.id), viejo, nuevo, cred });
         });
         if (!cambios.length) {
           if (out) out.textContent = '✅ Nada que migrar: todos ya están en el esquema v2.';
@@ -1272,14 +1276,15 @@
         }
         // ── Aplicar (segunda pulsación) ──
         if (out) out.textContent = `Aplicando ${_migracionPreview.length} cambios...`;
-        let ok = 0, err = 0;
+        let ok = 0; const fallos = [];
         for (const c of _migracionPreview) {
           try {
-            await updateDoc(doc(db, "usuarios", c.id), { rank:c.nuevo, rankEsquema:RANK_ESQUEMA });
+            await updateDoc(doc(db, "usuarios", c.id), { rank:c.nuevo, rankEsquema:RANK_ESQUEMA, creditos:c.cred });
             ok++;
-          } catch(e) { console.error('migrar', c.id, e); err++; }
+          } catch(e) { console.error('migrar', c.id, e); fallos.push(`${c.nombre} (${(e&&(e.code||e.message))||'error'})`); }
         }
-        if (out) out.textContent = `✅ Migración aplicada: ${ok} ok${err?`, ❌ ${err} con error (revisa consola)`:''}.`;
+        if (out) out.textContent = `✅ Migración aplicada: ${ok} ok`
+          + (fallos.length ? `\n❌ ${fallos.length} con error:\n• ${fallos.join('\n• ')}` : '.');
         _migracionPreview = null;
         if (usuarioActual) cargarPerfil(usuarioActual.uid);
       } catch(e) {
@@ -2033,17 +2038,24 @@
       let staffStatsHtml = '';
       if (window._miRank != null && window._miRank <= 2) {
         const nivelActual = { flexibilidad:0,fuerza:0,resistencia:0,tecnica:0,caida:0,interpretacion:0, ...(d.nivel||{}) };
-        const inputs = STATS_DEF.map(s => `
+        const mesAhora = new Date().toISOString().slice(0,7); // YYYY-MM
+        const statsMes = d.statsMes || {};
+        const inputs = STATS_DEF.map(s => {
+          const val = Math.max(0, Math.min(10, nivelActual[s.key]||0));
+          const yaEsteMes = statsMes[s.key] === mesAhora;
+          return `
           <label class="pm-stat-row">
-            <span class="pm-stat-lbl">${s.label}</span>
+            <span class="pm-stat-lbl">${s.label}${yaEsteMes ? ' <span class="pm-stat-lock" title="Ya avanzó este mes">🔒</span>' : ''}</span>
             <input type="number" id="stat-edit-${s.key}" class="pm-stat-input"
-                   min="0" max="10" step="1" value="${Math.max(0,Math.min(10, nivelActual[s.key]||0))}">
-          </label>`).join('');
+                   data-old="${val}" data-mes="${yaEsteMes ? '1' : '0'}"
+                   min="0" max="10" step="1" value="${val}">
+          </label>`;
+        }).join('');
         staffStatsHtml = `
           <details class="pm-stats-editor">
             <summary>✏️ Otorgar / editar stats</summary>
             <div class="pm-stats-editor-body">
-              <p class="pm-stats-hint">Puntajes de 0 a 10. Se reflejan al instante en su radar y títulos.</p>
+              <p class="pm-stats-hint">⚖️ <strong>Ley: cada stat sube máx. 1 punto por mes.</strong> Tú decides si avanzó o no. 🔒 = ya avanzó este mes. Corregir hacia abajo se permite siempre.</p>
               ${inputs}
               <button class="admin-btn" onclick="otorgarStatsPerfil('${id}', this)">Guardar stats</button>
               <p id="pm-stats-out" class="admin-resultado" style="text-align:center;"></p>
@@ -2068,21 +2080,39 @@
     // inputs, arma el objeto nivel y hace updateDoc (las reglas validan Rank ≤ 2).
     window.otorgarStatsPerfil = async (id, btn) => {
       const out = document.getElementById('pm-stats-out');
-      const nivel = {};
+      const mesAhora = new Date().toISOString().slice(0,7); // YYYY-MM
+      const nivel = {}, statsMes = {};
+      const bloqueados = [];
       for (const s of STATS_DEF) {
         const el = document.getElementById('stat-edit-' + s.key);
-        let v = Math.round(Number(el && el.value) || 0);
-        nivel[s.key] = Math.max(0, Math.min(10, v));
+        const old = Math.max(0, Math.min(10, Math.round(Number(el && el.dataset.old) || 0)));
+        const yaEsteMes = !!(el && el.dataset.mes === '1');
+        let v = Math.max(0, Math.min(10, Math.round(Number(el && el.value) || 0)));
+        if (v > old) {
+          // Intento de SUBIR: aplica la ley de 1 punto por mes por stat.
+          if (yaEsteMes) { bloqueados.push(s.label + ': ya avanzó este mes'); v = old; statsMes[s.key] = mesAhora; }
+          else { if (v - old > 1) { bloqueados.push(s.label + ': máx. +1/mes'); v = old + 1; } statsMes[s.key] = mesAhora; }
+        } else {
+          // Igual o corrección hacia abajo: conserva el candado si ya lo tenía este mes.
+          if (yaEsteMes && v === old) statsMes[s.key] = mesAhora;
+        }
+        nivel[s.key] = v;
       }
       if (btn) { btn.disabled = true; btn.textContent = 'Guardando...'; }
       try {
-        await updateDoc(doc(db, "usuarios", id), { nivel });
-        if (out) out.textContent = '✅ Stats actualizados.';
-        // Refresca la caché local y el radar del modal sin cerrarlo.
+        await updateDoc(doc(db, "usuarios", id), { nivel, statsMes });
+        if (out) out.textContent = bloqueados.length
+          ? '⚖️ Guardado (ley 1/mes). No aplicado → ' + bloqueados.join(' · ')
+          : '✅ Stats actualizados.';
+        // Refresca la caché local, el radar del modal y el estado de los inputs.
         const item = _dirCache.find(x => x._id === id);
-        if (item) item.nivel = nivel;
+        if (item) { item.nivel = nivel; item.statsMes = statsMes; }
         const radarEl = document.querySelector('#perfil-modal-card .pm-radar');
         if (radarEl) radarEl.innerHTML = construirRadar(nivel);
+        for (const s of STATS_DEF) {
+          const el = document.getElementById('stat-edit-' + s.key);
+          if (el) { el.dataset.old = nivel[s.key]; el.dataset.mes = statsMes[s.key] === mesAhora ? '1' : '0'; el.value = nivel[s.key]; }
+        }
         if (window.buscarPerfiles) buscarPerfiles();
       } catch (e) {
         console.error('otorgarStatsPerfil:', e);
@@ -3042,8 +3072,11 @@
         await setDoc(doc(db, "asistencias", uid + '_' + slotId + '_' + fecha), {
           uid, slotId, fecha, marcadoPor: usuarioActual.uid, ts: serverTimestamp()
         });
-        return true;
-      } catch (e) { console.warn('marcarAsistencia:', e); return false; }
+        return { ok: true };
+      } catch (e) {
+        console.warn('marcarAsistencia:', e);
+        return { ok: false, code: (e && (e.code || e.message)) || 'error' };
+      }
     };
   </script>
   </script>
@@ -3902,6 +3935,7 @@
     .pm-stats-hint { font-size:.72rem; opacity:.55; margin-bottom:10px; }
     .pm-stat-row { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:8px; }
     .pm-stat-lbl { font-size:.8rem; opacity:.85; }
+    .pm-stat-lock { font-size:.72rem; opacity:.75; margin-left:4px; }
     .pm-stat-input {
       width:70px; padding:7px 9px; text-align:center;
       background:rgba(255,255,255,.06); border:1px solid rgba(255,204,0,.25);
@@ -6151,9 +6185,17 @@
   window.marcarAsistenciaUI = async (uid, sid, btn) => {
     if (!window.marcarAsistencia || !btn) return;
     btn.disabled = true; btn.textContent = '…';
-    const ok = await window.marcarAsistencia(uid, sid);
-    if (ok) { btn.textContent = 'Asistió ✓'; btn.classList.add('hecho'); }
-    else { btn.disabled = false; btn.textContent = 'Marcar'; await window.uiAlert('No se pudo marcar la asistencia. (¿Faltan publicar las reglas de "asistencias"?)', { titulo: 'Error', peligro: true }); }
+    const r = await window.marcarAsistencia(uid, sid);
+    if (r && r.ok) { btn.textContent = 'Asistió ✓'; btn.classList.add('hecho'); }
+    else {
+      btn.disabled = false; btn.textContent = 'Marcar';
+      const code = (r && r.code) || 'error';
+      const esReglas = /permission|denied|insufficient/i.test(code);
+      const msg = esReglas
+        ? 'Permiso denegado por Firestore. Hay que PUBLICAR las reglas actuales en Firebase Console → circanicula-267 → Firestore → Reglas → Publicar (incluyen el bloque «asistencias»).'
+        : 'No se pudo marcar la asistencia. Detalle: ' + code;
+      await window.uiAlert(msg, { titulo: 'Error', peligro: true });
+    }
   };
 
   // STAFF: recalcula y publica el cupo de todas las clases (T3-H).
