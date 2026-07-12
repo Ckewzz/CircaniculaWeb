@@ -3962,6 +3962,27 @@
       padding:11px 4px; border-bottom:1px solid rgba(255,204,0,.2);
       color:var(--amarillo); text-align:center; background:rgba(0,0,0,.3);
     }
+    /* ── Vista tipo Google Calendar (popup Horarios) ──────────────────────
+       Encabezado de día = nombre + número de fecha real de ESTA semana; la
+       columna de HOY se resalta. Reusa la misma tabla/celdas (motor de
+       reservas intacto); solo cambia la piel. */
+    .cal-gc .horario-grid { border-radius:14px; overflow:hidden; background:rgba(14,14,14,.5); }
+    .cal-gc .horario-grid thead th { position:sticky; top:0; z-index:2; }
+    .th-dia { line-height:1.15; }
+    .th-dia .th-dia-nom { display:block; }
+    .th-dia .th-dia-fecha {
+      display:block; margin-top:3px; font-family:'Raleway',sans-serif;
+      font-size:1rem; font-weight:700; letter-spacing:0; color:var(--blanco);
+      opacity:.9;
+    }
+    .th-dia.es-hoy { background:rgba(255,204,0,.14); }
+    .th-dia.es-hoy .th-dia-nom { color:var(--amarillo); }
+    .th-dia.es-hoy .th-dia-fecha {
+      color:#0a0a0a; background:var(--amarillo); border-radius:999px;
+      width:1.7rem; height:1.7rem; line-height:1.7rem; margin:3px auto 0;
+    }
+    .cal-gc .horario-grid td.col-hoy { background:rgba(255,204,0,.05); }
+    @media (max-width:560px){ .th-dia .th-dia-fecha { font-size:.8rem; } }
     .horario-grid th.th-hora { width:52px; }
     .horario-grid td { border:1px solid rgba(255,255,255,.04); padding:8px 4px; text-align:center; vertical-align:middle; }
     .horario-grid .hora-col {
@@ -5839,12 +5860,16 @@
       <button class="staff-filtro-btn" id="staff-filtro-btn" onclick="toggleFiltroMisClases()">Ver solo mis clases</button>
       <button class="staff-filtro-btn staff-cupo-btn" id="staff-cupo-btn" onclick="staffSincronizarCupos(this)">Actualizar cupos</button>
     </div>
-    <div class="horario-wrap">
+    <div class="horario-wrap cal-gc">
       <table class="horario-grid">
         <thead>
           <tr>
             <th class="th-hora">Hora</th>
-            <th>Lun</th><th>Mar</th><th>Mier</th><th>Jue</th><th>Vier</th>
+            <th class="th-dia" data-col="1"><span class="th-dia-nom">Lun</span><span class="th-dia-fecha" id="dia-fecha-1">—</span></th>
+            <th class="th-dia" data-col="2"><span class="th-dia-nom">Mar</span><span class="th-dia-fecha" id="dia-fecha-2">—</span></th>
+            <th class="th-dia" data-col="3"><span class="th-dia-nom">Mié</span><span class="th-dia-fecha" id="dia-fecha-3">—</span></th>
+            <th class="th-dia" data-col="4"><span class="th-dia-nom">Jue</span><span class="th-dia-fecha" id="dia-fecha-4">—</span></th>
+            <th class="th-dia" data-col="5"><span class="th-dia-nom">Vie</span><span class="th-dia-fecha" id="dia-fecha-5">—</span></th>
           </tr>
         </thead>
         <tbody id="horario-body"></tbody>
@@ -6872,6 +6897,20 @@
     cont.textContent = mismoMes
       ? `${lunes.getDate()}–${fmt(viernes, true)}`
       : `${fmt(lunes)} al ${fmt(viernes, true)}`;
+
+    // Vista tipo Google Calendar: fecha real por columna (Lun–Vie de ESTA semana)
+    // + resalta la columna de HOY. lunesDe ya rueda al lunes siguiente en fin de
+    // semana, así que las fechas siempre coinciden con los slots de semana viva.
+    const hoyYmd = (typeof ymdLocal === 'function') ? ymdLocal(new Date()) : null;
+    for (let c = 1; c <= 5; c++) {
+      const cel = document.getElementById('dia-fecha-' + c);
+      if (!cel) continue;
+      const d = new Date(lunes); d.setDate(lunes.getDate() + (c - 1));
+      cel.textContent = d.getDate();
+      const th = cel.closest('.th-dia');
+      if (th) th.classList.toggle('es-hoy',
+        hoyYmd && typeof ymdLocal === 'function' && ymdLocal(d) === hoyYmd);
+    }
   }
   window.actualizarAvisoSemana = actualizarAvisoSemana;
 
@@ -6884,6 +6923,11 @@
     const body = document.getElementById('horario-body');
     body.innerHTML = '';
 
+    // Columna de HOY (Lun=1..Vie=5) para el resalte tipo Google Calendar.
+    // En fin de semana la semana viva ya rodó a la próxima → sin columna hoy.
+    const gHoy = new Date().getDay();
+    const todayCol = (gHoy >= 1 && gHoy <= 5) ? gHoy : 0;
+
     horarioBase.forEach(row => {
       const tr = document.createElement('tr');
       const tdHora = document.createElement('td');
@@ -6893,6 +6937,7 @@
 
       for(let i=1;i<=5;i++){
         const td = document.createElement('td');
+        if (i === todayCol) td.classList.add('col-hoy');
         const tipo = row[i];
         const div = document.createElement('div');
         const key = row[0]+'-'+i;

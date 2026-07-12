@@ -1,4 +1,4 @@
-const CACHE_NAME = 'circanicula-v7';
+const CACHE_NAME = 'circanicula-v8';
 
 // Recursos a cachear para uso offline
 const STATIC_ASSETS = [
