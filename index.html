@@ -4569,6 +4569,20 @@
     .admin-acordeon-avanzado > summary { color:rgba(255,255,255,.6); }
     .admin-hint { font-size:.74rem; color:rgba(255,255,255,.55); text-align:center; margin:0 0 12px; }
 
+    /* ===== MIS CLASES POR SEMANA (perfil) ===== */
+    .perfil-acordeon { margin-top:18px; }
+    .semana-grupo { margin-bottom:14px; padding:12px 13px; border-radius:10px;
+      background:rgba(255,255,255,.03); border:1px solid rgba(255,255,255,.06); }
+    .semana-grupo.actual { border-color:rgba(255,204,0,.35); background:rgba(255,204,0,.05); }
+    .semana-grupo-tit { font-family:'Cinzel',serif; font-size:.72rem; letter-spacing:.5px;
+      color:rgba(240,237,230,.75); margin:0 0 9px; }
+    .semana-actual-tag { color:var(--negro); background:var(--amarillo); font-family:'Raleway',sans-serif;
+      font-weight:700; font-size:.6rem; padding:1px 8px; border-radius:999px; letter-spacing:0; }
+    .semana-grupo-grid { display:flex; flex-wrap:wrap; gap:7px; }
+    .semana-chip { font-size:.7rem; padding:6px 11px; border-radius:999px;
+      background:rgba(255,204,0,.12); color:var(--amarillo); border:1px solid rgba(255,204,0,.22); }
+    .semana-chip.asistio { background:rgba(79,209,197,.14); color:#5eefdf; border-color:rgba(79,209,197,.3); }
+
     /* ===== BITÁCORA / AUDITORÍA (Dueño) ===== */
     .audit-lista { margin-top:12px; max-height:340px; overflow-y:auto; display:flex; flex-direction:column; gap:6px; }
     .audit-item { background:rgba(0,0,0,.30); border:1px solid rgba(255,255,255,.08);
@@ -6000,6 +6014,16 @@
         </div>
       </div>
 
+      <!-- MIS CLASES (por semana) · desplegable + trackeable. Agrupa las
+           reservas del alumno por semana viva; la actual va resaltada. -->
+      <details class="admin-acordeon perfil-acordeon" ontoggle="if(this.open){window.renderMisClasesSemana&&window.renderMisClasesSemana();}">
+        <summary>📆 Mis clases (por semana)</summary>
+        <div class="admin-acordeon-body">
+          <p class="admin-hint">Tus reservas agrupadas por semana. La <strong>semana viva</strong> se limpia sola cada lunes; las semanas pasadas quedan como historial.</p>
+          <div id="mis-clases-semana"><p style="opacity:.6;">Toca para cargar tus clases…</p></div>
+        </div>
+      </details>
+
       <div class="perfil-progreso">
         <h3 class="perfil-sub">Tu progreso</h3>
         <div id="perfil-radar" class="perfil-radar"></div>
@@ -6796,6 +6820,73 @@
     return Array.from(slotsSeleccionados).map(slotInfoDeKey);
   }
   window.slotsEstructurados = slotsEstructurados;
+
+  // ── MIS CLASES POR SEMANA (perfil, #72 fase 1) ─────────────────────────
+  // Agrupa las reservas del alumno por semana viva. Reusa cargarMisSlots
+  // (mismos slotId que el calendario) y los interpreta:
+  //   • Recurrente semana viva: "YYYY-MM-DD_<dia>_<horaCompacta>"  (3 partes)
+  //   • Clase suelta:           "YYYY-MM-DD_<horaCompacta>"        (2 partes)
+  //   • Formato viejo sin semana ("<dia>_<hora>") → se ignora (histórico).
+  function _esFechaYmd(s) { return /^\d{4}-\d{2}-\d{2}$/.test(s); }
+  function _ordenHora(horaCompact) {
+    const i = horarioBase.findIndex(r => slotIdDe(1, r[0]).split('_')[1] === horaCompact);
+    return i < 0 ? 99 : i;
+  }
+  function _tipoDe(dia, horaCompact) {
+    const row = horarioBase.find(r => slotIdDe(1, r[0]).split('_')[1] === horaCompact);
+    return row ? row[dia] : null;
+  }
+  function _horaLbl(horaCompact) { return String(horaCompact).replace('-', '–'); }
+  function _rangoSemanaLbl(wk) {
+    const [y, m, d] = wk.split('-').map(Number);
+    const lun = new Date(y, m - 1, d), vie = new Date(lun); vie.setDate(lun.getDate() + 4);
+    const f = dd => dd.toLocaleDateString('es-MX', { day: 'numeric', month: 'short' });
+    return `${lun.getDate()}–${f(vie)}`;
+  }
+  function _parseSlotSemana(sid) {
+    const p = String(sid).split('_');
+    if (p.length >= 3 && _esFechaYmd(p[0]) && /^[1-5]$/.test(p[1])) {
+      const week = p[0], dia = +p[1], hora = p.slice(2).join('_');
+      const nom = claseNombres[_tipoDe(dia, hora)] || 'Clase';
+      return { week, orden: dia * 100 + _ordenHora(hora), label: `${DIAS_NOMBRE[dia]} · ${nom} ${_horaLbl(hora)}` };
+    }
+    if (p.length >= 2 && _esFechaYmd(p[0])) {
+      const fecha = p[0], hora = p.slice(1).join('_');
+      const [y, m, d] = fecha.split('-').map(Number);
+      const week = weekKeyDe(new Date(y, m - 1, d));
+      const diaSem = new Date(y, m - 1, d).getDay();
+      return { week, orden: 900 + _ordenHora(hora), label: `${DIAS_NOMBRE[diaSem] || fecha} ${d}/${m} · Individual ${_horaLbl(hora)}` };
+    }
+    return null;
+  }
+  window.renderMisClasesSemana = async function () {
+    const cont = document.getElementById('mis-clases-semana');
+    if (!cont) return;
+    const u = window.usuarioActual;
+    if (!u) { cont.innerHTML = '<p style="opacity:.6;">Inicia sesión para ver tus clases.</p>'; return; }
+    cont.innerHTML = '<p style="opacity:.6;">Cargando…</p>';
+    let data = { apartados: [], asistidos: [] };
+    try { data = (await window.cargarMisSlots(u.uid)) || data; } catch (e) { console.warn('misClasesSemana:', e); }
+    const asistidos = new Set(data.asistidos || []);
+    const porSemana = {};
+    (data.apartados || []).forEach(sid => {
+      const info = _parseSlotSemana(sid);
+      if (!info) return;
+      (porSemana[info.week] = porSemana[info.week] || []).push({ label: info.label, asistio: asistidos.has(sid), orden: info.orden });
+    });
+    const weeks = Object.keys(porSemana).sort().reverse();  // más reciente primero
+    if (!weeks.length) { cont.innerHTML = '<p style="opacity:.6;">Aún no tienes clases apartadas. Ve a <strong>Horarios</strong> para reservar.</p>'; return; }
+    const wkActual = window.weekKeyActual ? window.weekKeyActual() : null;
+    cont.innerHTML = weeks.map(wk => {
+      const items = porSemana[wk].sort((a, b) => a.orden - b.orden);
+      const esActual = wk === wkActual;
+      return `<div class="semana-grupo${esActual ? ' actual' : ''}">
+        <p class="semana-grupo-tit">Semana del ${_rangoSemanaLbl(wk)}${esActual ? ' · <span class="semana-actual-tag">actual</span>' : ''}</p>
+        <div class="semana-grupo-grid">${items.map(it =>
+          `<span class="semana-chip${it.asistio ? ' asistio' : ''}">${it.label}${it.asistio ? ' ✓' : ''}</span>`).join('')}</div>
+      </div>`;
+    }).join('');
+  };
 
   // ── FECHA EXACTA PARA CLASE SUELTA (#45) + TOPE POR FECHA (#46) ─────────
   const DIAS_LARGO = { 1:'lunes', 2:'martes', 3:'miércoles', 4:'jueves', 5:'viernes' };
