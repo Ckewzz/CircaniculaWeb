@@ -926,6 +926,12 @@
           if (verExt && window.listarAlumnasManual) listarAlumnasManual();
         }
 
+        // Tarjeta "🛠️ Administración" (envuelve panel del Dueño + paneles de
+        // staff): visible para staff de clase (Rank ≤ 2). Los paneles internos
+        // ya se muestran/ocultan por su cuenta según el rango exacto.
+        const adminCard = document.getElementById('perfil-admin-card');
+        if (adminCard) adminCard.style.display = esStaffClase(rank) ? 'block' : 'none';
+
         // Teléfono propio (desde doc privado). Solo lo ve el dueño aquí.
         const telEl = document.getElementById('perfil-tel');
         if (telEl) {
@@ -1574,6 +1580,18 @@
 
     // ── ELIMINAR MI PROPIA CUENTA (perfil + Auth). Irreversible. ──
     // El Dueño (Rank 0) NO ve este botón (evita auto-borrar al super-admin).
+    // Confirmación EXTRA antes de borrar la cuenta: el botón es pequeño y a
+    // propósito pide "¿Estás seguro?" primero; si acepta, eliminarMiCuenta()
+    // vuelve a confirmar (doble candado, difícil de hacer sin querer).
+    window.pedirEliminarMiCuenta = async () => {
+      if (!usuarioActual) return;
+      const seguro = await uiConfirm(
+        '¿Estás seguro que quieres eliminar tu cuenta? Perderás tu perfil, tus Estrellas y tu acceso. Esta acción es permanente.',
+        { titulo:'¿Estás seguro?', okText:'Sí, continuar', cancelText:'No, cancelar', peligro:true });
+      if (!seguro) return;
+      window.eliminarMiCuenta();
+    };
+
     window.eliminarMiCuenta = async () => {
       if (!usuarioActual) return;
       const u = usuarioActual;
@@ -4205,12 +4223,35 @@
     #seccion-mis-clases { display:none; background:rgba(0,0,0,.45); }
 
     /* ===== PERFIL ===== */
+    /* El panel de perfil se FUNDE con el popup (mismo tono): sin fondo ni
+       borde propios, para que no se vea como una "caja dentro de otra caja".
+       Las tarjetas desplegables de adentro dan la separación, mismo tono. */
     .perfil-panel {
       max-width:760px; margin:0 auto 1rem;
-      background:rgba(20,20,20,.85);
-      border:1px solid rgba(255,204,0,.18);
-      border-radius:8px; padding:22px 24px;
+      background:transparent; border:none;
+      border-radius:0; padding:0;
     }
+    /* Tarjetas del menú de perfil (Mi información, Mis clases, Mi progreso,
+       Configuración, Administración): 1 grid por opción, mismo tono sutil. */
+    .perfil-acordeon { margin-top:12px; }
+    .perfil-acordeon:first-of-type { margin-top:18px; }
+    /* Las sub-tarjetas de rol dentro de un desplegable NO llevan su propia caja
+       (evita triple anidado): heredan el tono de la tarjeta contenedora. */
+    .perfil-acordeon .perfil-rol-card {
+      margin-top:0; padding:0; background:transparent; border:none;
+    }
+    .perfil-acordeon .perfil-rol-card + .perfil-rol-card {
+      margin-top:16px; padding-top:14px; border-top:1px solid rgba(255,255,255,.08);
+    }
+    .perfil-acordeon .perfil-progreso { margin-top:0; }
+    /* Botón pequeño de eliminar cuenta (deliberadamente discreto + confirma 2x) */
+    .perfil-del-mini {
+      display:inline-block; margin-top:4px; font-size:.72rem; font-weight:600;
+      color:#ff9a90; background:rgba(176,35,27,.14); cursor:pointer;
+      border:1px solid rgba(220,70,60,.4); border-radius:7px; padding:6px 12px;
+      transition:.15s;
+    }
+    .perfil-del-mini:hover { background:rgba(176,35,27,.28); color:#ffd6d0; }
     .perfil-head { display:flex; align-items:center; gap:16px; flex-wrap:wrap; }
     .perfil-foto-wrap { position:relative; width:72px; height:72px; flex:0 0 auto; border-radius:50%; padding:3px; }
     .perfil-foto {
@@ -4570,7 +4611,6 @@
     .admin-hint { font-size:.74rem; color:rgba(255,255,255,.55); text-align:center; margin:0 0 12px; }
 
     /* ===== MIS CLASES POR SEMANA (perfil) ===== */
-    .perfil-acordeon { margin-top:18px; }
     .semana-grupo { margin-bottom:14px; padding:12px 13px; border-radius:10px;
       background:rgba(255,255,255,.03); border:1px solid rgba(255,255,255,.06); }
     .semana-grupo.actual { border-color:rgba(255,204,0,.35); background:rgba(255,204,0,.05); }
@@ -6014,7 +6054,41 @@
         </div>
       </div>
 
-      <!-- MIS CLASES (por semana) · desplegable + trackeable. Agrupa las
+      <!-- ══ MENÚ DE TARJETAS DEL PERFIL (estilo Equilibrium) ══
+           Cada opción es una tarjeta desplegable del MISMO tono que el popup;
+           1 grid por tarjeta. La identidad (arriba) queda siempre visible. -->
+
+      <!-- 1 · MI INFORMACIÓN · semblanza docente + perfil de colaborador -->
+      <details class="admin-acordeon perfil-acordeon">
+        <summary>📋 Mi información</summary>
+        <div class="admin-acordeon-body">
+          <p class="admin-hint">Tu <strong>semblanza docente</strong> y tu <strong>perfil de colaborador</strong> aparecen aquí cuando el equipo te asigna esos roles. Si eres alumna, tus datos principales están arriba, en tu tarjeta.</p>
+
+          <!-- SEMBLANZA DOCENTE (visible si imparte clases) -->
+          <div id="perfil-semblanza-card" class="perfil-rol-card" style="display:none;">
+            <div class="perfil-rol-card-head">
+              <h3 class="perfil-sub">📖 Semblanza docente</h3>
+              <button class="perfil-edit-btn" onclick="abrirEditarSemblanza()" title="Editar semblanza">✎</button>
+            </div>
+            <p class="perfil-rol-linea"><strong>Experiencia:</strong> <span id="semblanza-experiencia">—</span></p>
+            <p class="perfil-rol-linea"><strong>Clases que imparte:</strong> <span id="semblanza-clases">—</span></p>
+            <p class="perfil-rol-linea"><strong>Tiempo con nosotras:</strong> <span id="semblanza-antiguedad">—</span></p>
+          </div>
+
+          <!-- PERFIL DE COLABORADOR (visible si es colaborador) -->
+          <div id="perfil-colab-card" class="perfil-rol-card" style="display:none;">
+            <div class="perfil-rol-card-head">
+              <h3 class="perfil-sub">🤝 Perfil de colaborador</h3>
+              <button class="perfil-edit-btn" onclick="abrirEditarColab()" title="Editar colaboración">✎</button>
+            </div>
+            <p class="perfil-rol-linea"><strong>Tipo:</strong> <span id="colab-tipo">—</span></p>
+            <p class="perfil-rol-linea"><strong>Descripción:</strong> <span id="colab-descripcion">—</span></p>
+            <p class="perfil-rol-linea"><strong>Enlace:</strong> <span id="colab-enlace">—</span></p>
+          </div>
+        </div>
+      </details>
+
+      <!-- 2 · MIS CLASES (por semana) · desplegable + trackeable. Agrupa las
            reservas del alumno por semana viva; la actual va resaltada. -->
       <details class="admin-acordeon perfil-acordeon" ontoggle="if(this.open){window.renderMisClasesSemana&&window.renderMisClasesSemana();}">
         <summary>📆 Mis clases (por semana)</summary>
@@ -6024,53 +6098,47 @@
         </div>
       </details>
 
-      <div class="perfil-progreso">
-        <h3 class="perfil-sub">Tu progreso</h3>
-        <div id="perfil-radar" class="perfil-radar"></div>
-        <div id="perfil-titulos" class="perfil-titulos"></div>
-        <p class="perfil-eventos-line">Eventos participados: <span id="perfil-eventos">0</span></p>
-      </div>
-
-      <!-- SEMBLANZA DOCENTE (visible si imparte clases) -->
-      <div id="perfil-semblanza-card" class="perfil-rol-card" style="display:none;">
-        <div class="perfil-rol-card-head">
-          <h3 class="perfil-sub">📖 Semblanza docente</h3>
-          <button class="perfil-edit-btn" onclick="abrirEditarSemblanza()" title="Editar semblanza">✎</button>
+      <!-- 3 · MI PROGRESO · radar de stats + títulos -->
+      <details class="admin-acordeon perfil-acordeon">
+        <summary>📊 Mi progreso</summary>
+        <div class="admin-acordeon-body">
+          <div class="perfil-progreso">
+            <div id="perfil-radar" class="perfil-radar"></div>
+            <div id="perfil-titulos" class="perfil-titulos"></div>
+            <p class="perfil-eventos-line">Eventos participados: <span id="perfil-eventos">0</span></p>
+          </div>
         </div>
-        <p class="perfil-rol-linea"><strong>Experiencia:</strong> <span id="semblanza-experiencia">—</span></p>
-        <p class="perfil-rol-linea"><strong>Clases que imparte:</strong> <span id="semblanza-clases">—</span></p>
-        <p class="perfil-rol-linea"><strong>Tiempo con nosotras:</strong> <span id="semblanza-antiguedad">—</span></p>
-      </div>
+      </details>
 
-      <!-- PERFIL DE COLABORADOR (visible si es colaborador) -->
-      <div id="perfil-colab-card" class="perfil-rol-card" style="display:none;">
-        <div class="perfil-rol-card-head">
-          <h3 class="perfil-sub">🤝 Perfil de colaborador</h3>
-          <button class="perfil-edit-btn" onclick="abrirEditarColab()" title="Editar colaboración">✎</button>
+      <!-- 4 · CONFIGURACIÓN · visibilidad + eliminar cuenta -->
+      <details class="admin-acordeon perfil-acordeon">
+        <summary>⚙️ Configuración</summary>
+        <div class="admin-acordeon-body">
+          <!-- VISIBILIDAD DEL PERFIL (todos) -->
+          <div id="perfil-visibilidad-card" class="perfil-rol-card">
+            <h3 class="perfil-sub">👁️ Visibilidad de tu perfil</h3>
+            <p class="admin-hint">Tú decides qué se muestra. Desactiva «Aparecer en Buscar Perfil» para <strong>ocultar tu perfil por completo</strong> del directorio (útil si tienes una cuenta de dueño y prefieres aparecer solo con otra cuenta de instructor).</p>
+            <div class="perfil-vis-toggles">
+              <label class="vis-toggle"><input type="checkbox" id="vis-perfilPublico" onchange="toggleVisibilidad('perfilPublico', this.checked)"> Aparecer en «Buscar Perfil» <span style="opacity:.55">(apágalo para ocultar tu perfil)</span></label>
+              <label class="vis-toggle"><input type="checkbox" id="vis-mostrarStats" onchange="toggleVisibilidad('mostrarStats', this.checked)"> Mostrar mis stats y títulos</label>
+              <label class="vis-toggle"><input type="checkbox" id="vis-mostrarSemblanza" onchange="toggleVisibilidad('mostrarSemblanza', this.checked)"> Mostrar mi semblanza docente</label>
+            </div>
+          </div>
+
+          <!-- ZONA DE PELIGRO · eliminar mi propia cuenta (todos menos el Dueño).
+               Botón pequeño + confirmación extra "¿Estás seguro?" a propósito. -->
+          <div id="perfil-peligro-card" class="perfil-rol-card perfil-peligro" style="display:none;">
+            <h3 class="perfil-sub">⚠️ Eliminar mi cuenta</h3>
+            <p class="admin-hint">Esto borra <strong>permanentemente</strong> tu cuenta, tu perfil, tus stats y tu acceso. No se puede deshacer. Tus reservas pasadas se conservan en el historial de Circanícula, pero ya no podrás iniciar sesión con esta cuenta.</p>
+            <button class="perfil-del-mini" onclick="pedirEliminarMiCuenta()">Eliminar mi cuenta</button>
+          </div>
         </div>
-        <p class="perfil-rol-linea"><strong>Tipo:</strong> <span id="colab-tipo">—</span></p>
-        <p class="perfil-rol-linea"><strong>Descripción:</strong> <span id="colab-descripcion">—</span></p>
-        <p class="perfil-rol-linea"><strong>Enlace:</strong> <span id="colab-enlace">—</span></p>
-      </div>
+      </details>
 
-      <!-- VISIBILIDAD DEL PERFIL (todos) -->
-      <div id="perfil-visibilidad-card" class="perfil-rol-card">
-        <h3 class="perfil-sub">👁️ Visibilidad de tu perfil</h3>
-        <p class="admin-hint">Tú decides qué se muestra. Desactiva «Aparecer en Buscar Perfil» para <strong>ocultar tu perfil por completo</strong> del directorio (útil si tienes una cuenta de dueño y prefieres aparecer solo con otra cuenta de instructor).</p>
-        <div class="perfil-vis-toggles">
-          <label class="vis-toggle"><input type="checkbox" id="vis-perfilPublico" onchange="toggleVisibilidad('perfilPublico', this.checked)"> Aparecer en «Buscar Perfil» <span style="opacity:.55">(apágalo para ocultar tu perfil)</span></label>
-          <label class="vis-toggle"><input type="checkbox" id="vis-mostrarStats" onchange="toggleVisibilidad('mostrarStats', this.checked)"> Mostrar mis stats y títulos</label>
-          <label class="vis-toggle"><input type="checkbox" id="vis-mostrarSemblanza" onchange="toggleVisibilidad('mostrarSemblanza', this.checked)"> Mostrar mi semblanza docente</label>
-        </div>
-      </div>
-
-      <!-- ZONA DE PELIGRO · eliminar mi propia cuenta (todos menos el Dueño) -->
-      <div id="perfil-peligro-card" class="perfil-rol-card perfil-peligro" style="display:none;">
-        <h3 class="perfil-sub">⚠️ Eliminar mi cuenta</h3>
-        <p class="admin-hint">Esto borra <strong>permanentemente</strong> tu cuenta, tu perfil, tus stats y tu acceso. No se puede deshacer. Tus reservas pasadas se conservan en el historial de Circanícula, pero ya no podrás iniciar sesión con esta cuenta.</p>
-        <button class="admin-btn admin-btn-peligro" onclick="eliminarMiCuenta()">Eliminar mi cuenta para siempre</button>
-      </div>
-    </div>
+      <!-- 5 · ADMINISTRACIÓN · paneles de staff/dueño (se muestra por rango) -->
+      <details class="admin-acordeon perfil-acordeon" id="perfil-admin-card" style="display:none;">
+        <summary>🛠️ Administración</summary>
+        <div class="admin-acordeon-body">
 
     <!-- PANEL ADMIN (solo Dueño · Rank 0) -->
     <div id="admin-panel" class="admin-panel" style="display:none;">
@@ -6208,6 +6276,9 @@
       <p id="admin-manual-out" class="admin-resultado" style="white-space:pre-line; text-align:left;"></p>
       <div id="admin-manual-lista" class="manual-lista"></div>
     </div>
+        </div>
+      </details>
+    </div><!-- /perfil-panel -->
 
     <div class="comunidad-links">
       <a href="#comunidad" class="btn-pildora"><span class="btn-pildora-ico">🔎</span> Buscar Perfil</a>
