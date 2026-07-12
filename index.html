@@ -5486,6 +5486,102 @@
     </div>
   </section>
 
+  <!-- ══════════════════════════════════════════════════════════════════
+       LANDING SHOWCASE (visitantes) — vive en el scroll principal, debajo
+       del mosaico. Orden: parrilla MUESTRA (solo lectura) → carrusel de 2
+       fotos → Preguntas Frecuentes (reutiliza contenido de Reglas) →
+       Contáctanos. Mantiene el scroll corto sin repetir toda la app.
+       ══════════════════════════════════════════════════════════════════ -->
+  <style>
+    #landing-showcase{max-width:1080px;margin:0 auto;padding:20px 20px 40px;}
+    .showcase-bloque{margin-top:54px;}
+    .showcase-eyebrow{display:block;text-align:center;font-family:'Cinzel',serif;font-size:.66rem;letter-spacing:3px;color:var(--naranja);text-transform:uppercase;margin-bottom:8px;}
+    .showcase-titulo{text-align:center;font-family:'Cinzel',serif;font-size:1.5rem;color:var(--blanco);margin:0 0 6px;}
+    .showcase-sub{text-align:center;font-size:.82rem;opacity:.62;margin:0 auto 22px;max-width:520px;line-height:1.7;}
+    /* --- Parrilla muestra (solo lectura) --- */
+    .muestra-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;border-radius:14px;}
+    table.muestra-grid{width:100%;border-collapse:collapse;min-width:520px;background:rgba(20,20,20,.55);}
+    table.muestra-grid th,table.muestra-grid td{padding:11px 8px;text-align:center;border:1px solid rgba(255,255,255,.06);font-size:.74rem;}
+    table.muestra-grid thead th{font-family:'Cinzel',serif;letter-spacing:1px;color:var(--amarillo);font-size:.7rem;background:rgba(0,0,0,.35);}
+    table.muestra-grid .mg-hora{font-weight:600;color:var(--blanco);opacity:.85;white-space:nowrap;font-size:.68rem;}
+    .mg-clase{display:inline-block;padding:4px 9px;border-radius:999px;font-weight:600;font-size:.68rem;color:#0a0a0a;}
+    .mg-vacio{opacity:.25;}
+    .muestra-cta{text-align:center;margin-top:18px;font-size:.78rem;opacity:.7;}
+    .muestra-cta button{margin-top:12px;}
+    /* --- Carrusel de 2 fotos --- */
+    .showcase-carousel{display:flex;gap:16px;}
+    .showcase-frame{position:relative;flex:1;aspect-ratio:4/3;overflow:hidden;border-radius:16px;box-shadow:0 14px 40px rgba(0,0,0,.4);}
+    .sc-slide{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:0;transition:opacity 1.3s ease;}
+    .sc-slide.active{opacity:1;}
+    @media(max-width:560px){ .showcase-carousel{flex-direction:column;} .showcase-frame{aspect-ratio:16/10;} }
+    /* --- FAQ landing --- */
+    .showcase-faq{max-width:680px;margin:0 auto;}
+  </style>
+  <section id="landing-showcase" data-nav-skip="true">
+
+    <!-- 1 · Parrilla muestra (solo lectura) -->
+    <div class="showcase-bloque">
+      <span class="showcase-eyebrow">Nuestra semana</span>
+      <h2 class="showcase-titulo">Horarios de la semana</h2>
+      <p class="showcase-sub">Lunes a Viernes. Una muestra de las clases disponibles — inicia sesión para apartar tu lugar.</p>
+      <div class="muestra-wrap">
+        <table class="muestra-grid">
+          <thead>
+            <tr><th>Hora</th><th>Lun</th><th>Mar</th><th>Mié</th><th>Jue</th><th>Vie</th></tr>
+          </thead>
+          <tbody id="muestra-body"></tbody>
+        </table>
+      </div>
+      <div class="muestra-cta">
+        <p>Vista previa · sin reservar</p>
+        <button type="button" class="btn-primario" onclick="abrirVista('horarios')">Reservar mi clase →</button>
+      </div>
+    </div>
+
+    <!-- 2 · Carrusel de 2 fotos -->
+    <div class="showcase-bloque">
+      <span class="showcase-eyebrow">Nuestro espacio</span>
+      <h2 class="showcase-titulo">Un vistazo a Circanícula</h2>
+      <div class="showcase-carousel">
+        <div class="showcase-frame">
+          <img class="sc-slide active" src="Images/BG-01.jpg" alt="Circanícula" loading="lazy">
+          <img class="sc-slide" src="Images/BG-03.jpeg" alt="Circanícula" loading="lazy">
+          <img class="sc-slide" src="Images/BG-05.jpg" alt="Circanícula" loading="lazy">
+          <img class="sc-slide" src="Images/BG-07.jpg" alt="Circanícula" loading="lazy">
+        </div>
+        <div class="showcase-frame">
+          <img class="sc-slide active" src="Images/BG-02.jpg" alt="Circanícula" loading="lazy">
+          <img class="sc-slide" src="Images/BG-04.jpg" alt="Circanícula" loading="lazy">
+          <img class="sc-slide" src="Images/BG-06.jpg" alt="Circanícula" loading="lazy">
+          <img class="sc-slide" src="Images/BG-08.jpg" alt="Circanícula" loading="lazy">
+        </div>
+      </div>
+    </div>
+
+    <!-- 3 · Preguntas Frecuentes (reutiliza contenido de Reglas) -->
+    <div class="showcase-bloque">
+      <span class="showcase-eyebrow">Convivencia & Dudas</span>
+      <h2 class="showcase-titulo">Preguntas Frecuentes</h2>
+      <div class="showcase-faq">
+        <div class="accordion-item"><button class="accordion-btn">Puntualidad y asistencia<span class="accordion-icon">+</span></button><div class="accordion-body"><div class="accordion-body-inner">10 minutos de tolerancia. Cancelaciones con 24h de anticipación. Sin cancelación previa, la clase cuenta como asistida.</div></div></div>
+        <div class="accordion-item"><button class="accordion-btn">Vestimenta y seguridad<span class="accordion-icon">+</span></button><div class="accordion-body"><div class="accordion-body-inner">Ropa adecuada para acrobacia, no holgada. Calentamiento obligatorio. No se permite probar cosas no enseñadas previamente.</div></div></div>
+        <div class="accordion-item"><button class="accordion-btn">Cupo y programa<span class="accordion-icon">+</span></button><div class="accordion-body"><div class="accordion-body-inner">Máximo 6 personas por clase. El programa es mensual; no se reponen horas de otros meses. Mínimo 2-3 meses para participar en presentaciones.</div></div></div>
+        <div class="accordion-item"><button class="accordion-btn">¿Desde qué edad pueden tomar clases?<span class="accordion-icon">+</span></button><div class="accordion-body"><div class="accordion-body-inner">Kids desde los 6 años. Para adultas no hay límite; comenzamos desde donde estés.</div></div></div>
+        <div class="accordion-item"><button class="accordion-btn">¿Necesito experiencia previa?<span class="accordion-icon">+</span></button><div class="accordion-body"><div class="accordion-body-inner">No. Contamos con niveles para principiantes absolutas. La técnica se construye desde cero.</div></div></div>
+        <div class="accordion-item"><button class="accordion-btn">¿Cómo funcionan los pagos?<span class="accordion-icon">+</span></button><div class="accordion-body"><div class="accordion-body-inner">Pago seguro con tarjeta vía Stripe. Mensualidades al inicio de cada período. Clase individual antes de la sesión.</div></div></div>
+      </div>
+    </div>
+
+    <!-- 4 · Contáctanos (compacto → abre la hoja de Explicaciones/Contacto) -->
+    <div class="showcase-bloque" style="text-align:center;">
+      <span class="showcase-eyebrow">Hablemos</span>
+      <h2 class="showcase-titulo">Contáctanos</h2>
+      <p class="showcase-sub">¿Dudas, talleres privados o colaboraciones? Escríbenos y te respondemos pronto.</p>
+      <button type="button" class="btn-primario" onclick="irAContacto()">Mándanos un mensaje</button>
+    </div>
+
+  </section>
+
   <!-- HOST del popup HOJA (sheet). El contenido se inyecta por portal. -->
   <div id="sheet-host" aria-hidden="true">
     <div class="sheet-bg" data-sheet-cerrar></div>
@@ -6486,6 +6582,42 @@
     cur = (cur + 1) % slides.length;
     slides[cur].classList.add('active');
   }, 5500);
+
+  /* LANDING SHOWCASE · carrusel de 2 fotos (independiente del hero).
+     Cada marco cicla entre sus imágenes con crossfade, desfasados entre sí. */
+  document.querySelectorAll('.showcase-frame').forEach((frame, fi) => {
+    const imgs = frame.querySelectorAll('.sc-slide');
+    if (imgs.length < 2) return;
+    let i = 0;
+    setInterval(() => {
+      imgs[i].classList.remove('active');
+      i = (i + 1) % imgs.length;
+      imgs[i].classList.add('active');
+    }, 4200 + fi * 900);
+  });
+
+  /* LANDING SHOWCASE · parrilla MUESTRA (solo lectura) construida desde el
+     mismo horarioBase que usa la app. Colores alineados con la leyenda. */
+  (function renderMuestra(){
+    const body = document.getElementById('muestra-body');
+    if (!body) return;
+    const COL = { open:'#4fd1c5', kids:'#e87400', flow:'#ffcc00', fit:'#ffcc00', flex:'#80d8ff', aro:'#d8a0ff' };
+    const NOM = { kids:'Kids', flow:'Telas', fit:'Telas', flex:'Flex', aro:'Aro', open:'Open Gym' };
+    const base = [
+      ['8:00 – 10:00', 'open', 'open',  'open', 'open',  'open' ],
+      ['5:30 – 7:00',  'kids', 'kids',  'kids', 'kids',  'kids' ],
+      ['7:00 – 8:00',  'flow', 'flex',  'flow', 'flex',  'flow' ],
+      ['8:00 – 9:00',  'fit',  'aro',   'fit',  'aro',   'fit'  ],
+    ];
+    body.innerHTML = base.map(row => {
+      const celdas = row.slice(1).map(c => {
+        if (!c) return '<td><span class="mg-vacio">·</span></td>';
+        const col = COL[c] || '#888';
+        return `<td><span class="mg-clase" style="background:${col}">${NOM[c] || c}</span></td>`;
+      }).join('');
+      return `<tr><td class="mg-hora">${row[0]}</td>${celdas}</tr>`;
+    }).join('');
+  })();
 
   /* FONDO SOLO EN LA PORTADA: al pasar el hero, el carrusel se desvanece y el
      contenido queda sobre fondo sólido oscuro (mejor lectura). Sin librerías:
