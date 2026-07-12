@@ -3476,6 +3476,63 @@
     .fab-perfil:active { transform:translateY(0); }
     .fab-perfil .fab-perfil-ico { font-size:1.05rem; }
     @media (max-width:560px){ .fab-perfil { right:14px; bottom:16px; padding:11px 17px; font-size:.74rem; } }
+    /* En móvil/PWA la barra inferior reemplaza al FAB "Mi Perfil" */
+    body.mob-nav-on .fab-perfil { display:none !important; }
+
+    /* ===== NAVEGACIÓN MÓVIL / PWA ===== */
+    .nav-burger {
+      display:none; flex-direction:column; justify-content:center; gap:5px;
+      width:40px; height:40px; padding:8px; border:none; border-radius:8px;
+      background:rgba(255,255,255,.06); cursor:pointer;
+      border:1px solid rgba(255,204,0,.22);
+      -webkit-tap-highlight-color:transparent;
+    }
+    .nav-burger span {
+      display:block; height:2px; width:100%;
+      background:var(--amarillo); border-radius:1px;
+      transition:transform .25s ease, opacity .25s ease;
+    }
+    .nav-burger.abierto span:nth-child(1) { transform:translateY(7px) rotate(45deg); }
+    .nav-burger.abierto span:nth-child(2) { opacity:0; }
+    .nav-burger.abierto span:nth-child(3) { transform:translateY(-7px) rotate(-45deg); }
+
+    .header-actions { display:flex; align-items:center; gap:8px; }
+
+    .nav-overlay {
+      display:none; position:fixed; inset:0; z-index:280;
+      background:rgba(0,0,0,.55); backdrop-filter:blur(2px);
+      opacity:0; transition:opacity .25s ease;
+    }
+    .nav-overlay.visible { display:block; opacity:1; }
+
+    .mob-bottom-nav {
+      display:none; position:fixed; left:0; right:0; bottom:0; z-index:8500;
+      height:calc(56px + env(safe-area-inset-bottom));
+      padding-bottom:env(safe-area-inset-bottom);
+      background:rgba(8,8,8,.94); backdrop-filter:blur(14px);
+      border-top:1px solid rgba(255,204,0,.18);
+      grid-template-columns:repeat(5,1fr);
+      align-items:stretch;
+    }
+    body.mob-nav-on .mob-bottom-nav { display:grid; }
+    body.mob-nav-on { padding-bottom:calc(56px + env(safe-area-inset-bottom)); }
+
+    .mob-nav-item {
+      display:flex; flex-direction:column; align-items:center; justify-content:center;
+      gap:3px; border:none; background:transparent; cursor:pointer;
+      color:rgba(240,237,230,.45); font-family:'Cinzel',serif;
+      font-size:.48rem; letter-spacing:.5px; text-transform:uppercase;
+      padding:6px 2px; -webkit-tap-highlight-color:transparent;
+      transition:color .2s ease;
+    }
+    .mob-nav-item .mob-nav-ico { font-size:1.15rem; line-height:1; }
+    .mob-nav-item.active, .mob-nav-item:active { color:var(--amarillo); }
+    .mob-nav-item.active .mob-nav-ico { transform:scale(1.08); }
+
+    /* Banner PWA: que no quede tapado por la barra inferior */
+    body.mob-nav-on #pwa-banner {
+      bottom:calc(68px + env(safe-area-inset-bottom)) !important;
+    }
     .nav-dot {
       width:7px; height:7px;
       border-radius:50%;
@@ -3554,6 +3611,7 @@
       display:flex;
       align-items:center;
       justify-content:space-between;
+      gap:16px;
       padding:12px 36px;
       /* PWA standalone: respeta la barra de estado / notch del teléfono */
       padding-top:calc(12px + env(safe-area-inset-top));
@@ -3561,6 +3619,7 @@
       backdrop-filter:blur(12px);
       border-bottom:1px solid rgba(255,204,0,.12);
     }
+    header > nav { display:flex; align-items:center; gap:22px; }
     .logo { height:44px; width:auto; }
     .logo-texto {
       font-family:'Cinzel',serif;
@@ -3571,7 +3630,14 @@
     }
     nav { display:flex; align-items:center; gap:22px; }
     nav ul.nav-links { display:flex; list-style:none; gap:24px; align-items:center; }
-    .nav-auth { display:flex; align-items:center; gap:10px; }
+    .nav-auth { display:flex; align-items:center; gap:10px; flex-shrink:0; }
+
+    /* Escritorio: logo · links centrados · cuenta a la derecha */
+    @media (min-width:769px) {
+      .logo { order:1; }
+      header > nav { order:2; flex:1; justify-content:center; }
+      .header-actions { order:3; }
+    }
     nav a {
       color:rgba(240,237,230,.7);
       text-decoration:none;
@@ -4580,7 +4646,7 @@
        --blanco (nada de blancos planos). Variante .peligro para borrados.
        ════════════════════════════════════════════════════════════════ */
     .ui-dlg-bg {
-      position:fixed; inset:0; z-index:4000; background:rgba(0,0,0,.82);
+      position:fixed; inset:0; z-index:5000; background:rgba(0,0,0,.82);
       -webkit-backdrop-filter:blur(3px); backdrop-filter:blur(3px);
       display:flex; align-items:center; justify-content:center; padding:20px;
       animation:uiDlgFade .14s ease;
@@ -4628,6 +4694,149 @@
     }
     .ui-dlg-ok:hover { filter:brightness(1.08); }
     .ui-dlg-ok.peligro { background:linear-gradient(90deg,#ff6b6b,#c0392b); color:#fff; }
+
+    /* ════════════════════════════════════════════════════════════════
+       APP-SHELL PWA — Grid de mosaicos (home) + popup nativo tipo HOJA.
+       El home es un grid de accesos; cada mosaico abre una "hoja" (sheet)
+       nativa con header fijo y cuerpo con scroll interno (flexbox cuidado).
+       ════════════════════════════════════════════════════════════════ */
+    /* --- Grid de mosaicos del home --- */
+    #home-grid {
+      max-width:1000px; margin:0 auto; padding:8px 20px 40px;
+    }
+    .home-grid-titulo {
+      font-family:'Cinzel',serif; color:var(--blanco); text-align:center;
+      font-size:1.05rem; letter-spacing:2px; opacity:.9; margin:0 0 4px;
+    }
+    .home-grid-sub {
+      text-align:center; color:var(--blanco); opacity:.6; font-size:.82rem;
+      margin:0 0 22px; letter-spacing:.3px;
+    }
+    .mosaicos {
+      display:grid; grid-template-columns:repeat(3,1fr); gap:14px;
+    }
+    .mosaico {
+      display:flex; flex-direction:column; align-items:center; justify-content:center;
+      gap:8px; padding:22px 12px; min-height:118px; cursor:pointer;
+      background:linear-gradient(160deg,rgba(28,28,28,.92),rgba(14,14,14,.92));
+      border:1px solid rgba(255,255,255,.08); border-radius:16px;
+      color:var(--blanco); text-align:center; font-family:inherit;
+      transition:transform .16s ease, border-color .16s ease, background .16s ease;
+      -webkit-tap-highlight-color:transparent;
+    }
+    .mosaico:hover, .mosaico:focus-visible {
+      transform:translateY(-4px); border-color:rgba(255,204,0,.55);
+      background:linear-gradient(160deg,rgba(36,34,20,.95),rgba(18,17,10,.95)); outline:none;
+    }
+    .mosaico:active { transform:translateY(-1px) scale(.98); }
+    .mosaico-ico { font-size:1.9rem; line-height:1; }
+    .mosaico-txt { font-size:.86rem; font-weight:600; letter-spacing:.4px; }
+    .mosaico-sub { font-size:.66rem; opacity:.55; letter-spacing:.2px; }
+    .mosaico-badge {
+      margin-top:2px; font-size:.7rem; font-weight:800; color:var(--amarillo);
+      background:rgba(255,204,0,.12); border:1px solid rgba(255,204,0,.3);
+      border-radius:999px; padding:2px 9px; line-height:1.3;
+    }
+    @media (max-width:560px) {
+      .mosaicos { grid-template-columns:repeat(2,1fr); gap:12px; }
+      .mosaico { min-height:106px; padding:18px 10px; }
+      .mosaico-ico { font-size:1.7rem; }
+    }
+
+    /* --- Popup HOJA (sheet) nativo --- */
+    #sheet-host { position:fixed; inset:0; z-index:4200; display:none; }
+    #sheet-host.abierto { display:block; }
+    .sheet-bg {
+      position:absolute; inset:0; background:rgba(0,0,0,.78);
+      -webkit-backdrop-filter:blur(3px); backdrop-filter:blur(3px);
+      animation:uiDlgFade .16s ease;
+    }
+    .sheet-card {
+      position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
+      width:min(680px,94vw); max-height:92vh;
+      display:flex; flex-direction:column;            /* flexbox: header fijo + cuerpo scroll */
+      background:linear-gradient(165deg,#1a1a1a,#0d0d0d);
+      border:1px solid rgba(255,204,0,.28); border-radius:20px; overflow:hidden;
+      box-shadow:0 30px 90px rgba(0,0,0,.75);
+      animation:sheetPop .2s cubic-bezier(.2,.9,.3,1.1);
+    }
+    @keyframes sheetPop { from{transform:translate(-50%,-46%) scale(.96);opacity:.4} to{transform:translate(-50%,-50%) scale(1);opacity:1} }
+    .sheet-header {
+      flex:0 0 auto; display:flex; align-items:center; gap:12px;
+      padding:15px 18px; border-bottom:1px solid rgba(255,255,255,.08);
+      background:linear-gradient(180deg,rgba(255,204,0,.06),transparent);
+    }
+    .sheet-back {
+      flex:0 0 auto; width:38px; height:38px; border-radius:11px; cursor:pointer;
+      background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.12);
+      color:var(--blanco); font-size:1.2rem; line-height:1; display:flex;
+      align-items:center; justify-content:center; transition:.15s;
+    }
+    .sheet-back:hover { background:rgba(255,204,0,.14); border-color:rgba(255,204,0,.4); }
+    .sheet-title {
+      flex:1 1 auto; margin:0; font-family:'Cinzel',serif; color:var(--amarillo);
+      font-size:1.05rem; letter-spacing:.5px; line-height:1.25;
+      display:flex; align-items:center; gap:9px; min-width:0;
+    }
+    .sheet-title .sheet-ico { font-size:1.15rem; }
+    .sheet-title .sheet-title-txt { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .sheet-close {
+      flex:0 0 auto; width:34px; height:34px; border-radius:50%; cursor:pointer;
+      background:transparent; border:1px solid rgba(255,255,255,.16);
+      color:var(--blanco); opacity:.75; font-size:1.1rem; line-height:1;
+      display:flex; align-items:center; justify-content:center; transition:.15s;
+    }
+    .sheet-close:hover { opacity:1; border-color:rgba(255,95,95,.5); color:#ff8a8a; }
+    .sheet-body {
+      flex:1 1 auto; overflow-y:auto; -webkit-overflow-scrolling:touch;
+      padding:18px 18px 26px;
+    }
+    /* Las secciones migradas: al vivir dentro de la hoja se neutraliza su
+       padding de página completa y el acordeón (siempre abiertas dentro). */
+    .sheet-body > .seccion {
+      min-height:0 !important; padding:0 !important; margin:0 !important;
+      display:block !important; max-width:none !important;
+    }
+    .sheet-body > .seccion + .seccion { margin-top:34px !important; border-top:1px solid rgba(255,255,255,.07); padding-top:26px !important; }
+    /* dentro de la hoja el acordeón queda SIEMPRE abierto (aunque el resize lo cierre) */
+    .sheet-body > .colapsable > .seccion-header::after { display:none !important; }
+    .sheet-body > .colapsable.cerrado > *:not(.seccion-header) { display:block !important; }
+    /* secciones que ahora VIVEN en hojas: se ocultan del flujo largo del home */
+    [data-en-hoja] { display:none !important; }
+    @media (max-width:560px) {
+      .sheet-card { width:100vw; height:100vh; max-height:100vh; border-radius:0; top:0; left:0; transform:none; }
+      @keyframes sheetPop { from{transform:translateY(3%);opacity:.5} to{transform:translateY(0);opacity:1} }
+      .sheet-card { animation:sheetPop .2s ease; }
+      .sheet-body { padding-bottom:calc(26px + env(safe-area-inset-bottom,0px)); }
+    }
+
+    /* --- Tarjetas de PAQUETES (mensualidades) dentro de su hoja --- */
+    .paquetes-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:14px; }
+    .paquete-card {
+      position:relative; display:flex; flex-direction:column; align-items:center;
+      text-align:center; padding:20px 14px 16px; border-radius:15px;
+      background:rgba(255,255,255,.03); border:1px solid rgba(255,255,255,.1);
+    }
+    .paquete-card.destacado { border:2px solid var(--amarillo); background:rgba(26,24,0,.6); }
+    .paquete-badge {
+      position:absolute; top:-11px; left:50%; transform:translateX(-50%);
+      background:var(--amarillo); color:var(--negro); font-size:.62rem; font-weight:800;
+      letter-spacing:.5px; padding:3px 11px; border-radius:999px; white-space:nowrap;
+    }
+    .paquete-nombre { font-family:'Cinzel',serif; color:var(--blanco); font-size:1rem; margin:4px 0 2px; letter-spacing:.5px; }
+    .paquete-sesiones { color:var(--blanco); opacity:.6; font-size:.74rem; margin:0 0 10px; }
+    .paquete-precio { color:var(--amarillo); font-size:1.7rem; font-weight:800; line-height:1; margin:0; }
+    .paquete-periodo { color:var(--blanco); opacity:.55; font-size:.68rem; margin:3px 0 0; text-transform:uppercase; letter-spacing:.5px; }
+    .paquete-clases { color:var(--blanco); opacity:.85; font-size:.82rem; font-weight:600; margin:10px 0 0; }
+    .paquete-sep { width:38px; height:1px; background:rgba(255,255,255,.12); margin:12px auto; }
+    .paquete-btn {
+      width:100%; margin-top:auto; padding:10px; border-radius:9px; cursor:pointer;
+      background:transparent; border:1px solid rgba(255,204,0,.4); color:var(--amarillo);
+      font-family:inherit; font-size:.78rem; font-weight:700; transition:.15s;
+    }
+    .paquete-btn:hover, .paquete-card.destacado .paquete-btn { background:var(--amarillo); color:var(--negro); }
+    .paquetes-nota { color:var(--blanco); opacity:.55; font-size:.76rem; line-height:1.6; margin:20px 0 0; text-align:center; }
+
     /* Avatar por EMOJI: fondo neutro + emoji centrado. Sirve en tarjeta, modal,
        perfil, onboarding y chip del nav. El tamaño lo fija cada contexto (las
        tarjetas/modal por su clase -ph; perfil/onb/nav en línea desde JS). */
@@ -4999,31 +5208,70 @@
       #inicio { padding:100px 18px 60px; }
       .form-fila { grid-template-columns:1fr; }
     }
-    /* PWA / móvil: logo arriba, navegación y cuenta DEBAJO del logo */
-    @media (max-width:680px) {
+    /* PWA / móvil: header compacto + drawer lateral + barra inferior */
+    @media (max-width:768px) {
       header {
+        flex-direction:row;
+        align-items:center;
+        justify-content:space-between;
+        gap:10px;
+        padding:8px 14px;
+        padding-top:calc(8px + env(safe-area-inset-top));
+      }
+      .logo { height:36px; }
+      .nav-burger { display:flex; }
+      .header-actions { flex-shrink:0; }
+      .nav-auth { gap:6px; }
+      #user-name { display:none; }
+      #btn-login { padding:7px 12px; font-size:.55rem; }
+      #btn-logout { padding:7px 10px; font-size:.55rem; }
+
+      header > nav {
+        position:fixed; top:0; right:0; bottom:0;
+        width:min(290px, 86vw);
+        z-index:300;
         flex-direction:column;
         align-items:stretch;
-        gap:8px;
-        padding:10px 14px;
-        padding-top:calc(10px + env(safe-area-inset-top));
+        gap:0;
+        padding:calc(18px + env(safe-area-inset-top)) 22px 28px;
+        background:rgba(10,10,10,.97);
+        border-left:1px solid rgba(255,204,0,.2);
+        box-shadow:-12px 0 40px rgba(0,0,0,.55);
+        transform:translateX(105%);
+        transition:transform .28s ease;
+        overflow-y:auto;
       }
-      .logo, .logo-texto { align-self:center; }
-      nav {
-        flex-direction:column-reverse; /* cuenta justo debajo del logo, luego los links */
-        gap:10px;
-        width:100%;
-      }
-      .nav-auth { justify-content:center; }
+      header > nav.abierto { transform:translateX(0); }
+
       nav ul.nav-links {
-        flex-wrap:wrap;
-        justify-content:center;
-        gap:8px 16px;
+        flex-direction:column;
+        align-items:stretch;
+        gap:4px;
         width:100%;
+        margin-top:18px;
       }
-      #btn-login span { display:inline; }
-      /* el header es más alto en móvil: empuja el hero para que no quede tapado */
-      #inicio { padding:180px 18px 60px; }
+      nav ul.nav-links a {
+        display:block;
+        font-size:.72rem;
+        letter-spacing:2.5px;
+        padding:14px 12px;
+        border-radius:6px;
+        border:1px solid transparent;
+      }
+      nav ul.nav-links a:hover,
+      nav ul.nav-links a:active {
+        color:var(--amarillo);
+        background:rgba(255,204,0,.08);
+        border-color:rgba(255,204,0,.15);
+      }
+      nav ul.nav-links .nav-cta {
+        margin-top:8px;
+        text-align:center;
+        background:rgba(255,204,0,.12);
+        border-color:rgba(255,204,0,.3);
+      }
+      #inicio { padding:92px 18px 60px; }
+      .seccion { padding:56px 18px; }
     }
 
     /* ===== SECCIONES COLAPSABLES (acordeón) — SOLO móvil/PWA =====
@@ -5120,15 +5368,7 @@
   <header>
     <img src="Images/Logo_4.png" alt="Circanícula" class="logo"
       onerror="this.outerHTML='<span class=\'logo-texto\'>Circanícula</span>'">
-    <nav>
-      <ul class="nav-links">
-        <li><a href="#inicio">Inicio</a></li>
-        <li><a href="#proximos-eventos">Eventos</a></li>
-        <li><a href="#horarios">Horarios</a></li>
-        <li><a href="#precios">Precios</a></li>
-        <li><a href="#labor-social">Nosotros</a></li>
-        <li><a href="#contacto" class="nav-cta">Contacto</a></li>
-      </ul>
+    <div class="header-actions">
       <div class="nav-auth">
         <button id="user-info" onclick="irAMiCuenta()" title="Ir a Mi Cuenta">
           <img id="user-foto" src="" alt="foto">
@@ -5146,8 +5386,43 @@
         </button>
         <button id="btn-logout" class="btn-header" onclick="logout()">Salir</button>
       </div>
+      <button id="nav-burger" class="nav-burger" type="button"
+        aria-label="Abrir menú" aria-expanded="false" aria-controls="nav-drawer">
+        <span></span><span></span><span></span>
+      </button>
+    </div>
+    <nav id="nav-drawer" aria-label="Menú principal">
+      <ul class="nav-links">
+        <li><a href="#inicio" onclick="cerrarVista();return false;">Inicio</a></li>
+        <li><a href="#" onclick="abrirVista('perfil');return false;">Mi Perfil</a></li>
+        <li><a href="#" onclick="abrirVista('estrellas');return false;">Estrellas</a></li>
+        <li><a href="#" onclick="abrirVista('horarios');return false;">Horarios</a></li>
+        <li><a href="#" onclick="abrirVista('paquetes');return false;">Paquetes</a></li>
+        <li><a href="#" onclick="abrirVista('explicaciones');return false;">Explicaciones</a></li>
+        <li><a href="#" onclick="abrirVista('academia');return false;" class="nav-cta">Academia</a></li>
+      </ul>
     </nav>
   </header>
+  <div id="nav-overlay" class="nav-overlay" aria-hidden="true"></div>
+
+  <!-- BARRA INFERIOR (solo móvil/PWA) -->
+  <nav id="mob-bottom-nav" class="mob-bottom-nav" aria-label="Accesos rápidos">
+    <button type="button" class="mob-nav-item active" data-nav="inicio" aria-label="Inicio">
+      <span class="mob-nav-ico">🏠</span><span>Inicio</span>
+    </button>
+    <button type="button" class="mob-nav-item" data-nav="horarios" aria-label="Horarios">
+      <span class="mob-nav-ico">📅</span><span>Horarios</span>
+    </button>
+    <button type="button" class="mob-nav-item" data-nav="precios" aria-label="Precios">
+      <span class="mob-nav-ico">⭐</span><span>Precios</span>
+    </button>
+    <button type="button" class="mob-nav-item" data-nav="seccion-mis-clases" aria-label="Mi cuenta">
+      <span class="mob-nav-ico">🪽</span><span>Cuenta</span>
+    </button>
+    <button type="button" class="mob-nav-item" data-nav="mas" aria-label="Más opciones">
+      <span class="mob-nav-ico">☰</span><span>Más</span>
+    </button>
+  </nav>
 
   <!-- BOTÓN FLOTANTE "MI PERFIL" (visible solo con sesión) -->
   <button id="fab-perfil" class="fab-perfil" onclick="irAMiCuenta()" title="Ir a Mi Perfil" style="display:none;">
@@ -5165,16 +5440,72 @@
     </div>
     <div class="hero-btns" style="margin-top:14px;">
       <button type="button" id="btn-clase-prueba" class="btn-primario" onclick="agendarPrueba()">Agendar Clase de Prueba</button>
-      <a href="#precios" class="btn-secundario">Ver Planes</a>
+      <a href="#" class="btn-secundario" onclick="abrirVista('paquetes');return false;">Ver Planes</a>
     </div>
     <div class="hero-scroll">
-      <span>Scroll</span>
+      <span>Explora</span>
       <div class="hero-scroll-line"></div>
     </div>
   </section>
 
+  <!-- HOME · GRID DE MOSAICOS (app-shell PWA) -->
+  <section id="home-grid" data-nav-skip="true">
+    <p class="home-grid-titulo">¿Qué quieres hacer hoy?</p>
+    <p class="home-grid-sub">Toca una opción — todo se abre aquí mismo.</p>
+    <div class="mosaicos">
+      <button type="button" class="mosaico" onclick="abrirVista('perfil')">
+        <span class="mosaico-ico">🪽</span>
+        <span class="mosaico-txt">Mi Perfil</span>
+        <span class="mosaico-sub">Tus datos y clases</span>
+      </button>
+      <button type="button" class="mosaico" onclick="abrirVista('estrellas')">
+        <span class="mosaico-ico">⭐</span>
+        <span class="mosaico-txt">Estrellas</span>
+        <span class="mosaico-badge" id="mosaico-saldo">— ⭐</span>
+      </button>
+      <button type="button" class="mosaico" onclick="abrirVista('horarios')">
+        <span class="mosaico-ico">📅</span>
+        <span class="mosaico-txt">Horarios</span>
+        <span class="mosaico-sub">Agenda tu clase</span>
+      </button>
+      <button type="button" class="mosaico" onclick="abrirVista('paquetes')">
+        <span class="mosaico-ico">🎟️</span>
+        <span class="mosaico-txt">Paquetes</span>
+        <span class="mosaico-sub">Planes y mensualidades</span>
+      </button>
+      <button type="button" class="mosaico" onclick="abrirVista('explicaciones')">
+        <span class="mosaico-ico">❓</span>
+        <span class="mosaico-txt">Explicaciones</span>
+        <span class="mosaico-sub">Reglas y dudas</span>
+      </button>
+      <button type="button" class="mosaico" onclick="abrirVista('academia')">
+        <span class="mosaico-ico">🎪</span>
+        <span class="mosaico-txt">Academia</span>
+        <span class="mosaico-sub">Noticias, equipo y más</span>
+      </button>
+    </div>
+  </section>
+
+  <!-- HOST del popup HOJA (sheet). El contenido se inyecta por portal. -->
+  <div id="sheet-host" aria-hidden="true">
+    <div class="sheet-bg" data-sheet-cerrar></div>
+    <div class="sheet-card" role="dialog" aria-modal="true" aria-labelledby="sheet-title">
+      <div class="sheet-header">
+        <button type="button" class="sheet-back" data-sheet-cerrar aria-label="Volver al inicio">‹</button>
+        <h2 class="sheet-title" id="sheet-title"><span class="sheet-ico"></span><span class="sheet-title-txt">—</span></h2>
+        <button type="button" class="sheet-close" data-sheet-cerrar aria-label="Cerrar">✕</button>
+      </div>
+      <div class="sheet-body" id="sheet-body"></div>
+    </div>
+  </div>
+
+  <!-- PAQUETES · vista informativa (mensualidades) — vive dentro de su hoja -->
+  <section id="paquetes-view" class="seccion" style="display:none;" data-nav-skip="true">
+    <div id="paquetes-cards"></div>
+  </section>
+
   <!-- NOTICIAS -->
-  <section id="noticias" class="seccion">
+  <section id="noticias" class="seccion" data-en-hoja>
     <div class="seccion-header">
       <span class="seccion-eyebrow">Últimas Noticias</span>
       <h2 class="seccion-titulo">Noticias & Avances</h2>
@@ -5218,7 +5549,7 @@
   </section>
 
   <!-- PRÓXIMOS EVENTOS -->
-  <section id="proximos-eventos" class="seccion colapsable">
+  <section id="proximos-eventos" class="seccion colapsable" data-en-hoja>
     <div class="seccion-header">
       <span class="seccion-eyebrow">Lo que viene</span>
       <h2 class="seccion-titulo">Próximos Eventos</h2>
@@ -5349,7 +5680,7 @@
   </div>
 
   <!-- HALLWAY EVENTOS PASADOS -->
-  <section id="eventos-pasados" class="seccion colapsable">
+  <section id="eventos-pasados" class="seccion colapsable" data-en-hoja>
     <div class="seccion-header">
       <span class="seccion-eyebrow">Historia</span>
       <h2 class="seccion-titulo">Nuestros Eventos</h2>
@@ -5386,7 +5717,7 @@
   </div>
 
   <!-- HORARIOS -->
-  <section id="horarios" class="seccion">
+  <section id="horarios" class="seccion" data-en-hoja>
     <div class="seccion-header">
       <span class="seccion-eyebrow">Organiza tu semana</span>
       <h2 class="seccion-titulo">Horarios</h2>
@@ -5473,7 +5804,7 @@
   </section>
 
   <!-- PRECIOS -->
-  <section id="precios" class="seccion colapsable">
+  <section id="precios" class="seccion colapsable" data-en-hoja>
     <div class="seccion-header">
       <span class="seccion-eyebrow">1 ⭐ = 1 clase</span>
       <h2 class="seccion-titulo">Compra tus Estrellas</h2>
@@ -5513,7 +5844,7 @@
   </section>
 
   <!-- MIS CLASES (solo logueadas) -->
-  <section id="seccion-mis-clases" class="seccion colapsable">
+  <section id="seccion-mis-clases" class="seccion colapsable" data-en-hoja>
     <div class="seccion-header">
       <span class="seccion-eyebrow">Tu cuenta</span>
       <h2 class="seccion-titulo">Mis Clases</h2>
@@ -5986,7 +6317,7 @@
         <span class="ctag">Aro</span>
         <span class="ctag">Tips de técnica</span>
       </div>
-      <a href="#contacto" class="btn-secundario" style="margin-top:28px;display:inline-block;">Avísame cuando esté listo</a>
+      <a href="#" onclick="irAContacto();return false;" class="btn-secundario" style="margin-top:28px;display:inline-block;">Avísame cuando esté listo</a>
     </div>
   </section>
 
@@ -6015,7 +6346,7 @@
   </section>
 
   <!-- HALLWAY #2 — GALERÍA (antes de Labor Social) -->
-  <section class="seccion" data-nav-skip="true">
+  <section id="galeria-seccion" class="seccion" data-nav-skip="true" data-en-hoja>
     <div class="seccion-header">
       <span class="seccion-eyebrow">Momentos</span>
       <h2 class="seccion-titulo">Galería</h2>
@@ -6040,7 +6371,7 @@
   </section>
 
   <!-- LABOR SOCIAL -->
-  <section id="labor-social" class="seccion colapsable">
+  <section id="labor-social" class="seccion colapsable" data-en-hoja>
     <div class="seccion-header">
       <span class="seccion-eyebrow">Más allá del estudio</span>
       <h2 class="seccion-titulo">Labor Social</h2>
@@ -6048,12 +6379,12 @@
     </div>
     <div class="labor-wrap">
       <p class="labor-texto">Nos importa comenzar a participar activamente en nuestra sociedad. Si tienes alguna petición de espectáculo para tu comunidad, déjanos un mensaje y con gusto nos ponemos en contacto contigo para planearlo juntos.</p>
-      <a href="#contacto" class="btn-donar">Mándanos un mensaje</a>
+      <a href="#" onclick="irAContacto();return false;" class="btn-donar">Mándanos un mensaje</a>
     </div>
   </section>
 
   <!-- REGLAS & FAQ -->
-  <section id="reglas" class="seccion colapsable">
+  <section id="reglas" class="seccion colapsable" data-en-hoja>
     <div class="seccion-header">
       <span class="seccion-eyebrow">Convivencia & Dudas</span>
       <h2 class="seccion-titulo">Reglas & Preguntas Frecuentes</h2>
@@ -6070,7 +6401,7 @@
   </section>
 
   <!-- CONTACTO -->
-  <section id="contacto" class="seccion colapsable">
+  <section id="contacto" class="seccion colapsable" data-en-hoja>
     <div class="seccion-header">
       <span class="seccion-eyebrow">Hablemos</span>
       <h2 class="seccion-titulo">Contáctanos</h2>
@@ -6924,13 +7255,258 @@
     abrirPorHash(); // por si cargamos con un hash directo
   })();
 
-  /* Botones "Más información / Quiero participar…" que bajan a Contáctanos:
-     abren la sección (si está colapsada en móvil) y luego hacen scroll. */
+  /* ===== NAVEGACIÓN MÓVIL / PWA =====
+     Header compacto + drawer lateral + barra inferior con accesos rápidos.
+     Reemplaza el header apilado y los nav-dots (ocultos en móvil). */
+  (function initNavegacionMovil() {
+    const MQ = window.matchMedia('(max-width:768px)');
+    const burger  = document.getElementById('nav-burger');
+    const drawer  = document.getElementById('nav-drawer');
+    const overlay = document.getElementById('nav-overlay');
+    const bottom  = document.getElementById('mob-bottom-nav');
+    if (!burger || !drawer || !overlay || !bottom) return;
+
+    const mobNavMap = {
+      inicio:'inicio', noticias:'mas', 'proximos-eventos':'mas', 'eventos-pasados':'mas',
+      horarios:'horarios', precios:'precios', 'seccion-mis-clases':'seccion-mis-clases',
+      'labor-social':'mas', reglas:'mas', contacto:'mas'
+    };
+
+    const irASeccion = (id) => {
+      if (id === 'seccion-mis-clases') {
+        if (window.irAMiCuenta) { window.irAMiCuenta(); return; }
+      }
+      if (window._abrirColapsable) window._abrirColapsable(id);
+      const sec = document.getElementById(id);
+      if (sec) {
+        if (id === 'seccion-mis-clases') sec.style.display = 'block';
+        sec.scrollIntoView({ behavior:'smooth', block:'start' });
+      }
+    };
+
+    const cerrarDrawer = () => {
+      drawer.classList.remove('abierto');
+      burger.classList.remove('abierto');
+      burger.setAttribute('aria-expanded', 'false');
+      overlay.classList.remove('visible');
+      overlay.setAttribute('aria-hidden', 'true');
+      document.body.style.overflow = '';
+    };
+
+    const abrirDrawer = () => {
+      drawer.classList.add('abierto');
+      burger.classList.add('abierto');
+      burger.setAttribute('aria-expanded', 'true');
+      overlay.classList.add('visible');
+      overlay.setAttribute('aria-hidden', 'false');
+      document.body.style.overflow = 'hidden';
+    };
+
+    burger.addEventListener('click', () => {
+      drawer.classList.contains('abierto') ? cerrarDrawer() : abrirDrawer();
+    });
+    overlay.addEventListener('click', cerrarDrawer);
+    document.addEventListener('keydown', e => {
+      if (e.key === 'Escape' && drawer.classList.contains('abierto')) cerrarDrawer();
+    });
+
+    drawer.querySelectorAll('.nav-links a[href^="#"]').forEach(a => {
+      a.addEventListener('click', () => { if (MQ.matches) cerrarDrawer(); });
+    });
+
+    // Barra inferior → abre HOJAS del app-shell (no scroll).
+    const NAV_A_VISTA = { horarios:'horarios', precios:'estrellas', 'seccion-mis-clases':'perfil' };
+    bottom.querySelectorAll('.mob-nav-item').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const id = btn.dataset.nav;
+        if (id === 'mas') { abrirDrawer(); return; }
+        cerrarDrawer();
+        if (id === 'inicio') {
+          if (window.cerrarVista) window.cerrarVista();
+          window.scrollTo({ top:0, behavior:'smooth' });
+          return;
+        }
+        const vista = NAV_A_VISTA[id];
+        if (vista && window.abrirVista) { window.abrirVista(vista); return; }
+        irASeccion(id);
+      });
+    });
+
+    const marcarActivo = (secId) => {
+      const key = mobNavMap[secId];
+      bottom.querySelectorAll('.mob-nav-item').forEach(b => {
+        b.classList.toggle('active', b.dataset.nav === key);
+      });
+    };
+
+    const secsMob = Array.from(document.querySelectorAll('section[id]'))
+      .filter(s => s.style.display !== 'none' && !s.dataset.navSkip);
+    secsMob.forEach(sec => {
+      new IntersectionObserver(entries => {
+        if (!MQ.matches) return;
+        if (entries[0].isIntersecting) marcarActivo(sec.id);
+      }, { threshold:0.35 }).observe(sec);
+    });
+
+    const sync = () => {
+      document.body.classList.toggle('mob-nav-on', MQ.matches);
+      if (!MQ.matches) cerrarDrawer();
+    };
+    sync();
+    if (MQ.addEventListener) MQ.addEventListener('change', sync);
+  })();
+
+  /* Botones "Más información / Quiero participar…" → ahora abren la HOJA de
+     Explicaciones (que contiene Reglas y Contacto). */
   window.irAContacto = () => {
-    if (window._abrirColapsable) window._abrirColapsable('contacto');
-    const s = document.getElementById('contacto');
-    if (s) s.scrollIntoView({ behavior:'smooth' });
+    if (window.abrirVista) window.abrirVista('explicaciones');
   };
+
+  /* ══════════════════════════════════════════════════════════════════
+     APP-SHELL PWA — POPUP tipo HOJA (sheet) por PORTAL.
+     Cada mosaico del home mueve su(s) sección(es) REALES al cuerpo de la
+     hoja (preserva TODOS los listeners y binduaciones de Firebase) y las
+     devuelve a su lugar al cerrar. Cero duplicación de DOM.
+     ══════════════════════════════════════════════════════════════════ */
+  (function initAppShell(){
+    const host = document.getElementById('sheet-host');
+    if (!host) return;
+    const body  = document.getElementById('sheet-body');
+    const titTx = host.querySelector('.sheet-title-txt');
+    const titIc = host.querySelector('.sheet-ico');
+
+    // key → { titulo, icono, secciones:[ids], necesitaSesion?, onOpen? }
+    const VISTAS = {
+      perfil:        { titulo:'Mi Perfil',     icono:'🪽', secciones:['seccion-mis-clases'], necesitaSesion:true },
+      estrellas:     { titulo:'Estrellas',     icono:'⭐', secciones:['precios'] },
+      horarios:      { titulo:'Horarios',      icono:'📅', secciones:['horarios'] },
+      paquetes:      { titulo:'Paquetes',      icono:'🎟️', secciones:['paquetes-view'], onOpen:pintarPaquetes },
+      explicaciones: { titulo:'Explicaciones', icono:'❓', secciones:['reglas','contacto'] },
+      academia:      { titulo:'Academia',      icono:'🎪', secciones:['noticias','proximos-eventos','eventos-pasados','equipo','galeria-seccion','labor-social'] },
+    };
+
+    let abiertos = [];   // [{ nodo, marcador, displayPrevio }]
+
+    function moverAlSheet(id){
+      const nodo = document.getElementById(id);
+      if (!nodo) return;
+      const marcador = document.createComment('sheet-slot:'+id);
+      nodo.parentNode.insertBefore(marcador, nodo);
+      const displayPrevio = nodo.style.display;
+      body.appendChild(nodo);
+      nodo.style.display = 'block';
+      nodo.classList.remove('cerrado');
+      if (window._abrirColapsable) window._abrirColapsable(id);
+      abiertos.push({ nodo, marcador, displayPrevio });
+    }
+
+    function restaurar(){
+      abiertos.forEach(({ nodo, marcador, displayPrevio }) => {
+        if (marcador.parentNode) marcador.parentNode.insertBefore(nodo, marcador);
+        nodo.style.display = displayPrevio;
+        if (marcador.parentNode) marcador.parentNode.removeChild(marcador);
+      });
+      abiertos = [];
+      if (body) body.scrollTop = 0;
+    }
+
+    window.abrirVista = function(key){
+      const v = VISTAS[key];
+      if (!v) return;
+      if (v.necesitaSesion && !window.usuarioActual){
+        if (window.abrirLoginModal) window.abrirLoginModal('login');
+        return;
+      }
+      if (host.classList.contains('abierto')) restaurar();
+      titTx.textContent = v.titulo;
+      titIc.textContent = v.icono || '';
+      v.secciones.forEach(moverAlSheet);
+      if (typeof v.onOpen === 'function'){ try { v.onOpen(); } catch(e){ console.warn('vista onOpen',e); } }
+      host.classList.add('abierto');
+      host.setAttribute('aria-hidden','false');
+      host.dataset.vista = key;
+      document.body.style.overflow = 'hidden';
+    };
+
+    window.cerrarVista = function(){
+      if (!host.classList.contains('abierto')) return;
+      restaurar();
+      host.classList.remove('abierto');
+      host.setAttribute('aria-hidden','true');
+      delete host.dataset.vista;
+      document.body.style.overflow = '';
+    };
+
+    host.querySelectorAll('[data-sheet-cerrar]').forEach(el =>
+      el.addEventListener('click', () => window.cerrarVista()));
+    document.addEventListener('keydown', e => {
+      if (e.key === 'Escape' && host.classList.contains('abierto')) window.cerrarVista();
+    });
+
+    // Re-apuntar accesos que antes hacían scroll a secciones ya ocultas.
+    document.addEventListener('DOMContentLoaded', () => {
+      window.irAMiCuenta = () => {
+        if (window.usuarioActual) window.abrirVista('perfil');
+        else if (window.abrirLoginModal) window.abrirLoginModal('login');
+      };
+      window.agendarPrueba = () => {
+        if (window.usuarioActual) window.abrirVista('horarios');
+        else if (window.abrirLoginModal) window.abrirLoginModal('reg');
+      };
+    });
+
+    // Refleja el saldo de ⭐ en el mosaico de Estrellas (lee el nº del perfil).
+    window.actualizarMosaicoSaldo = function(n){
+      const el = document.getElementById('mosaico-saldo');
+      if (!el) return;
+      let v = n;
+      if (v == null){
+        const p = document.getElementById('perfil-creditos');
+        v = p ? (parseInt(p.textContent,10) || 0) : null;
+      }
+      el.textContent = (v == null ? '—' : v) + ' ⭐';
+    };
+    const _pc = document.getElementById('perfil-creditos');
+    if (_pc && window.MutationObserver){
+      new MutationObserver(() => window.actualizarMosaicoSaldo()).observe(_pc, { childList:true, characterData:true, subtree:true });
+    }
+
+    // Contenido de PAQUETES (mensualidades) — tarjetas informativas.
+    function pintarPaquetes(){
+      const cont = document.getElementById('paquetes-cards');
+      if (!cont || cont.dataset.listo) return;
+      const PLANES = [
+        { nombre:'Individual', sesiones:'1 clase suelta', clases:'1 clase', precio:'$250',   periodo:'pago único',  destacado:false },
+        { nombre:'Básico',     sesiones:'2 clases/sem',   clases:'8 clases al mes', precio:'$800',   periodo:'mensualidad', destacado:false },
+        { nombre:'Medio',      sesiones:'5 clases/sem',   clases:'20 clases al mes', precio:'$1,200', periodo:'mensualidad', destacado:true  },
+        { nombre:'Avanzado',   sesiones:'7 clases/sem',   clases:'28 clases al mes', precio:'$1,600', periodo:'mensualidad', destacado:false },
+      ];
+      const grid = document.createElement('div');
+      grid.className = 'paquetes-grid';
+      PLANES.forEach(p => {
+        const card = document.createElement('div');
+        card.className = 'paquete-card' + (p.destacado ? ' destacado' : '');
+        if (p.destacado){ const b = document.createElement('span'); b.className = 'paquete-badge'; b.textContent = 'Más popular'; card.appendChild(b); }
+        const nom = document.createElement('p'); nom.className = 'paquete-nombre'; nom.textContent = p.nombre; card.appendChild(nom);
+        const ses = document.createElement('p'); ses.className = 'paquete-sesiones'; ses.textContent = p.sesiones; card.appendChild(ses);
+        const pre = document.createElement('p'); pre.className = 'paquete-precio'; pre.textContent = p.precio; card.appendChild(pre);
+        const per = document.createElement('p'); per.className = 'paquete-periodo'; per.textContent = p.periodo; card.appendChild(per);
+        const cl = document.createElement('p'); cl.className = 'paquete-clases'; cl.textContent = '= ' + p.clases; card.appendChild(cl);
+        card.appendChild(document.createElement('div')).className = 'paquete-sep';
+        const btn = document.createElement('button');
+        btn.type = 'button'; btn.className = 'paquete-btn';
+        btn.textContent = 'Agendar con este plan';
+        btn.addEventListener('click', () => window.abrirVista('horarios'));
+        card.appendChild(btn);
+        grid.appendChild(card);
+      });
+      const nota = document.createElement('p');
+      nota.className = 'paquetes-nota';
+      nota.textContent = 'Las mensualidades y clases sueltas se pagan con Estrellas ⭐ (1 ⭐ = 1 clase). Compra tus Estrellas desde el mosaico ⭐ Estrellas.';
+      cont.appendChild(grid); cont.appendChild(nota);
+      cont.dataset.listo = '1';
+    }
+  })();
 
   /* Stripe success: manejado en onAuthStateChanged del módulo Firebase */
 
