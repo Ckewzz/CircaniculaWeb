@@ -6598,15 +6598,41 @@
     const h = m ? `${m[1]}-${m[2]}` : String(hora).replace(/\s+/g, '');
     return `${dia}_${h}`;
   }
+  // ── SEMANA VIVA ────────────────────────────────────────────────────────
+  // El cupo y las reservas RECURRENTES viven SOLO su semana. El id que va a
+  // cupos/{id} y al campo slots[].slotId lleva la SEMANA embebida (el lunes en
+  // "YYYY-MM-DD"): "<lunes>_<dia>_<horaCompacta>" (p. ej. "2026-07-13_2_8-9").
+  // Efecto: cada lunes el tablero amanece limpio, porque los ids de semanas
+  // pasadas ya no coinciden con los de la semana en curso (auto-limpieza). No
+  // se borra nada en Firestore: los docs viejos simplemente dejan de leerse.
+  // La clase SUELTA (individual) es aparte: usa fecha exacta "<fecha>_<hora>".
+  function lunesDe(d) {
+    const x = new Date(d || new Date()); const g = x.getDay();
+    // Las clases son Lun–Vie. En FIN DE SEMANA (Sáb/Dom) las de esta semana ya
+    // pasaron, así que la "semana viva" salta al PRÓXIMO lunes: en sábado/domingo
+    // se reserva para la semana que viene (nunca una semana ya consumida).
+    if      (g === 0) x.setDate(x.getDate() + 1);        // Dom  -> lunes de mañana
+    else if (g === 6) x.setDate(x.getDate() + 2);        // Sáb  -> lunes en 2 días
+    else              x.setDate(x.getDate() + (1 - g));  // Lun–Vie -> lunes de ESTA semana
+    x.setHours(0, 0, 0, 0); return x;
+  }
+  function weekKeyDe(d) { return ymdLocal(lunesDe(d)); }   // "YYYY-MM-DD" del lunes
+  window.weekKeyActual = () => weekKeyDe(new Date());
+  // slotId semanal: le antepone la semana al slotId base recurrente.
+  function slotIdWk(dia, hora, weekKey) {
+    return (weekKey || weekKeyActual()) + '_' + slotIdDe(dia, hora);
+  }
+  window.slotIdWk = slotIdWk;
   // Reconstruye {dia,hora,tipo,slotId} desde una key de selección ("8:00 – 9:00-2").
-  // El tipo se recupera de horarioBase porque la key no lo lleva.
+  // El tipo se recupera de horarioBase porque la key no lo lleva. El slotId lleva
+  // la SEMANA en curso embebida (semana viva).
   function slotInfoDeKey(key) {
     const idx  = key.lastIndexOf('-');
     const hora = key.slice(0, idx).trim();
     const dia  = Number(key.slice(idx + 1));
     const row  = horarioBase.find(r => r[0] === hora);
     const tipo = row ? row[dia] : '';
-    return { dia, hora, tipo, slotId: slotIdDe(dia, hora) };
+    return { dia, hora, tipo, slotId: slotIdWk(dia, hora) };
   }
   // Selección actual como array estructurado (se guarda dentro de la reserva).
   function slotsEstructurados() {
@@ -6699,14 +6725,14 @@
   let slotsSeleccionados = new Set();
   let planActual = 'medio';
 
-  // Aviso de SEMANA ACTUAL: calcula Lun–Vie de la semana en curso y lo pinta en la
-  // burbuja amarilla, para que quede claro que solo se apartan las clases de ESTA
-  // semana (no todos los martes/jueves del mes).
+  // Aviso de SEMANA VIVA: pinta el Lun–Vie de la semana que se está reservando en
+  // la burbuja amarilla (mismo cálculo que los slots: lunesDe salta al próximo
+  // lunes en fin de semana), para que quede claro que solo se apartan las clases
+  // de ESA semana (no todos los martes/jueves del mes).
   function actualizarAvisoSemana() {
     const cont = document.getElementById('semana-rango');
     if (!cont) return;
-    const lunes = (typeof calLunes === 'function') ? calLunes(new Date())
-      : (() => { const x=new Date(); const g=x.getDay(); x.setDate(x.getDate()+(g===0?-6:1-g)); x.setHours(0,0,0,0); return x; })();
+    const lunes = lunesDe(new Date());
     const viernes = new Date(lunes); viernes.setDate(lunes.getDate() + 4);
     const fmt = (d, conAnio) => d.toLocaleDateString('es-MX',
       conAnio ? { day:'numeric', month:'short', year:'numeric' } : { day:'numeric', month:'short' });
@@ -6744,7 +6770,7 @@
         } else {
           div.className = 'clase-cell ' + tipo + ' disponible';
           div.title = 'Click para seleccionar / deseleccionar';
-          div.dataset.slotId = slotIdDe(i, row[0]);
+          div.dataset.slotId = slotIdWk(i, row[0]);   // semana viva
           div.dataset.dia = i;
           div.dataset.tipo = tipo;
           const span = document.createElement('span');
@@ -6986,12 +7012,13 @@
     renderHorario(planActual);   // re-render limpia selección y aplica el modo
   };
 
-  // Todos los slotIds reales de la rejilla (sin celdas 'empty'). Lo usa el staff
-  // para escribir cupo 0 en clases que se quedaron sin reservas (T3-H).
+  // Todos los slotIds reales de la rejilla (sin celdas 'empty') de la SEMANA EN
+  // CURSO. Lo usa el staff para escribir cupo 0 en clases que se quedaron sin
+  // reservas (T3-H). Semana viva: ids con la semana embebida.
   window.slotIdsTodos = function () {
     const ids = [];
     horarioBase.forEach(row => {
-      for (let i = 1; i <= 5; i++) { if (row[i] && row[i] !== 'empty') ids.push(slotIdDe(i, row[0])); }
+      for (let i = 1; i <= 5; i++) { if (row[i] && row[i] !== 'empty') ids.push(slotIdWk(i, row[0])); }
     });
     return ids;
   };
