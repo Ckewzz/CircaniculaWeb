@@ -4788,7 +4788,7 @@
       margin:0 0 22px; letter-spacing:.3px;
     }
     .mosaicos {
-      display:grid; grid-template-columns:repeat(3,1fr); gap:14px;
+      display:grid; grid-template-columns:repeat(2,1fr); gap:14px;
     }
     .mosaico {
       display:flex; flex-direction:column; align-items:center; justify-content:center;
@@ -4812,6 +4812,37 @@
       background:rgba(255,204,0,.12); border:1px solid rgba(255,204,0,.3);
       border-radius:999px; padding:2px 9px; line-height:1.3;
     }
+    /* Los dos primeros (Reservar y Estrellas) llevan acento: son la acción. */
+    .mosaico-destacado { border-color:rgba(255,204,0,.32); }
+    .mosaico-destacado .mosaico-txt { color:var(--amarillo); }
+    /* BANNER ANCHO · Aprende con Nosotros (rectángulo horizontal bajo el grid) */
+    .mosaico-ancho {
+      display:flex; align-items:center; gap:16px; width:100%; margin-top:14px;
+      padding:18px 22px; cursor:pointer; text-align:left; font-family:inherit;
+      background:linear-gradient(120deg,rgba(232,116,0,.16),rgba(28,28,28,.92));
+      border:1px solid rgba(255,204,0,.28); border-radius:16px; color:var(--blanco);
+      transition:transform .16s ease, border-color .16s ease, background .16s ease;
+      -webkit-tap-highlight-color:transparent;
+    }
+    .mosaico-ancho:hover, .mosaico-ancho:focus-visible {
+      transform:translateY(-3px); border-color:rgba(255,204,0,.6);
+      background:linear-gradient(120deg,rgba(232,116,0,.26),rgba(36,34,20,.95)); outline:none;
+    }
+    .mosaico-ancho:active { transform:translateY(-1px) scale(.99); }
+    .mosaico-ancho-ico { font-size:2rem; line-height:1; flex:0 0 auto; }
+    .mosaico-ancho-txt { display:flex; flex-direction:column; gap:3px; flex:1 1 auto; }
+    .mosaico-ancho-tit { font-size:.95rem; font-weight:700; letter-spacing:.4px; }
+    .mosaico-ancho-sub { font-size:.72rem; opacity:.62; }
+    .mosaico-ancho-flecha { font-size:1.3rem; color:var(--amarillo); flex:0 0 auto; }
+    /* LEYENDA "¿qué clase es?" dentro de Reservar */
+    .clase-leyenda { margin:0 0 16px; padding:14px 16px; border-radius:14px;
+      background:rgba(255,204,0,.05); border:1px solid rgba(255,204,0,.16); }
+    .clase-leyenda-tit { font-family:'Cinzel',serif; font-size:.8rem; letter-spacing:.4px;
+      color:var(--amarillo); margin:0 0 10px; text-align:center; }
+    .clase-leyenda-grid { display:flex; flex-wrap:wrap; gap:8px; justify-content:center; }
+    .clase-chip { font-size:.72rem; padding:7px 12px; border-radius:999px; line-height:1.35;
+      background:rgba(255,255,255,.04); border:1px solid rgba(255,255,255,.1); color:var(--blanco); }
+    .clase-chip b { color:var(--amarillo); font-weight:700; margin-right:6px; }
     @media (max-width:560px) {
       .mosaicos { grid-template-columns:repeat(2,1fr); gap:12px; }
       .mosaico { min-height:106px; padding:18px 10px; }
@@ -5469,12 +5500,11 @@
     <nav id="nav-drawer" aria-label="Menú principal">
       <ul class="nav-links">
         <li><a href="#inicio" onclick="cerrarVista();return false;">Inicio</a></li>
+        <li><a href="#" onclick="abrirVista('horarios');return false;">Reservar</a></li>
+        <li><a href="#" onclick="abrirVista('estrellas');return false;">Estrellas &amp; Planes</a></li>
         <li><a href="#" onclick="abrirVista('perfil');return false;">Mi Perfil</a></li>
-        <li><a href="#" onclick="abrirVista('estrellas');return false;">Estrellas</a></li>
-        <li><a href="#" onclick="abrirVista('horarios');return false;">Horarios</a></li>
-        <li><a href="#" onclick="abrirVista('paquetes');return false;">Paquetes</a></li>
-        <li><a href="#" onclick="abrirVista('explicaciones');return false;">Explicaciones</a></li>
-        <li><a href="#" onclick="abrirVista('academia');return false;" class="nav-cta">Academia</a></li>
+        <li><a href="#" onclick="abrirVista('aprende');return false;">Aprende</a></li>
+        <li><a href="#" onclick="abrirVista('academia');return false;" class="nav-cta">La Academia</a></li>
       </ul>
     </nav>
   </header>
@@ -5515,7 +5545,7 @@
     </div>
     <div class="hero-btns" style="margin-top:14px;">
       <button type="button" id="btn-clase-prueba" class="btn-primario" onclick="agendarPrueba()">Agendar Clase de Prueba</button>
-      <a href="#" class="btn-secundario" onclick="abrirVista('paquetes');return false;">Ver Planes</a>
+      <a href="#" class="btn-secundario" onclick="abrirVista('estrellas');return false;">Ver Planes</a>
     </div>
     <div class="hero-scroll">
       <span>Explora</span>
@@ -5528,37 +5558,40 @@
     <p class="home-grid-titulo">¿Qué quieres hacer hoy?</p>
     <p class="home-grid-sub">Toca una opción — todo se abre aquí mismo.</p>
     <div class="mosaicos">
+      <!-- 1 · RESERVAR (acción principal: agendar clase + qué clase es) -->
+      <button type="button" class="mosaico mosaico-destacado" onclick="abrirVista('horarios')">
+        <span class="mosaico-ico">📅</span>
+        <span class="mosaico-txt">Reservar</span>
+        <span class="mosaico-sub">Agenda tu clase de la semana</span>
+      </button>
+      <!-- 2 · ESTRELLAS & PLANES (conseguir estrellas: compra + mensualidades) -->
+      <button type="button" class="mosaico mosaico-destacado" onclick="abrirVista('estrellas')">
+        <span class="mosaico-ico">⭐</span>
+        <span class="mosaico-txt">Estrellas &amp; Planes</span>
+        <span class="mosaico-badge" id="mosaico-saldo">— ⭐</span>
+      </button>
+      <!-- 3 · MI PERFIL -->
       <button type="button" class="mosaico" onclick="abrirVista('perfil')">
         <span class="mosaico-ico">🪽</span>
         <span class="mosaico-txt">Mi Perfil</span>
         <span class="mosaico-sub">Tus datos y clases</span>
       </button>
-      <button type="button" class="mosaico" onclick="abrirVista('estrellas')">
-        <span class="mosaico-ico">⭐</span>
-        <span class="mosaico-txt">Estrellas</span>
-        <span class="mosaico-badge" id="mosaico-saldo">— ⭐</span>
-      </button>
-      <button type="button" class="mosaico" onclick="abrirVista('horarios')">
-        <span class="mosaico-ico">📅</span>
-        <span class="mosaico-txt">Horarios</span>
-        <span class="mosaico-sub">Agenda tu clase</span>
-      </button>
-      <button type="button" class="mosaico" onclick="abrirVista('paquetes')">
-        <span class="mosaico-ico">🎟️</span>
-        <span class="mosaico-txt">Paquetes</span>
-        <span class="mosaico-sub">Planes y mensualidades</span>
-      </button>
-      <button type="button" class="mosaico" onclick="abrirVista('explicaciones')">
-        <span class="mosaico-ico">❓</span>
-        <span class="mosaico-txt">Explicaciones</span>
-        <span class="mosaico-sub">Reglas y dudas</span>
-      </button>
+      <!-- 4 · LA ACADEMIA (todo lo demás: reglas, contacto, eventos, equipo, comunidad…) -->
       <button type="button" class="mosaico" onclick="abrirVista('academia')">
         <span class="mosaico-ico">🎪</span>
-        <span class="mosaico-txt">Academia</span>
-        <span class="mosaico-sub">Noticias, equipo y más</span>
+        <span class="mosaico-txt">La Academia</span>
+        <span class="mosaico-sub">Reglas, eventos, equipo y comunidad</span>
       </button>
     </div>
+    <!-- BANNER ANCHO · Aprende con Nosotros (clases online / videos) -->
+    <button type="button" class="mosaico-ancho" onclick="abrirVista('aprende')">
+      <span class="mosaico-ancho-ico">🎬</span>
+      <span class="mosaico-ancho-txt">
+        <span class="mosaico-ancho-tit">Aprende con Nosotros</span>
+        <span class="mosaico-ancho-sub">Clases online, tips y rutinas grabadas</span>
+      </span>
+      <span class="mosaico-ancho-flecha">→</span>
+    </button>
   </section>
 
   <!-- ══════════════════════════════════════════════════════════════════
@@ -5893,7 +5926,18 @@
       <span class="seccion-eyebrow">Organiza tu semana</span>
       <h2 class="seccion-titulo">Horarios</h2>
       <div class="titulo-linea"></div>
-      <p class="seccion-desc">Lunes a Viernes · Open Gym 8–10 am · Kids 5:30–7 pm · Telas 7–9 pm (L·Mi·V) · Mar & Jue: Flex 7–8 pm y Aro 8–9 pm.</p>
+      <p class="seccion-desc">Lunes a Viernes. Elige tu plan, toca las horas que quieras y aparta tu lugar.</p>
+    </div>
+    <!-- LEYENDA · qué clase es cuál (para reservar sin dudas) -->
+    <div class="clase-leyenda">
+      <p class="clase-leyenda-tit">¿Qué clase es cuál?</p>
+      <div class="clase-leyenda-grid">
+        <span class="clase-chip"><b>Open Gym</b> Lun–Vie · 8–10 am</span>
+        <span class="clase-chip"><b>Kids</b> Lun–Vie · 5:30–7 pm</span>
+        <span class="clase-chip"><b>Telas</b> L·Mi·V · 7–9 pm</span>
+        <span class="clase-chip"><b>Flex</b> Mar & Jue · 7–8 pm</span>
+        <span class="clase-chip"><b>Aro</b> Mar & Jue · 8–9 pm</span>
+      </div>
     </div>
     <div class="plan-selector">
       <button class="plan-btn" data-plan="individual">Clase Individual</button>
@@ -6281,9 +6325,8 @@
     </div><!-- /perfil-panel -->
 
     <div class="comunidad-links">
-      <a href="#comunidad" class="btn-pildora"><span class="btn-pildora-ico">🔎</span> Buscar Perfil</a>
-      <a href="#colaboradores" class="btn-pildora"><span class="btn-pildora-ico">🤝</span> Colaboradores</a>
-      <a href="#calendario" class="btn-pildora"><span class="btn-pildora-ico">📅</span> Calendario</a>
+      <a href="#" class="btn-pildora" onclick="abrirVista('academia');return false;"><span class="btn-pildora-ico">🔎</span> Buscar Perfil</a>
+      <a href="#" class="btn-pildora" onclick="abrirVista('academia');return false;"><span class="btn-pildora-ico">🤝</span> Colaboradores</a>
     </div>
 
     <h3 class="perfil-sub" style="margin-top:1.4rem;">Tus reservas</h3>
@@ -7722,10 +7765,10 @@
     if (MQ.addEventListener) MQ.addEventListener('change', sync);
   })();
 
-  /* Botones "Más información / Quiero participar…" → ahora abren la HOJA de
-     Explicaciones (que contiene Reglas y Contacto). */
+  /* Botones "Más información / Quiero participar / Contáctanos" → abren la
+     HOJA de La Academia (Contacto va primero en esa vista). */
   window.irAContacto = () => {
-    if (window.abrirVista) window.abrirVista('explicaciones');
+    if (window.abrirVista) window.abrirVista('academia');
   };
 
   /* ══════════════════════════════════════════════════════════════════
@@ -7742,13 +7785,15 @@
     const titIc = host.querySelector('.sheet-ico');
 
     // key → { titulo, icono, secciones:[ids], necesitaSesion?, onOpen? }
+    // Reestructura: 4 mosaicos (Reservar · Estrellas & Planes · Mi Perfil ·
+    // La Academia) + banner ancho (Aprende). Estrellas absorbe Paquetes;
+    // La Academia absorbe Reglas, Contacto, Comunidad y Colaboradores.
     const VISTAS = {
-      perfil:        { titulo:'Mi Perfil',     icono:'🪽', secciones:['seccion-mis-clases'], necesitaSesion:true },
-      estrellas:     { titulo:'Estrellas',     icono:'⭐', secciones:['precios'] },
-      horarios:      { titulo:'Horarios',      icono:'📅', secciones:['horarios'] },
-      paquetes:      { titulo:'Paquetes',      icono:'🎟️', secciones:['paquetes-view'], onOpen:pintarPaquetes },
-      explicaciones: { titulo:'Explicaciones', icono:'❓', secciones:['reglas','contacto'] },
-      academia:      { titulo:'Academia',      icono:'🎪', secciones:['noticias','proximos-eventos','eventos-pasados','equipo','galeria-seccion','labor-social'] },
+      horarios:  { titulo:'Reservar',            icono:'📅', secciones:['horarios'] },
+      estrellas: { titulo:'Estrellas & Planes',  icono:'⭐', secciones:['precios','paquetes-view'], onOpen:pintarPaquetes },
+      perfil:    { titulo:'Mi Perfil',           icono:'🪽', secciones:['seccion-mis-clases'], necesitaSesion:true },
+      academia:  { titulo:'La Academia',         icono:'🎪', secciones:['contacto','noticias','proximos-eventos','eventos-pasados','reglas','comunidad','colaboradores','equipo','galeria-seccion','labor-social'] },
+      aprende:   { titulo:'Aprende con Nosotros', icono:'🎬', secciones:['videos'] },
     };
 
     let abiertos = [];   // [{ nodo, marcador, displayPrevio }]
