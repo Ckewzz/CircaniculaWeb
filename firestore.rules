@@ -341,6 +341,24 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
+    // ── VIDEOS ("Aprende con Nosotros" + destacado del home) ──────────
+    //  videos/{id} = { url, fuente, categoria, disciplina, titulo, destacado,
+    //                  publico, orden, createdAt, createdBy, creadoPorNombre, tenantId }
+    //  LECTURA: con sesión (biblioteca para alumnas registradas). Los marcados
+    //   publico:true (p. ej. "Nuestro video más reciente" del home) los ve
+    //   CUALQUIERA, incluso sin cuenta — es el teaser público del inicio.
+    //   ⚠️ Para leer sin sesión, la consulta debe filtrar where('publico','==',true).
+    //  ESCRITURA: solo el staff de clase (Rank ≤ 2) desde su panel de perfil.
+    //   'createdBy' debe ser quien lo crea (no se puede falsear el autor).
+    match /videos/{id} {
+      allow read: if (resource.data.publico == true) || signedIn();
+      allow create: if isStaffClase()
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.url is string
+        && request.resource.data.categoria is string;
+      allow update, delete: if isStaffClase();
+    }
+
     // Todo lo demás: denegado.
     match /{document=**} {
       allow read, write: if false;
