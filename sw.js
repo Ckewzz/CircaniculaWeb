@@ -1,4 +1,4 @@
-const CACHE_NAME = 'circanicula-v12';
+const CACHE_NAME = 'circanicula-v13';
 
 // Recursos a cachear para uso offline
 const STATIC_ASSETS = [
@@ -21,11 +21,19 @@ const STATIC_ASSETS = [
 ];
 
 self.addEventListener('install', event => {
+  // OJO: ya NO llamamos self.skipWaiting() aquí. Así, cuando hay una versión
+  // nueva, el SW queda "esperando" (waiting) y la app le muestra a la persona
+  // el aviso "Nueva versión disponible". Solo se activa cuando ella toca
+  // "Actualizar" (mensaje SKIP_WAITING de abajo). En la PRIMERA instalación
+  // —sin SW previo— igual se activa de inmediato: no hay a quién esperar.
   event.waitUntil(
-    caches.open(CACHE_NAME)
-      .then(cache => cache.addAll(STATIC_ASSETS))
-      .then(() => self.skipWaiting())
+    caches.open(CACHE_NAME).then(cache => cache.addAll(STATIC_ASSETS))
   );
+});
+
+// La app pide activar la versión nueva cuando la persona toca "Actualizar".
+self.addEventListener('message', event => {
+  if (event.data && event.data.type === 'SKIP_WAITING') self.skipWaiting();
 });
 
 self.addEventListener('activate', event => {

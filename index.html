@@ -5765,6 +5765,27 @@
   </div>
 </div>
 
+<!-- AVISO: NUEVA VERSIÓN DISPONIBLE (actualización controlada del PWA, estilo Dashboard) -->
+<div id="pwa-update" style="display:none;position:fixed;bottom:20px;left:50%;transform:translateX(-50%);z-index:9100;
+  background:rgba(12,12,12,.97);border:1px solid rgba(232,116,0,.55);border-radius:6px;
+  padding:14px 20px;gap:14px;align-items:center;flex-wrap:wrap;max-width:460px;width:90%;
+  box-shadow:0 8px 32px rgba(0,0,0,.6);backdrop-filter:blur(10px);">
+  <div style="flex:1;min-width:200px;">
+    <p style="font-family:'Cinzel',serif;font-size:.72rem;letter-spacing:1px;color:var(--naranja);margin-bottom:3px;">✨ Nueva versión disponible</p>
+    <p style="font-size:.7rem;opacity:.55;">Actualiza para ver lo más reciente. Es rápido y no pierdes nada.</p>
+  </div>
+  <div style="display:flex;gap:8px;">
+    <button id="pwa-update-btn" style="padding:9px 20px;background:var(--naranja);color:#fff;
+      font-family:'Cinzel',serif;font-size:.6rem;letter-spacing:2px;border:none;border-radius:2px;cursor:pointer;">
+      Actualizar
+    </button>
+    <button id="pwa-update-later" style="padding:9px 14px;background:transparent;color:rgba(240,237,230,.4);
+      font-family:'Cinzel',serif;font-size:.6rem;border:1px solid rgba(255,255,255,.1);border-radius:2px;cursor:pointer;">
+      Después
+    </button>
+  </div>
+</div>
+
 <!-- PAGO EXITOSO BANNER -->
 <div id="pago-exitoso-banner" style="display:none;position:fixed;top:80px;left:50%;transform:translateX(-50%);z-index:9000;
   background:rgba(8,40,8,.97);border:1px solid rgba(80,200,80,.4);border-radius:6px;
@@ -7932,8 +7953,52 @@
 <script>
   /* ===== PWA: Service Worker + Install Banner ===== */
   if ('serviceWorker' in navigator) {
+    let _swRecargando = false;
+    // Cuando el SW nuevo toma el control (tras tocar "Actualizar"), recargamos
+    // UNA sola vez para que la persona vea la versión nueva ya aplicada.
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (_swRecargando) return;
+      _swRecargando = true;
+      window.location.reload();
+    });
+
+    // Muestra el aviso "Nueva versión disponible" y conecta el botón Actualizar
+    // con el SW que está esperando (waiting).
+    function ofrecerActualizacionSW(worker){
+      const toast = document.getElementById('pwa-update');
+      if (!toast || !worker) return;
+      toast.style.display = 'flex';
+      const btn = document.getElementById('pwa-update-btn');
+      if (btn) btn.onclick = () => {
+        btn.textContent = 'Actualizando…';
+        worker.postMessage({ type: 'SKIP_WAITING' });
+      };
+    }
+    document.getElementById('pwa-update-later')?.addEventListener('click', () => {
+      const t = document.getElementById('pwa-update'); if (t) t.style.display = 'none';
+    });
+
     window.addEventListener('load', () => {
-      navigator.serviceWorker.register('/sw.js').catch(() => {});
+      navigator.serviceWorker.register('/sw.js').then(reg => {
+        // Ya había una versión nueva esperando de una visita anterior.
+        if (reg.waiting) ofrecerActualizacionSW(reg.waiting);
+        // Aparece una versión nueva mientras la app está abierta.
+        reg.addEventListener('updatefound', () => {
+          const nuevo = reg.installing;
+          if (!nuevo) return;
+          nuevo.addEventListener('statechange', () => {
+            // 'installed' + ya hay un SW controlando = es ACTUALIZACIÓN (no la 1ª vez).
+            if (nuevo.state === 'installed' && navigator.serviceWorker.controller) {
+              ofrecerActualizacionSW(nuevo);
+            }
+          });
+        });
+        // Al volver a la pestaña, buscamos si hay versión nueva (por si estuvo
+        // horas abierta en un teléfono).
+        document.addEventListener('visibilitychange', () => {
+          if (document.visibilityState === 'visible') reg.update().catch(() => {});
+        });
+      }).catch(() => {});
     });
   }
 
