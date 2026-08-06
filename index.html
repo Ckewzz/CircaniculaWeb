@@ -674,6 +674,80 @@
     // (correo, teléfono) en usuarios_priv/{uid}, legibles solo por el dueño y
     // Rank 0/1. Los campos sensibles (rank/creditos/nivel/titulos) están
     // protegidos por reglas de Firestore admin-only (ver firestore.rules).
+    // ── AVISO DE NOMBRE REPETIDO (sugerencia al darse de alta) ───────────
+    //  Problema real: en una academia chica, dos "Bridgitte" en la lista de
+    //  asistencia son un lío — y a veces la persona YA tenía cuenta y no se
+    //  acordaba. Esto lo detecta y PREGUNTA, pero nunca bloquea: dos personas
+    //  sí pueden llamarse igual y nadie se queda fuera por eso.
+    //
+    //  ⚠️ Por qué corre DESPUÉS de crear la cuenta y no en el formulario:
+    //  la colección "usuarios" exige sesión iniciada (firestore.rules:
+    //  `allow read: if signedIn()`), así que estando deslogueada la app no
+    //  tiene contra qué comparar. Abrir el padrón al público sería peor
+    //  remedio que la enfermedad.
+
+    // Clave de comparación: minúsculas, sin acentos, sin espacios de más.
+    // Así "Bridgitte  Álexa " y "bridgitte alexa" son la MISMA clave.
+    // Se quitan los acentos con una TABLA y no con normalize('NFD') + rango de
+    // combinantes: ese rango son caracteres INVISIBLES en el código y cualquier
+    // editor o copiar-pegar se los puede comer sin avisar. Aquí todo se ve.
+    const _SIN_ACENTO = {
+      'á':'a','à':'a','ä':'a','â':'a','ã':'a', 'é':'e','è':'e','ë':'e','ê':'e',
+      'í':'i','ì':'i','ï':'i','î':'i',         'ó':'o','ò':'o','ö':'o','ô':'o','õ':'o',
+      'ú':'u','ù':'u','ü':'u','û':'u',         'ñ':'n','ç':'c'
+    };
+    const _claveNombre = (s) => String(s || '').toLowerCase()
+      .replace(/[áàäâãéèëêíìïîóòöôõúùüûñç]/g, c => _SIN_ACENTO[c] || c)
+      .replace(/\s+/g, ' ').trim();
+
+    async function _buscarHomonimas(nombre, miUid) {
+      const clave = _claveNombre(nombre);
+      const pila  = clave.split(' ')[0];         // nombre de pila
+      if (pila.length < 3) return [];            // "Jo", "Ma": demasiado ruido
+      const snap = await getDocs(collection(db, "usuarios"));
+      const out = [];
+      snap.forEach(s => {
+        if (s.id === miUid) return;              // yo misma no cuento
+        const d = s.data();
+        if (d.cuentaActiva === false || d.esInvitada) return;
+        const otra = _claveNombre(d.nombreVisible);
+        if (!otra) return;
+        // Coincide si es el MISMO nombre completo o si comparten nombre de pila.
+        if (otra === clave || otra.split(' ')[0] === pila)
+          out.push({ _id: s.id, nombre: d.nombreVisible || '' });
+      });
+      return out;
+    }
+
+    window.avisarNombreRepetido = async (user, nombre) => {
+      let iguales = [];
+      try { iguales = await _buscarHomonimas(nombre, user.uid); }
+      catch (e) { console.warn('homonimas:', e.code || e); return; }  // red/permiso: ni se entera
+      if (!iguales.length) return;
+      const pila  = String(nombre).trim().split(/\s+/)[0];
+      const lista = iguales.slice(0, 3).map(x => `• ${x.nombre}`).join('\n');
+      const soyYo = await window.uiConfirm(
+        `Ya hay alguien con tu nombre en la comunidad:\n${lista}\n\n¿Eres tú?`,
+        // El botón de "cancelar" del sistema de diálogos vive con flex:1 contra
+        // el flex:2 del principal, así que le toca la mitad de ancho: con
+        // "No, soy otra persona" el texto se partía en dos renglones.
+        { titulo: `¿Ya nos conocemos, ${pila}?`,
+          okText: 'Sí, soy yo', cancelText: 'No, soy otra' });
+      if (!soyYo) return;                        // homónima de verdad: todo sigue igual
+      // Dijo que sí. La cuenta nueva NO se borra: borrar algo irreversible por
+      // un botón mal picado es peor que tener dos registros. Se deja una marca
+      // para que la academia los junte a mano.
+      try {
+        await setDoc(doc(db, "usuarios", user.uid),
+          { posibleDuplicado: { de: iguales[0]._id, nombre: iguales[0].nombre, ts: serverTimestamp() } },
+          { merge: true });
+      } catch (e) { console.warn('marca duplicado:', e.code || e); }
+      await window.uiAlert(
+        'Esta cuenta es NUEVA y empieza en ceros: tus Estrellas y tu historial siguen en la otra.\n\n' +
+        'Avísale a la academia (o cuando llegues a tu clase) para que junten tus dos registros en uno solo.',
+        { titulo: '¡Bienvenida de vuelta!' });
+    };
+
     async function bootstrapPerfil(user) {
       const ref  = doc(db, "usuarios", user.uid);
       const snap = await getDoc(ref);
@@ -751,7 +825,13 @@
           } catch(e) { console.error('recuperacion:', e); }
         }
       }
+      // Aviso de homónimas. Solo en ALTAS REALES: las invitadas (anónimas) son
+      // cuentas de paso y no salen en el directorio, avisarles no sirve de nada.
+      // NO se hace await a propósito: es un aviso, no debe retrasar la entrada
+      // a la app; si falla (red/permisos) se ignora en silencio.
+      const nombreAlta = (esNuevo && regPend && !esInvitada) ? (regPend.nombreVisible || '') : '';
       if (esNuevo) _pendingRegister = null;
+      if (nombreAlta) window.avisarNombreRepetido(user, nombreAlta);
       return { ...data, ...patch };
     }
 
@@ -812,6 +892,9 @@
         set('perfil-nombre', d.nombreVisible || d.nombre || 'Alumno');
         set('perfil-id', d.userIdCorto || '—');
         set('perfil-creditos', d.creditos ?? 0);
+        // Fecha real de caducidad del saldo (la del documento, no una calculada):
+        // el recuadro de Reservar la muestra como "vencen el 2 de sep".
+        window._miCreditosExpiran = (d.creditosExpiran && d.creditosExpiran.toDate) ? d.creditosExpiran.toDate() : null;
 
         // Rank badge
         const badge = document.getElementById('perfil-rank-badge');
@@ -940,6 +1023,12 @@
         // ya se muestran/ocultan por su cuenta según el rango exacto.
         const adminCard = document.getElementById('perfil-admin-card');
         if (adminCard) adminCard.style.display = esStaffClase(rank) ? 'block' : 'none';
+
+        // Entradas del SIDEBAR reservadas a staff de clase (hoy: el calendario
+        // de horas del staff). Mismo criterio que los paneles de arriba.
+        document.querySelectorAll('.sb-solo-staff').forEach(el => {
+          el.style.display = esStaffClase(rank) ? '' : 'none';
+        });
 
         // Teléfono propio (desde doc privado). Solo lo ve el dueño aquí.
         const telEl = document.getElementById('perfil-tel');
@@ -2436,11 +2525,31 @@
       </div>`;
     }
 
+    // Tope de tarjetas por búsqueda. No es un límite de datos (todo sigue en
+    // _dirCache): es un límite de PINTADO, para que el navegador no arme cientos
+    // de tarjetas de golpe en un teléfono.
+    const DIR_MAX = 24;
+
     // Filtra _dirCache por término + filtro activo y lo pinta. No va a la red.
     window.pintarDirectorio = () => {
       const cont  = document.getElementById('dir-resultados');
       const vacio = document.getElementById('dir-vacio');
       const term  = (document.getElementById('dir-input')?.value || '').trim().toLowerCase();
+
+      // MODO BUSCADOR (no catálogo): sin texto y sin filtro NO se pinta a nadie.
+      // Antes se volcaba _dirCache completo y quedaba un scroll larguísimo que
+      // no ayudaba a encontrar a nadie. Comunidad ahora se USA escribiendo.
+      if (!term && _dirFiltro === 'todos') {
+        if (cont) cont.innerHTML = '';
+        if (vacio) {
+          vacio.style.display = 'block';
+          vacio.textContent = _dirCache.length
+            ? `Escribe un nombre, apodo o ID para buscar. Somos ${_dirCache.length} en la comunidad.`
+            : 'Aún no hay perfiles públicos.';
+        }
+        return;
+      }
+
       let lista = _dirCache.slice();
       // "Instructoras": incluye a quien tiene el flag docente (imparteClases) Y a
       // quien es Instructora POR RANGO (rank 2). Tras migrar rangos, las misses
@@ -2466,12 +2575,21 @@
         return String(a.nombreVisible || a.handle || '')
           .localeCompare(String(b.nombreVisible || b.handle || ''), 'es', { sensitivity: 'base' });
       });
-      if (cont) cont.innerHTML = lista.map(renderPerfilCard).join('');
+      const total = lista.length;
+      if (cont) cont.innerHTML = lista.slice(0, DIR_MAX).map(renderPerfilCard).join('');
+      // El aviso reusa #dir-vacio a propósito: vive DESPUÉS de .dir-grid, y
+      // .dir-grid es un CSS grid — un <p> metido dentro se volvería una celda
+      // más y se vería como una tarjeta rota.
       if (vacio) {
-        vacio.style.display = lista.length ? 'none' : 'block';
-        if (!lista.length) vacio.textContent = term || _dirFiltro!=='todos'
-          ? 'Sin resultados. Prueba con otro nombre o filtro.'
-          : 'Aún no hay perfiles públicos.';
+        if (!total) {
+          vacio.style.display = 'block';
+          vacio.textContent = 'Sin resultados. Prueba con otro nombre o filtro.';
+        } else if (total > DIR_MAX) {
+          vacio.style.display = 'block';
+          vacio.textContent = `Mostrando ${DIR_MAX} de ${total}. Escribe un poco más para afinar la búsqueda.`;
+        } else {
+          vacio.style.display = 'none';
+        }
       }
     };
 
@@ -2552,6 +2670,17 @@
           </details>`;
       }
 
+      // AVISO DE POSIBLE CUENTA REPETIDA — solo para el staff de clase (Rank ≤ 2).
+      // Lo deja avisarNombreRepetido() cuando la persona, al darse de alta,
+      // contestó "sí, soy yo" al ver un nombre igual. La app NO junta cuentas
+      // sola (fusionar Estrellas e historial no se puede deshacer): esto es el
+      // recado para que alguien lo haga a mano sabiendo lo que hace.
+      let dupHtml = '';
+      if (window._miRank != null && window._miRank <= 2 && d.posibleDuplicado) {
+        const otra = escapeHtml(d.posibleDuplicado.nombre || 'otra cuenta');
+        dupHtml = `<p class="pm-oculto">⚠️ Al registrarse dijo que ya tenía cuenta como <strong>${otra}</strong>. Falta juntar los dos registros.</p>`;
+      }
+
       const card = document.getElementById('perfil-modal-card');
       if (card) card.innerHTML = `
         <button class="pm-close" onclick="cerrarPerfilModal()" aria-label="Cerrar">×</button>
@@ -2559,6 +2688,7 @@
         <div class="pm-nombre">${nombre}</div>
         ${apodo}
         <div class="pm-tags">${tags}</div>
+        ${dupHtml}
         ${statsHtml}
         ${staffStatsHtml}`;
       const m = document.getElementById('perfil-modal');
@@ -3075,17 +3205,15 @@
         if(userName)  userName.textContent = (user.displayName || 'Mi cuenta').split(' ')[0];
         const fabP = document.getElementById('fab-perfil'); if (fabP) fabP.style.display = 'inline-flex';
         if(misClases) misClases.style.display = 'block';
-        // Comunidad (directorio + colaboradores): visibles y autocargados al entrar
-        const comunidad = document.getElementById('comunidad');
-        const colabSec  = document.getElementById('colaboradores');
-        if(comunidad) comunidad.style.display = 'block';
-        if(colabSec)  colabSec.style.display  = 'block';
-        if (window.buscarPerfiles)     buscarPerfiles();
-        if (window.cargarColaboradores) cargarColaboradores();
-        // Calendario de horarios del staff (visible y cargado al entrar)
-        const calSec = document.getElementById('calendario');
-        if(calSec) calSec.style.display = 'block';
-        if (window.calIniciar) calIniciar();
+        /* ─── LIMPIEZA (reestructura PWA) ───────────────────────────────
+           Aquí antes se forzaba display:block sobre Comunidad, Colaboradores
+           y el Calendario. Resultado: al iniciar sesión esas secciones
+           reaparecían SUELTAS en el scroll del home aunque ya vivieran dentro
+           de una hoja → ésa era justo la sensación de "opciones duplicadas"
+           (y el segundo calendario fantasma).
+           Ahora NO se pintan inline: cada una se abre desde el SIDEBAR y
+           carga su contenido en su onOpen. De paso el arranque es más ágil,
+           porque ya no se descargan directorio y calendario en cada login. */
         // Desbloquear videos
         videosLock.forEach(l => l.style.display = 'none');
         videoCards.forEach(c => c.style.pointerEvents = 'auto');
@@ -3127,6 +3255,8 @@
         const calSec = document.getElementById('calendario');
         if(calSec) calSec.style.display = 'none';
         _calHorarios = []; _calStaff = []; window._miRank = null;
+        // Al salir, las entradas de staff del sidebar vuelven a esconderse.
+        document.querySelectorAll('.sb-solo-staff').forEach(el => { el.style.display = 'none'; });
         if (window.cargarOverlayHorario) window.cargarOverlayHorario();  // limpia marcas del usuario anterior
         // Bloquear videos
         videosLock.forEach(l => l.style.display = 'flex');
@@ -3189,12 +3319,12 @@
       return { pendiente_pago:'Pendiente de pago', pago_reportado:'En confirmación', activa:'Activa', cancelada:'Cancelada' }[e] || e;
     }
 
-    // Slots que el ALUMNO ya apartó (reservas no canceladas) y dónde una miss le
-    // marcó asistencia. Devuelve {apartados:[slotId], asistidos:[slotId]}.
+    // Slots que el ALUMNO ya apartó (reservas no canceladas) y cómo se los
+    // calificó una miss. Devuelve {apartados:[], asistidos:[], faltas:[]}.
     // Lo consume el calendario (window.cargarOverlayHorario). Defensiva: cualquier
     // fallo de permisos/colección devuelve listas vacías sin romper el render.
     window.cargarMisSlots = async (uid) => {
-      const apartados = [], asistidos = [];
+      const apartados = [], asistidos = [], faltas = [];
       try {
         const snap = await getDocs(query(collection(db, "reservas"), where("uid", "==", uid)));
         snap.docs.forEach(d => {
@@ -3205,9 +3335,17 @@
       } catch (e) { console.warn('cargarMisSlots/reservas:', e); }
       try {
         const snapA = await getDocs(query(collection(db, "asistencias"), where("uid", "==", uid)));
-        snapA.docs.forEach(d => { const a = d.data(); if (a && a.slotId) asistidos.push(a.slotId); });
+        snapA.docs.forEach(d => {
+          const a = d.data(); if (!a || !a.slotId) return;
+          // Desde T2.3 el pase de lista también registra INASISTENCIAS. Las marcas
+          // viejas no traen `estado`, y todas ellas eran "sí asistió": por eso el
+          // valor por omisión es 'asistio' y no algo neutro — si no, el histórico
+          // entero se volvería "sin marcar" de la noche a la mañana.
+          if ((a.estado || 'asistio') === 'falta') faltas.push(a.slotId);
+          else asistidos.push(a.slotId);
+        });
       } catch (e) { /* colección/reglas de asistencias aún no existen */ }
-      return { apartados, asistidos };
+      return { apartados, asistidos, faltas };
     };
 
     // STAFF: mapa slotId -> [{nombre,estado,uid}] con TODAS las reservas no canceladas.
@@ -3324,8 +3462,10 @@
     // El staff VERIFICA el pago en el Stripe Dashboard y luego confirma aquí
     // (→ 'activa'). Es el paso humano interino hasta que el webhook lo automatice.
 
-    // Detalle legible de cada plan (para staff/reportes). Fuente: tarjetas de
-    // precios + planHoras/planNombres del grid. Aclara mensualidad vs clase suelta.
+    // Detalle legible de cada plan (para staff/reportes). Es HISTÓRICO: desde que
+    // se reserva con Estrellas, las reservas nuevas guardan plan:'creditos' y aquí
+    // no encuentran nada (el listado simplemente no pinta etiqueta de plan). Esto
+    // sigue vivo para poder LEER las reservas viejas, que sí traen plan.
     const PLAN_DETALLE = {
       individual: { nombre:'Individual', sesiones:'1 clase suelta', precio:'$250',   periodo:'pago único' },
       basico:     { nombre:'Básico',     sesiones:'2 clases/sem',   precio:'$800',   periodo:'mensualidad' },
@@ -3623,26 +3763,39 @@
       } catch (e) { console.debug('logActividad (ignorado):', e && (e.code || e.message)); }
     };
 
-    // ── PASE DE LISTA / ASISTENCIAS (T3-E) ────────────────────────────────
-    // STAFF marca que un alumno asistio a una clase (slotId) HOY. Id determinista
-    // uid_slotId_fecha -> idempotente. Inmutable por reglas (para "desmarcar" se
-    // borra). El alumno ve su propia asistencia via cargarMisSlots.
-    window.marcarAsistencia = async (uid, slotId) => {
-      const fecha = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+    // ── PASE DE LISTA / ASISTENCIAS (T3-E + T2.3) ─────────────────────────
+    // STAFF califica a un alumno en una clase (slotId): 'asistio' o 'falta'.
+    // Id determinista uid_slotId_fecha -> idempotente. Inmutable por reglas: para
+    // CORREGIR hay que borrar y volver a crear. El alumno ve la suya vía
+    // cargarMisSlots; nunca ve la de nadie más (regla de lectura por uid).
+    //
+    // La FECHA sale de la clase, no del reloj. Antes se usaba "hoy", y eso metía
+    // dos errores: si la miss pasaba lista al día siguiente, la marca quedaba
+    // fechada en un día en que no hubo clase, y el id dejaba de ser único por
+    // clase (misma alumna, misma clase, dos marcas). Ahora `fechaDeSlot` saca la
+    // fecha REAL del slotId (que lleva la semana embebida).
+    window.marcarAsistencia = async (uid, slotId, estado) => {
+      const est = (estado === 'falta') ? 'falta' : 'asistio';
+      const fecha = (window.fechaDeSlot && window.fechaDeSlot(slotId)) || new Date().toISOString().slice(0, 10);
       const ref = doc(db, "asistencias", uid + '_' + slotId + '_' + fecha);
       try {
-        // IDEMPOTENTE: si ya está marcada HOY, no la reescribimos. El id es
-        // determinista (uid_slotId_fecha) y la regla prohíbe 'update' (una marca
-        // establecida es inmutable); un segundo setDoc sobre el MISMO doc sería
-        // un update -> permission-denied. Por eso primero comprobamos existencia
-        // y damos la marca por buena en vez de reescribir.
-        const prev = await getDoc(ref);
-        if (prev.exists()) return { ok: true, already: true };
+        // ¿Ya hay marca de esta persona en esta clase? Se busca por slotId (no por
+        // el id calculado) para encontrar también las VIEJAS, que se guardaron con
+        // la fecha del día en que se marcó y por lo tanto tienen otro id.
+        const prev = await _buscarAsistencia(uid, slotId);
+        if (prev) {
+          // Misma calificación: no se reescribe (la regla prohíbe 'update', así que
+          // un segundo setDoc sobre el mismo doc sería permission-denied).
+          if ((prev.data.estado || 'asistio') === est) return { ok: true, already: true, estado: est };
+          // Distinta: se corrige borrando y recreando (borrar sí lo permite el staff).
+          await deleteDoc(prev.ref);
+        }
         await setDoc(ref, {
-          uid, slotId, fecha, marcadoPor: usuarioActual.uid, ts: serverTimestamp()
+          uid, slotId, fecha, estado: est, marcadoPor: usuarioActual.uid, ts: serverTimestamp()
         });
-        window.logActividad('Pase de lista', 'Marcó asistencia · ' + slotId + ' · ' + fecha);
-        return { ok: true };
+        window.logActividad('Pase de lista',
+          (est === 'falta' ? 'Marcó INASISTENCIA · ' : 'Marcó asistencia · ') + slotId + ' · ' + fecha);
+        return { ok: true, estado: est };
       } catch (e) {
         console.warn('marcarAsistencia:', e);
         const code = (e && (e.code || e.message)) || 'error';
@@ -3663,6 +3816,112 @@
         return { ok: false, code, diag };
       }
     };
+
+    // Marca existente de ESA persona en ESA clase, con cualquier fecha. Sólo la
+    // usa el STAFF: la consulta recorre toda la colección filtrando por slotId, y
+    // las reglas se la rechazarían a una alumna (ella sólo puede leer las suyas).
+    async function _buscarAsistencia(uid, slotId) {
+      try {
+        const snap = await getDocs(query(collection(db, "asistencias"), where("slotId", "==", slotId)));
+        const d = snap.docs.find(x => (x.data() || {}).uid === uid);
+        return d ? { ref: d.ref, data: d.data() || {} } : null;
+      } catch (e) { console.warn('_buscarAsistencia:', e); return null; }
+    }
+
+    // STAFF: quita la marca (ni asistió ni faltó, vuelve a "sin marcar"). Existe
+    // porque las marcas son INMUTABLES por regla: no hay "editar", sólo borrar.
+    window.desmarcarAsistencia = async (uid, slotId) => {
+      try {
+        const prev = await _buscarAsistencia(uid, slotId);
+        if (!prev) return { ok: true, already: true };
+        await deleteDoc(prev.ref);
+        window.logActividad('Pase de lista', 'Quitó la marca · ' + slotId);
+        return { ok: true };
+      } catch (e) {
+        console.warn('desmarcarAsistencia:', e);
+        return { ok: false, code: (e && (e.code || e.message)) || 'error' };
+      }
+    };
+
+    // STAFF: pase de lista de la SEMANA VIVA -> { slotId: { uid: 'asistio'|'falta' } }.
+    // Se filtra por `fecha >= lunes` (UN solo campo, así Firestore lo resuelve con
+    // su índice automático y no hace falta índice compuesto) para no arrastrar el
+    // histórico completo cada vez que se abre el calendario.
+    window.cargarAsistenciasSemana = async () => {
+      const mapa = {};
+      try {
+        const desde = window.weekKeyActual ? window.weekKeyActual() : '0000-00-00';
+        const snap = await getDocs(query(collection(db, "asistencias"), where("fecha", ">=", desde)));
+        snap.docs.forEach(d => {
+          const a = d.data() || {};
+          if (!a.slotId || !a.uid) return;
+          (mapa[a.slotId] = mapa[a.slotId] || {})[a.uid] = (a.estado === 'falta' ? 'falta' : 'asistio');
+        });
+      } catch (e) { console.warn('cargarAsistenciasSemana:', e); }
+      return mapa;
+    };
+
+    // STAFF: la misma foto pero EN VIVO, para que dos misses pasando lista al
+    // mismo tiempo vean los contadores moverse sin recargar.
+    window.suscribirAsistencias = (cb) => {
+      try {
+        const desde = window.weekKeyActual ? window.weekKeyActual() : '0000-00-00';
+        return onSnapshot(query(collection(db, "asistencias"), where("fecha", ">=", desde)), (snap) => {
+          const mapa = {};
+          snap.forEach(d => {
+            const a = d.data() || {};
+            if (!a.slotId || !a.uid) return;
+            (mapa[a.slotId] = mapa[a.slotId] || {})[a.uid] = (a.estado === 'falta' ? 'falta' : 'asistio');
+          });
+          cb(mapa);
+        }, (e) => console.warn('suscribirAsistencias:', e));
+      } catch (e) { console.warn('suscribirAsistencias:', e); return null; }
+    };
+
+    // ── CANCELAR UNA CLASE — devuelve la Estrella si faltan ≥12 h (T2.4) ──
+    // Va por el BACKEND a propósito, y esto NO es un capricho de arquitectura:
+    // las reservas pagadas con Estrellas nacen 'activa', y firestore.rules le
+    // prohíbe a la dueña tocar una reserva activa. Si la cancelación viviera en el
+    // navegador, cualquiera podría abrir la consola, "cancelar" una clase de hace
+    // un mes y regalarse Estrellas. Quien mide las horas, libera el cupo y
+    // reembolsa es el servidor, en UNA transacción: nunca queda a medias.
+    window.cancelarClase = async (slotId) => {
+      if (!usuarioActual) { abrirLoginModal('login'); return { ok: false }; }
+      if (!BACKEND_URL) {
+        await uiAlert('Cancelar en línea todavía no está disponible. Escríbenos por WhatsApp y liberamos tu lugar.', { titulo: 'No disponible' });
+        return { ok: false };
+      }
+      try {
+        const idToken = await usuarioActual.getIdToken();
+        const resp = await fetch(BACKEND_URL + '/cancelar', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + idToken },
+          body: JSON.stringify({ slotId }),
+        });
+        // Si el backend todavía no trae /cancelar, contesta 404 con HTML y el
+        // .json() truena con "Unexpected token <". Se atrapa aquí para poder dar
+        // un mensaje humano en vez de un error de parser.
+        let out = {};
+        try { out = await resp.json(); } catch (_) { out = {}; }
+        if (!resp.ok || !out.ok) {
+          const motivo = out.motivo || (resp.status === 404 ? 'no_desplegado' : 'error');
+          const msg = {
+            no_desplegado: 'La cancelación en línea aún no está publicada en el servidor. Escríbenos y liberamos tu lugar a mano.',
+            no_encontrada: 'No encontramos esa reserva a tu nombre. Puede que ya estuviera cancelada.',
+            ya_paso: 'Esa clase ya pasó, no se puede cancelar.',
+            falta_slot: 'No supimos qué clase cancelar. Vuelve a intentarlo desde el calendario.',
+          }[motivo] || (out.error || 'No se pudo cancelar la clase.');
+          await uiAlert(msg, { titulo: 'No se pudo cancelar', peligro: true });
+          return { ok: false, motivo };
+        }
+        cargarPerfil(usuarioActual.uid);   // el saldo cambió: que lo vea al instante
+        return out;
+      } catch (e) {
+        console.error('cancelarClase:', e);
+        await uiAlert('No se pudo cancelar. ' + (e.message || ''), { titulo: 'Error', peligro: true });
+        return { ok: false };
+      }
+    };
   </script>
 
   <style>
@@ -3680,10 +3939,56 @@
       --gris-medio: #242424;
       --overlay: rgba(0,0,0,0.70);
       --pendon-w: 0px;
+
+      /* ===== LIQUID GLASS · paleta NEGRO/NARANJA =====
+         Decisión: el NARANJA va al frente (superficies y gradientes) y el
+         AMARILLO queda como acento (textos/realces). Por eso NO tocamos
+         --amarillo: sigue siendo el realce de marca en todo el CSS viejo. */
+      --naranja-claro: #ff9433;
+      --naranja-hondo: #b25200;
+      --grad-naranja: linear-gradient(135deg, var(--naranja), var(--naranja-claro));
+      /* Vidrio: fondo translúcido + desenfoque. El "alto" es para paneles
+         grandes (sidebar/hojas) y el normal para tarjetas sobre contenido. */
+      --glass-bg:       rgba(20,14,9,.46);
+      --glass-bg-alto:  rgba(16,11,7,.72);
+      --glass-borde:      rgba(255,148,51,.20);
+      --glass-borde-vivo: rgba(255,148,51,.55);
+      --glass-blur:   blur(18px) saturate(140%);
+      --glass-sombra: 0 18px 50px rgba(0,0,0,.55);
+      /* Halo "brilloso" para las secciones que guían a apartar */
+      --brillo: 0 0 0 1px rgba(255,148,51,.38), 0 0 30px rgba(232,116,0,.34);
+      --sidebar-w: 268px;
     }
 
     * { margin:0; padding:0; box-sizing:border-box; }
     html { scroll-behavior:smooth; }
+
+    /* ═══════ SCROLL DE MARCA ═══════
+       La barra del sistema (gris sobre blanco en Windows) rompía el vidrio
+       oscuro: en cuanto un popup se pasaba de alto aparecía una franja
+       clarísima pegada al borde, justo encima del negro/naranja.
+
+       Van las DOS sintaxis a propósito, NO es código repetido:
+         · scrollbar-width / scrollbar-color → el estándar, lo lee Firefox
+         · ::-webkit-scrollbar-*             → Chrome, Edge, Safari y la PWA
+       Cada navegador entiende una y descarta la otra; ninguna pisa a la otra.
+
+       El `border:2px solid transparent` + `background-clip:padding-box` es el
+       truco para que el pulgar se vea más delgado que su carril sin cambiarle
+       el ancho real: el borde transparente deja ver el carril por debajo. */
+    * { scrollbar-width:thin; scrollbar-color:var(--naranja) rgba(255,255,255,.06); }
+    ::-webkit-scrollbar { width:9px; height:9px; }
+    ::-webkit-scrollbar-track { background:rgba(255,255,255,.05); border-radius:99px; }
+    ::-webkit-scrollbar-thumb {
+      border-radius:99px;
+      background:linear-gradient(180deg, var(--amarillo), var(--naranja));
+      border:2px solid transparent; background-clip:padding-box;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background:linear-gradient(180deg, #ffdd55, var(--naranja-claro));
+      background-clip:padding-box;
+    }
+    ::-webkit-scrollbar-corner { background:transparent; }
     /* En ESCRITORIO el texto se veía pequeño (la PWA en móvil se ve bien).
        Subimos la raíz tipográfica 25% SOLO en pantallas anchas: como todas las
        fuentes usan rem escalan (títulos, textos, calendarios, formulario), pero
@@ -3751,7 +4056,10 @@
     .fab-perfil:active { transform:translateY(0); }
     .fab-perfil .fab-perfil-ico { font-size:1.05rem; }
     @media (max-width:560px){ .fab-perfil { right:14px; bottom:16px; padding:11px 17px; font-size:.74rem; } }
-    /* En móvil/PWA la barra inferior reemplaza al FAB "Mi Perfil" */
+    /* En teléfono el FAB sigue oculto aunque ya no exista la barra inferior:
+       "Mi Perfil" ya vive en el mosaico de inicio Y en el sidebar. Un tercer
+       botón flotando encima del contenido sería justo el estorbo abajo que
+       se pidió quitar. En escritorio sí se queda: ahí sobra el espacio. */
     body.mob-nav-on .fab-perfil { display:none !important; }
 
     /* ===== NAVEGACIÓN MÓVIL / PWA ===== */
@@ -3780,33 +4088,14 @@
     }
     .nav-overlay.visible { display:block; opacity:1; }
 
-    .mob-bottom-nav {
-      display:none; position:fixed; left:0; right:0; bottom:0; z-index:8500;
-      height:calc(56px + env(safe-area-inset-bottom));
-      padding-bottom:env(safe-area-inset-bottom);
-      background:rgba(8,8,8,.94); backdrop-filter:blur(14px);
-      border-top:1px solid rgba(255,204,0,.18);
-      grid-template-columns:repeat(5,1fr);
-      align-items:stretch;
-    }
-    body.mob-nav-on .mob-bottom-nav { display:grid; }
-    body.mob-nav-on { padding-bottom:calc(56px + env(safe-area-inset-bottom)); }
+    /* La BARRA INFERIOR se retiró (ago-2026). Con el sidebar deslizable desde
+       la hamburguesa de arriba-derecha, la barra duplicaba la misma navegación
+       y encima se comía 56px de pantalla en cada scroll. `body.mob-nav-on`
+       sobrevive como bandera de "estamos en teléfono", que otras reglas usan. */
 
-    .mob-nav-item {
-      display:flex; flex-direction:column; align-items:center; justify-content:center;
-      gap:3px; border:none; background:transparent; cursor:pointer;
-      color:rgba(240,237,230,.45); font-family:'Cinzel',serif;
-      font-size:.48rem; letter-spacing:.5px; text-transform:uppercase;
-      padding:6px 2px; -webkit-tap-highlight-color:transparent;
-      transition:color .2s ease;
-    }
-    .mob-nav-item .mob-nav-ico { font-size:1.15rem; line-height:1; }
-    .mob-nav-item.active, .mob-nav-item:active { color:var(--amarillo); }
-    .mob-nav-item.active .mob-nav-ico { transform:scale(1.08); }
-
-    /* Banner PWA: que no quede tapado por la barra inferior */
+    /* Banner PWA: respeta la franja del gesto en teléfonos sin botón físico. */
     body.mob-nav-on #pwa-banner {
-      bottom:calc(68px + env(safe-area-inset-bottom)) !important;
+      bottom:calc(20px + env(safe-area-inset-bottom)) !important;
     }
     .nav-dot {
       width:7px; height:7px;
@@ -4203,20 +4492,48 @@
 
     /* ===== HORARIOS ===== */
     #horarios { background:rgba(0,0,0,.25); }
-    .plan-selector { display:flex; gap:10px; margin-bottom:36px; flex-wrap:wrap; }
-    .plan-btn {
-      padding:10px 26px;
-      background:transparent;
-      border:1px solid rgba(255,255,255,.15);
-      color:rgba(240,237,230,.4);
-      font-family:'Cinzel',serif; font-size:.62rem;
-      letter-spacing:2px; text-transform:uppercase;
-      cursor:pointer; border-radius:2px; transition:all .3s;
+    /* ── SALDO DE ESTRELLAS (aquí vivía el selector de 4 planes) ──
+       Es lo PRIMERO que se debe ver al entrar a Reservar: cuántas clases te
+       quedan. Por eso el número va grande, amarillo y en su propio recuadro
+       de vidrio, en vez de perderse como un dato más de texto corrido. */
+    .reservar-saldo {
+      display:flex; align-items:center; gap:16px; flex-wrap:wrap;
+      margin-bottom:24px; padding:16px 20px;
+      background:linear-gradient(135deg, rgba(232,116,0,.22), rgba(255,204,0,.08));
+      border:1px solid rgba(255,204,0,.28); border-radius:16px;
+      backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px);
+      box-shadow:0 8px 26px rgba(0,0,0,.28), inset 0 1px 0 rgba(255,255,255,.08);
     }
-    .plan-btn.activo { background:var(--amarillo); color:var(--negro); border-color:var(--amarillo); }
-    .plan-btn:hover:not(.activo) { border-color:rgba(255,204,0,.4); color:var(--amarillo); }
-    .plan-info-badge { margin-bottom:12px; font-size:.78rem; opacity:.5; }
-    .plan-info-badge strong { color:var(--amarillo); font-weight:600; }
+    .reservar-saldo-num {
+      display:flex; align-items:baseline; gap:5px;
+      font-family:'Cinzel',serif; font-size:2.4rem; font-weight:700; line-height:1;
+      color:var(--amarillo); text-shadow:0 2px 14px rgba(255,204,0,.35);
+    }
+    .reservar-saldo-est { font-size:1.25rem; }
+    .reservar-saldo-txt { display:flex; flex-direction:column; gap:3px; flex:1 1 170px; min-width:0; }
+    .reservar-saldo-txt strong { font-size:.95rem; color:#fff; font-weight:700; letter-spacing:.2px; }
+    .reservar-saldo-txt span { font-size:.78rem; color:rgba(255,255,255,.62); }
+    .reservar-saldo-btn {
+      padding:11px 22px; border:none; border-radius:999px; cursor:pointer;
+      background:linear-gradient(135deg, var(--naranja), var(--amarillo));
+      color:#1a1200; font-weight:800; font-size:.78rem; letter-spacing:.4px;
+      white-space:nowrap; transition:transform .2s, box-shadow .2s;
+      box-shadow:0 6px 18px rgba(232,116,0,.35);
+    }
+    .reservar-saldo-btn:hover { transform:translateY(-2px); box-shadow:0 10px 24px rgba(232,116,0,.45); }
+    /* Sin Estrellas el recuadro deja de presumir un número y se vuelve aviso:
+       apaga el amarillo y deja al botón de comprar como lo único que brilla,
+       porque comprar es literalmente lo único que desbloquea la reserva. */
+    .reservar-saldo.vacio {
+      border-color:rgba(255,255,255,.14);
+      background:linear-gradient(135deg, rgba(255,255,255,.06), rgba(255,255,255,.02));
+    }
+    .reservar-saldo.vacio .reservar-saldo-num { color:rgba(255,255,255,.32); text-shadow:none; }
+    @media (max-width:520px) {
+      .reservar-saldo { gap:12px; padding:14px 16px; }
+      .reservar-saldo-num { font-size:2rem; }
+      .reservar-saldo-btn { width:100%; }
+    }
     /* Aviso de SEMANA ACTUAL — burbuja amarilla de marca, letras negras */
     .semana-aviso {
       display:inline-flex; align-items:center; gap:8px;
@@ -4272,7 +4589,9 @@
       .horario-grid th.th-hora { width:38px; }
       .horario-grid td { padding:5px 2px; }
       .horario-grid .hora-col { font-size:.46rem; width:38px; }
-      .clase-cell { padding:8px 2px !important; font-size:.52rem !important; min-height:44px !important; letter-spacing:0 !important; }
+      /* Sube de 44 a 52: ahora la celda carga insignia arriba (cupo) y etiqueta
+         abajo ("Apartada ✓"), y con 44 se encimaban sobre el nombre de la clase. */
+      .clase-cell { padding:13px 2px !important; font-size:.52rem !important; min-height:52px !important; letter-spacing:0 !important; }
     }
     .clase-cell {
       border-radius:3px; padding:7px 5px;
@@ -4281,12 +4600,18 @@
       transition:all .4s; user-select:none;
     }
     .clase-cell {
-      border-radius:4px; padding:12px 6px;
+      border-radius:4px; padding:15px 6px;
       font-size:.68rem; font-family:'Cinzel',serif;
       letter-spacing:.5px; opacity:.25;
       transition:all .3s; user-select:none;
-      min-height:52px; display:flex;
+      min-height:60px; display:flex;
       align-items:center; justify-content:center;
+      /* ANCLA de los distintivos de la celda (cupo, pase de lista, "Apartada ✓").
+         Todos son position:absolute y hasta hoy la celda NO era position:relative:
+         se colgaban del primer ancestro posicionado, o sea que TODOS se amontonaban
+         en la misma esquina de la hoja en vez de vivir cada uno en su clase. Por eso
+         "no se veía cuántos lugares quedaban": el número sí se pintaba, pero lejos. */
+      position:relative;
     }
     .clase-nombre { pointer-events:none; }
     .clase-cell.disponible { opacity:1; cursor:pointer; }
@@ -4312,33 +4637,94 @@
       box-shadow: inset 0 0 0 3px rgba(124,252,154,.12);
     }
     .clase-cell.mi-reserva:hover { transform: none; filter: none; }
+    /* En el teléfono la celda mide ~58 px: "No asististe" se partía en DOS
+       renglones y crecía hacia arriba tapando el nombre de la clase. Una sola
+       línea siempre, con puntos suspensivos como último recurso. */
     .mi-reserva-tag {
-      position: absolute; bottom: 2px; left: 0; right: 0; text-align: center;
-      font-size: .5rem; letter-spacing: .5px; color: #7CFC9A;
+      position: absolute; bottom: 2px; left: 1px; right: 1px; text-align: center;
+      font-size: .5rem; letter-spacing: .2px; line-height: 1.2; color: #7CFC9A;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
       font-family: 'Cinzel', serif; pointer-events: none;
     }
     /* Clase ASISTIDA (marcada por una miss) — se activará con el pase de lista. */
     .clase-cell.asistida { outline-color: #4fd1c5; }
     .clase-cell.asistida .mi-reserva-tag { color: #4fd1c5; }
-    /* Cupo / lleno (se activa cuando se publiquen las reglas de 'cupos'). */
+    /* Clase que quedó marcada como INASISTENCIA: sigue siendo suya (la Estrella ya
+       se gastó), pero se ve en rojo apagado para que no se confunda con "asististe". */
+    .clase-cell.falto { outline-color: #ff7676; }
+    .clase-cell.falto .mi-reserva-tag { color: #ff9b9b; }
+    /* ── CUPOS A LA VISTA (T2.1) ──────────────────────────────────────────
+       Se muestran los lugares LIBRES, no los ocupados: es el número con el que
+       una alumna decide. Al llegar a 0 la leyenda es "Clase Full". */
+    /* Anclada a los DOS lados (left+right) con ancho de contenido y márgenes
+       automáticos: así se centra sola y NUNCA puede salirse de su celda, que en
+       el teléfono mide apenas ~58 px. */
     .cupo-badge {
-      position: absolute; top: 2px; left: 4px;
-      font-size: .5rem; letter-spacing: .3px; color: rgba(255,255,255,.6);
+      position: absolute; top: 3px; left: 2px; right: 2px; z-index: 2;
+      width: fit-content; max-width: calc(100% - 4px); margin-inline: auto;
+      font-size: .5rem; letter-spacing: .2px; line-height: 1; white-space: nowrap;
+      color: rgba(255,255,255,.72); background: rgba(0,0,0,.45);
+      border-radius: 999px; padding: 2px 4px; text-align: center;
+      overflow: hidden; text-overflow: ellipsis;
       font-family: 'Cinzel', serif; pointer-events: none;
+    }
+    .cupo-badge.pocos { color: #ffd76a; background: rgba(0,0,0,.6); }
+    /* "Clase Full" es la leyenda más larga y es la que NO se puede recortar (es
+       justo la que hay que ver). Como pastilla flotante se desbordaba ~10 px
+       hacia la celda vecina, así que esta variante toma la franja completa. */
+    .cupo-badge.full {
+      color: #fff; background: var(--naranja, #e87400);
+      font-weight: 700; letter-spacing: 0;
+      width: auto; max-width: none; padding: 2px 3px;
     }
     .clase-cell.lleno { opacity: .55; cursor: not-allowed; filter: grayscale(.4); }
     .clase-cell.lleno:hover { transform: none; filter: grayscale(.4); }
-    .clase-cell.lleno .cupo-badge { color: var(--naranja, #e87400); font-weight: 600; }
     /* Vista STAFF/MISS (T3-F): ver quién apartó + filtro "mis clases". */
     .clase-cell.staff-view { cursor: pointer; }
     .clase-cell.staff-view:hover { filter: brightness(1.18); }
     .staff-reservas-badge {
-      position: absolute; top: 2px; left: 4px; z-index: 2;
-      font-size: .5rem; letter-spacing: .3px; font-family: 'Cinzel', serif;
-      color: #ffe08a; background: rgba(0,0,0,.5); border-radius: 8px;
-      padding: 1px 6px; pointer-events: none;
+      position: absolute; top: 3px; left: 2px; right: 2px; z-index: 2;
+      width: fit-content; max-width: calc(100% - 4px); margin-inline: auto;
+      font-size: .5rem; letter-spacing: .2px; line-height: 1; white-space: nowrap;
+      font-family: 'Cinzel', serif; text-align: center;
+      color: #ffe08a; background: rgba(0,0,0,.55); border-radius: 999px;
+      padding: 2px 4px; pointer-events: none;
+      overflow: hidden; text-overflow: ellipsis;
     }
     .staff-reservas-badge.vacio { color: rgba(255,255,255,.38); }
+    /* Misma razón que .cupo-badge.full: aquí también dice "Clase Full". */
+    .staff-reservas-badge.full {
+      color: #fff; background: var(--naranja, #e87400); font-weight: 700; letter-spacing: 0;
+      width: auto; max-width: none; padding: 2px 3px;
+    }
+    /* ── PASE DE LISTA DE UN VISTAZO (T2.3) ───────────────────────────────
+       Responde a "no tengo cómo verificar cuántas fueron sin entrar clase por
+       clase": ✓ las que sí, ✗ las que no, y el punto gris = todavía sin marcar. */
+    .staff-asist-badge {
+      position: absolute; bottom: 2px; left: 0; right: 0; z-index: 2;
+      display: flex; gap: 5px; justify-content: center; align-items: center;
+      font-size: .5rem; line-height: 1; white-space: nowrap;
+      font-family: 'Raleway', sans-serif; font-weight: 700; pointer-events: none;
+    }
+    .staff-asist-badge .si    { color: #7CFC9A; }
+    .staff-asist-badge .no    { color: #ff7676; }
+    .staff-asist-badge .pend  { color: rgba(255,255,255,.45); }
+    /* ── CANCELAR MI CLASE (T2.4) ─────────────────────────────────────────
+       Antes tocar tu propia clase apartada sólo hacía temblar la celda: no había
+       NINGUNA forma de soltar el lugar ni de recuperar la Estrella. La ✕ es sólo
+       la señal (pointer-events:none) — el botón real es la celda entera, que es
+       un blanco mucho más cómodo para el pulgar en el teléfono. */
+    .mi-reserva-cancelar {
+      position: absolute; top: 3px; right: 3px; z-index: 3;
+      width: 17px; height: 17px; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: .55rem; line-height: 1; pointer-events: none;
+      background: rgba(0,0,0,.55); border: 1px solid rgba(255,155,155,.55); color: #ff9b9b;
+    }
+    .clase-cell.mi-reserva[data-mi-clase="1"] { cursor: pointer; }
+    .clase-cell.mi-reserva[data-mi-clase="1"]:hover .mi-reserva-cancelar {
+      background: #ff5a5a; border-color: #ff5a5a; color: #fff;
+    }
     .clase-cell.fuera-mis-dias { opacity: .26; filter: grayscale(.6); }
     .clase-cell.fuera-mis-dias:hover { filter: grayscale(.6) brightness(1.05); }
     .horario-staff-bar {
@@ -4373,16 +4759,30 @@
     .r-estado.activa { background: rgba(124,252,154,.15); color: #7CFC9A; }
     .r-estado.pago_reportado { background: rgba(255,204,0,.15); color: var(--amarillo); }
     .r-estado.pendiente_pago { background: rgba(255,255,255,.08); color: rgba(255,255,255,.6); }
-    .reservas-modal-cap { font-size: .72rem; opacity: .6; margin-bottom: 18px; }
-    .r-asist-btn {
+    .reservas-modal-cap { font-size: .72rem; opacity: .75; margin-bottom: 18px; line-height: 1.7; }
+    /* Resumen del pase de lista arriba de la lista: el "cuántas SÍ / cuántas NO"
+       que el dueño pedía poder leer sin abrir a cada alumna. */
+    .pase-resumen { display: inline-flex; gap: 10px; flex-wrap: wrap; font-size: .7rem; font-weight: 700; }
+    .pase-resumen .si   { color: #7CFC9A; }
+    .pase-resumen .no   { color: #ff7676; }
+    .pase-resumen .pend { color: rgba(255,255,255,.5); }
+    /* La fila envuelve: con tres botones ya no cabe en una línea de teléfono. */
+    .reserva-fila { flex-wrap: wrap; }
+    .r-btns { display: flex; gap: 6px; flex: 0 0 auto; margin-left: auto; }
+    .r-asist-btn, .r-falta-btn, .r-limpiar-btn {
       padding: 5px 10px; border-radius: 5px; cursor: pointer; white-space: nowrap;
       font-family: 'Cinzel', serif; font-size: .58rem; letter-spacing: .5px;
-      background: transparent; border: 1px solid rgba(124,252,154,.5); color: #7CFC9A;
-      transition: all .2s;
+      background: transparent; transition: all .2s;
     }
+    .r-asist-btn { border: 1px solid rgba(124,252,154,.5); color: #7CFC9A; }
     .r-asist-btn:hover { background: rgba(124,252,154,.15); }
-    .r-asist-btn:disabled { opacity: .6; cursor: default; }
-    .r-asist-btn.hecho { background: rgba(124,252,154,.2); border-color: #7CFC9A; }
+    .r-asist-btn.hecho { background: rgba(124,252,154,.22); border-color: #7CFC9A; font-weight: 700; }
+    .r-falta-btn { border: 1px solid rgba(255,118,118,.5); color: #ff9b9b; }
+    .r-falta-btn:hover { background: rgba(255,118,118,.15); }
+    .r-falta-btn.hecho { background: rgba(255,118,118,.22); border-color: #ff7676; font-weight: 700; }
+    .r-limpiar-btn { border: 1px solid rgba(255,255,255,.22); color: rgba(255,255,255,.6); }
+    .r-limpiar-btn:hover { background: rgba(255,255,255,.1); color: var(--blanco); }
+    .r-asist-btn:disabled, .r-falta-btn:disabled, .r-limpiar-btn:disabled { opacity: .6; cursor: default; }
     @keyframes shake {
       0%,100%{transform:translateX(0)}
       20%{transform:translateX(-5px)}
@@ -4440,41 +4840,13 @@
     .leyenda-dot { width:10px; height:10px; border-radius:2px; }
 
 
-    /* ===== PRECIOS ===== */
-    #precios { background:rgba(0,0,0,.35); }
-    .precios-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); gap:20px; }
-    .precio-card {
-      background:rgba(18,18,18,.85);
-      border:1px solid rgba(255,255,255,.08);
-      border-radius:4px; padding:34px 26px;
-      text-align:center; position:relative;
-      transition:transform .3s;
-    }
-    .precio-card:hover { transform:translateY(-6px); }
-    .precio-card.destacado { border:2px solid var(--amarillo); background:rgba(24,22,0,.85); }
-    .precio-badge {
-      position:absolute; top:-12px; left:50%;
-      transform:translateX(-50%);
-      background:var(--amarillo); color:var(--negro);
-      font-family:'Cinzel',serif; font-size:.52rem;
-      letter-spacing:2px; padding:4px 14px;
-      border-radius:10px; white-space:nowrap;
-    }
-    .precio-plan-nombre { font-family:'Cinzel',serif; font-size:.62rem; letter-spacing:4px; color:var(--naranja); margin-bottom:14px; }
-    .precio-monto { font-family:'Cinzel',serif; font-size:2.6rem; font-weight:900; color:var(--blanco); line-height:1; margin-bottom:3px; }
-    .precio-periodo { font-size:.68rem; opacity:.3; margin-bottom:22px; }
-    .precio-horas { font-size:.78rem; opacity:.5; margin-bottom:22px; padding:9px; background:rgba(255,204,0,.06); border-radius:3px; }
-    .precio-horas strong { color:var(--amarillo); font-weight:600; }
-    .btn-plan {
-      display:block; padding:12px; width:100%;
-      border:1px solid rgba(255,204,0,.35);
-      color:var(--amarillo);
-      font-family:'Cinzel',serif; font-size:.62rem;
-      letter-spacing:2px; text-align:center;
-      border-radius:2px; cursor:pointer;
-      background:transparent; transition:all .3s;
-    }
-    .btn-plan:hover, .precio-card.destacado .btn-plan { background:var(--amarillo); color:var(--negro); }
+    /* ===== PRECIOS (retirado) =====
+       Aquí vivía el mostrario ORIGINAL: `.precios-grid` + `.precio-card` +
+       `.btn-plan`, tarjetas anchas de $250/$800/$1,200/$1,600. La hoja de
+       Estrellas enseñaba ESE mostrario y, justo debajo, el de `.paquete-card`
+       con los mismos cuatro precios: el mismo catálogo dos veces.
+       Se dejó el segundo (rectángulos verticales, se leen mejor de un vistazo)
+       y este se borró junto con su CSS, que ya no lo usaba nadie más. */
 
     /* ===== MIS CLASES ===== */
     #seccion-mis-clases { display:none; background:rgba(0,0,0,.45); }
@@ -5106,9 +5478,153 @@
       .mosaico-ico { font-size:1.7rem; }
     }
 
+    /* ═══════════════ SIDEBAR · Liquid Glass ═══════════════
+       Navegación ÚNICA de la app. En escritorio (≥1024px) vive fijo a la
+       DERECHA y el contenido se recorre; por debajo queda fuera de pantalla
+       y entra deslizándose con ☰ o con "Ver Más" del grid.
+       Conserva el id #nav-drawer a propósito: así reutiliza la plomería ya
+       probada (hamburguesa, velo, Escape, botón "Ver Más" del mosaico).
+
+       ⬅➡ POR QUÉ DERECHA (ago-2026): nació anclado a la izquierda mientras la
+       ☰ vive arriba a la DERECHA. Tocabas un botón de un lado y el panel se
+       asomaba por el otro — el ojo no ligaba una cosa con la otra. El disparador
+       manda: se mueve el panel al lado de su botón, no el botón. Bonus: el ✕ del
+       panel cae casi debajo de la ☰, así que abrir y cerrar ocurren en el MISMO
+       punto de la pantalla. */
+    .sidebar {
+      position:fixed; top:0; right:0; bottom:0;
+      width:var(--sidebar-w); z-index:320;
+      display:flex; flex-direction:column; align-items:stretch; gap:0;
+      /* Antes había 74px de colchón abajo para librar la barra inferior. Ya no
+         existe esa barra: quedan 18px + la franja del gesto del teléfono, y el
+         menú recupera ese espacio (se ve una entrada más sin hacer scroll). */
+      padding:calc(18px + env(safe-area-inset-top)) 12px calc(18px + env(safe-area-inset-bottom));
+      background:var(--glass-bg-alto);
+      -webkit-backdrop-filter:var(--glass-blur); backdrop-filter:var(--glass-blur);
+      border-left:1px solid var(--glass-borde);
+      box-shadow:var(--glass-sombra);
+      transform:translateX(102%);
+      transition:transform .3s cubic-bezier(.22,.9,.28,1);
+      overflow-y:auto; -webkit-overflow-scrolling:touch;
+    }
+    .sidebar.abierto { transform:translateX(0); }
+    /* velo naranja: es lo que le da el tono "vivo" sobre el vidrio.
+       160deg (y no 200) para que el naranja baje desde la esquina de arriba a la
+       DERECHA: el mismo rincón por donde entra el panel y donde vive la ☰. */
+    .sidebar::before {
+      content:''; position:absolute; inset:0; pointer-events:none;
+      background:linear-gradient(160deg, rgba(232,116,0,.20), transparent 58%);
+    }
+    .sidebar > * { position:relative; z-index:1; }
+
+    .sidebar-top { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:0 6px 12px; }
+    .sidebar-marca { font-family:'Cinzel',serif; font-size:.95rem; font-weight:900; letter-spacing:2px; color:var(--blanco); }
+    .sidebar-marca .acento { color:var(--naranja-claro); }
+    /* 40px de lado: es el mínimo cómodo para el pulgar. Con 34px se fallaba el
+       toque y parecía que "no había forma de cerrar", que es justo la queja
+       que originó este cambio. */
+    .sidebar-cerrar {
+      width:40px; height:40px; border-radius:11px; cursor:pointer; flex:0 0 auto;
+      background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.14);
+      color:var(--blanco); font-size:1rem; line-height:1;
+      display:flex; align-items:center; justify-content:center; transition:.15s;
+      -webkit-tap-highlight-color:transparent;
+    }
+    .sidebar-cerrar:hover, .sidebar-cerrar:focus-visible {
+      border-color:var(--glass-borde-vivo); color:var(--naranja-claro);
+      background:rgba(232,116,0,.16); outline:none;
+    }
+
+    .sidebar-nav { display:flex; flex-direction:column; gap:4px; }
+    .sidebar-grupo {
+      font-family:'Cinzel',serif; font-size:.54rem; letter-spacing:2.6px; text-transform:uppercase;
+      color:rgba(240,237,230,.34); margin:16px 8px 6px;
+    }
+    .sb-item {
+      display:flex; align-items:center; gap:11px; width:100%; cursor:pointer;
+      padding:11px 12px; border-radius:12px; text-align:left; font-family:inherit;
+      background:transparent; border:1px solid transparent; color:rgba(240,237,230,.82);
+      transition:background .16s ease, border-color .16s ease, color .16s ease, transform .16s ease;
+      -webkit-tap-highlight-color:transparent;
+    }
+    /* El empujoncito del hover va hacia el CONTENIDO (ahora a la izquierda,
+       porque el riel se mudó a la derecha). Con +2px se despegaba hacia el
+       borde de la pantalla, que es justo a donde no lleva. */
+    .sb-item:hover, .sb-item:focus-visible {
+      background:linear-gradient(100deg, rgba(232,116,0,.20), rgba(255,255,255,.04));
+      border-color:var(--glass-borde); color:var(--blanco); outline:none; transform:translateX(-2px);
+    }
+    .sb-item.activo {
+      background:linear-gradient(100deg, rgba(232,116,0,.30), rgba(255,255,255,.05));
+      border-color:var(--glass-borde-vivo); color:#fff;
+    }
+    .sb-ico { font-size:1.05rem; line-height:1; flex:0 0 auto; }
+    .sb-txt { flex:1 1 auto; font-size:.76rem; font-weight:600; letter-spacing:.5px; }
+    .sb-badge {
+      flex:0 0 auto; font-size:.62rem; font-weight:800; color:var(--amarillo);
+      background:rgba(255,204,0,.12); border:1px solid rgba(255,204,0,.30);
+      border-radius:999px; padding:2px 8px; line-height:1.3;
+    }
+    /* Accesos que llevan a APARTAR: van "brillosos" (naranja al frente) */
+    .sb-item.sb-brillo { border-color:var(--glass-borde); }
+    .sb-item.sb-brillo .sb-txt { color:var(--naranja-claro); }
+
+    /* el overlay reutilizado queda DEBAJO del sidebar */
+    .nav-overlay { z-index:310; }
+
+    /* Destello de "Ver Más" en escritorio (el riel ya está a la vista). */
+    .sidebar.destello { animation:sbDestello 1.2s ease; }
+    @keyframes sbDestello {
+      0%,100% { box-shadow:var(--glass-sombra); }
+      25%,75% { box-shadow:var(--glass-sombra), var(--brillo); }
+    }
+    @media (prefers-reduced-motion:reduce){ .sidebar.destello { animation:none; } }
+
+    /* ESCRITORIO: sidebar a la vista, el contenido se recorre a la izquierda…
+       …PERO SE PUEDE PLEGAR. Antes el riel era permanente y el ✕ se escondía
+       (`display:none`), así que en pantalla grande NO existía forma de quitarlo
+       de en medio: ocupaba 268px fijos aunque quisieras ver la app a lo ancho.
+       Ahora el mismo ✕ lo pliega, la ☰ lo trae de vuelta, y la decisión se
+       recuerda (localStorage) para no tener que plegarlo en cada visita.
+       Todo este bloque es el espejo del de antes: donde decía `left` ahora dice
+       `right`, porque el riel cambió de lado para quedar junto a su ☰. */
+    @media (min-width:1024px) {
+      .sidebar { transform:translateX(0); }
+      body { padding-right:var(--sidebar-w); }
+      header { right:var(--sidebar-w); }
+      /* en escritorio no hay barra inferior: se recupera el hueco */
+      .sidebar { padding-bottom:18px; }
+      .nav-overlay { display:none !important; }
+
+      /* El contenido acompaña al riel en vez de saltar de golpe. Va sólo aquí
+         (≥1024) porque en teléfono el cuerpo NO se recorre: el panel flota
+         encima y animar el padding de <body> sería trabajo tirado. */
+      body { transition:padding-right .3s cubic-bezier(.22,.9,.28,1); }
+      header, #sheet-host { transition:right .3s cubic-bezier(.22,.9,.28,1); }
+
+      /* ── RIEL PLEGADO ──
+         Ojo con la especificidad: `#sheet-host` es un id (1,0,0), así que para
+         ganarle hay que subir con `body.sidebar-plegado #sheet-host` (1,1,1).
+         Con `.sidebar-plegado #sheet-host` sola (0,1,1) NO alcanzaría y la hoja
+         se quedaría con el hueco del riel ya plegado. */
+      body.sidebar-plegado .sidebar { transform:translateX(102%); }
+      body.sidebar-plegado { padding-right:0; }
+      body.sidebar-plegado header { right:0; }
+      body.sidebar-plegado #sheet-host { right:0; }
+      /* plegado, la ☰ es la ÚNICA manera de volver: tiene que verse sí o sí */
+      body.sidebar-plegado .nav-burger { display:flex; }
+    }
+    /* Debajo de 1024 se abre con ☰ (antes el burger sólo aparecía en ≤768). */
+    @media (max-width:1023px) { .nav-burger { display:flex; } }
+
     /* --- Popup HOJA (sheet) nativo --- */
     #sheet-host { position:fixed; inset:0; z-index:4200; display:none; }
     #sheet-host.abierto { display:block; }
+    /* Va DESPUÉS del inset:0 de arriba a propósito: una @media no suma
+       especificidad, así que si la pusiéramos antes, el inset:0 la pisaría.
+       En escritorio la hoja se corta ANTES del riel (que ahora está a la
+       derecha) para no taparlo. */
+    @media (min-width:1024px){ #sheet-host { right:var(--sidebar-w); } }
     .sheet-bg {
       position:absolute; inset:0; background:rgba(0,0,0,.78);
       -webkit-backdrop-filter:blur(3px); backdrop-filter:blur(3px);
@@ -5152,7 +5668,11 @@
     .sheet-close:hover { opacity:1; border-color:rgba(255,95,95,.5); color:#ff8a8a; }
     .sheet-body {
       flex:1 1 auto; overflow-y:auto; -webkit-overflow-scrolling:touch;
-      padding:18px 18px 26px;
+      /* El margen lateral CRECE con la hoja (18px en teléfono, hasta 30px en
+         escritorio). Antes eran 18px fijos: en la hoja de 680px el contenido
+         quedaba pegadísimo al filo y se leía apretado. `clamp` evita tener que
+         repetir la regla en tres @media distintos. */
+      padding:20px clamp(18px, 4.5vw, 30px) 30px;
     }
     /* Las secciones migradas: al vivir dentro de la hoja se neutraliza su
        padding de página completa y el acordeón (siempre abiertas dentro). */
@@ -5161,9 +5681,29 @@
       display:block !important; max-width:none !important;
     }
     .sheet-body > .seccion + .seccion { margin-top:34px !important; border-top:1px solid rgba(255,255,255,.07); padding-top:26px !important; }
+
+    /* ── Encabezados CENTRADOS dentro de las hojas ──
+       En la página larga el encabezado va a la izquierda y funciona: hay 50px
+       de padding y la vista es ancha. Dentro de un popup ese mismo bloque se
+       veía descolgado contra el filo izquierdo, con la rayita amarilla suelta
+       en una esquina. Aquí se centra TODO el encabezado (y sólo el encabezado:
+       el contenido de abajo conserva su alineación, que en tablas y listas
+       leerlas centradas sería peor). */
+    .sheet-body .seccion-header { text-align:center; margin-bottom:26px; }
+    .sheet-body .seccion-header .titulo-linea { margin:0 auto; }
+    .sheet-body .seccion-header .seccion-desc { margin-left:auto; margin-right:auto; }
+    /* El título de sección se repite con el título de la hoja (ambos dicen lo
+       mismo, uno encima del otro). Se achica para que mande el de la hoja. */
+    .sheet-body .seccion-titulo { font-size:clamp(1.15rem,2.4vw,1.5rem); }
     /* dentro de la hoja el acordeón queda SIEMPRE abierto (aunque el resize lo cierre) */
     .sheet-body > .colapsable > .seccion-header::after { display:none !important; }
     .sheet-body > .colapsable.cerrado > *:not(.seccion-header) { display:block !important; }
+    /* En móvil el encabezado colapsable reserva 36px a la derecha para la
+       flechita. Dentro de la hoja esa flecha va oculta (regla de arriba), así
+       que ese hueco sólo servía para descentrar el título 18px a la izquierda.
+       No lleva !important: (0,3,0) ya le gana a `.colapsable > .seccion-header`
+       aunque esa viva más abajo, dentro de una @media. */
+    .sheet-body > .colapsable > .seccion-header { padding-right:0; margin-bottom:26px; }
     /* secciones que ahora VIVEN en hojas: se ocultan del flujo largo del home */
     [data-en-hoja] { display:none !important; }
     @media (max-width:560px) {
@@ -5589,6 +6129,17 @@
 
     /* ===== CONTACTO ===== */
     #contacto { background:rgba(0,0,0,.4); }
+    /* Recordatorio de algo que TODAVÍA no existe. Va apagado a propósito: es un
+       aviso, no una función; si brillara como los botones reales, la gente lo
+       tocaría esperando que pase algo. */
+    .nota-proximamente {
+      margin:0 auto 26px; max-width:560px; padding:14px 18px;
+      background:rgba(255,255,255,.045);
+      border:1px dashed rgba(255,204,0,.30);
+      border-radius:14px; text-align:left;
+    }
+    .nota-proximamente b { display:block; margin-bottom:5px; font-size:.8rem; color:var(--amarillo); letter-spacing:.3px; }
+    .nota-proximamente span { font-size:.78rem; line-height:1.7; color:rgba(255,255,255,.55); }
     .contacto-opciones { display:flex; gap:12px; margin-bottom:32px; flex-wrap:wrap; }
     .opcion-btn {
       padding:11px 22px; background:transparent;
@@ -5740,6 +6291,165 @@
       .colapsable.cerrado > *:not(.seccion-header) { display:none !important; }
       .colapsable > .seccion-header:active .seccion-titulo { opacity:.7; }
     }
+
+    /* ══════════════════════════════════════════════════════════════════
+       CAPA LIQUID GLASS · negro + naranja
+       Va al FINAL del <style> a propósito: así pisa por orden de origen
+       a las reglas viejas sin tener que borrarlas (si algo se ve mal,
+       basta con quitar este bloque completo y la app vuelve al look
+       anterior — rollback barato).
+       Idea del "vidrio": superficie translúcida + desenfoque de fondo
+       + un velo de color en diagonal (::before) + un reflejo especular
+       (::after). El naranja manda en las superficies; el amarillo se
+       queda como acento de texto, tal como se acordó.
+       ══════════════════════════════════════════════════════════════════ */
+
+    /* ---------- MOSAICOS del grid ---------- */
+    .mosaico, .mosaico-ancho {
+      position:relative; overflow:hidden; isolation:isolate;
+      background:var(--glass-bg);
+      /* desenfoque más suave que el del sidebar: son 5 cajas a la vez y el
+         desenfoque es de lo más caro que hay en GPU de teléfono. */
+      -webkit-backdrop-filter:blur(9px) saturate(135%);
+      backdrop-filter:blur(9px) saturate(135%);
+      border:1px solid var(--glass-borde);
+      border-radius:18px;
+      box-shadow:var(--glass-sombra);
+      transition:transform .18s ease, border-color .18s ease, box-shadow .25s ease;
+    }
+    /* velo de color: naranja arriba-izquierda que se disuelve en negro */
+    .mosaico::before, .mosaico-ancho::before {
+      content:''; position:absolute; inset:0; z-index:-1; pointer-events:none;
+      background:linear-gradient(150deg, rgba(232,116,0,.22), rgba(0,0,0,0) 60%);
+      opacity:.85; transition:opacity .25s ease;
+    }
+    /* reflejo especular: la "gota" de luz que hace que se lea como vidrio */
+    .mosaico::after, .mosaico-ancho::after {
+      content:''; position:absolute; left:-25%; top:-85%;
+      width:150%; height:120%; z-index:-1; pointer-events:none;
+      background:radial-gradient(58% 52% at 50% 100%, rgba(255,255,255,.13), rgba(255,255,255,0) 72%);
+    }
+    .mosaico:hover, .mosaico:focus-visible,
+    .mosaico-ancho:hover, .mosaico-ancho:focus-visible {
+      transform:translateY(-4px); outline:none;
+      background:var(--glass-bg);
+      border-color:var(--glass-borde-vivo);
+      box-shadow:var(--glass-sombra), 0 0 34px rgba(232,116,0,.30);
+    }
+    .mosaico:hover::before, .mosaico-ancho:hover::before { opacity:1; }
+    .mosaico-ancho::before {
+      background:linear-gradient(115deg, rgba(232,116,0,.30), rgba(0,0,0,0) 72%);
+    }
+    .mosaico-ancho-flecha { color:var(--naranja-claro); }
+    .mosaico-sub, .mosaico-ancho-sub { opacity:.66; }
+
+    /* ---------- SECCIONES "BRILLOSAS" ----------
+       Sólo las DOS que llevan a la acción: Reservar y Estrellas/Planes.
+       Llevan aura que late + un barrido de luz, para que el ojo caiga ahí
+       primero. Si se le pone brillo a todo, el brillo deja de significar
+       algo: por eso son exactamente dos. */
+    .mosaico-destacado, .sb-item.sb-brillo {
+      border-color:var(--glass-borde-vivo);
+    }
+    .mosaico-destacado::before {
+      background:linear-gradient(150deg, rgba(232,116,0,.46), rgba(178,82,0,.14) 58%, rgba(0,0,0,0));
+    }
+    /* El aura va FIJA (no animada) a propósito: animar box-shadow obliga al
+       navegador a repintar en cada cuadro y en teléfono eso se siente.
+       El movimiento lo pone sólo el barrido, y ése se anima con transform +
+       opacity, que sí van por la GPU y no cuestan repintado. */
+    .mosaico-destacado {
+      box-shadow:var(--glass-sombra), 0 0 0 1px rgba(255,148,51,.30), 0 0 34px rgba(232,116,0,.30);
+    }
+    .mosaico-destacado::after {
+      /* aquí el ::after deja de ser reflejo y pasa a ser BARRIDO de luz */
+      left:0; top:-60%; width:46%; height:220%;
+      background:linear-gradient(100deg, rgba(255,255,255,0), rgba(255,214,150,.34), rgba(255,255,255,0));
+      will-change:transform, opacity;
+      animation:brilloBarrido 5s ease-in-out infinite;
+    }
+    .mosaico-destacado .mosaico-txt { color:#ffd89b; }
+    @keyframes brilloBarrido {
+      0%   { transform:translateX(-160%) rotate(16deg); opacity:0; }
+      12%  { opacity:1; }
+      45%  { transform:translateX(320%)  rotate(16deg); opacity:0; }
+      100% { transform:translateX(320%)  rotate(16deg); opacity:0; }
+    }
+    .sb-item.sb-brillo {
+      background:linear-gradient(100deg, rgba(232,116,0,.22), rgba(255,255,255,.03) 70%);
+    }
+    .sb-item.sb-brillo:hover { background:linear-gradient(100deg, rgba(232,116,0,.34), rgba(255,255,255,.05) 70%); }
+
+    /* ---------- HOJA (sheet) ----------
+       Ojo con la legibilidad: la hoja se abre ENCIMA de la portada, que es
+       una foto clara. Por eso el vidrio de la tarjeta es denso (.92) y el
+       desenfoque va en el fondo, no en el texto. */
+    .sheet-bg {
+      background:rgba(8,5,3,.74);
+      -webkit-backdrop-filter:blur(10px) saturate(120%);
+      backdrop-filter:blur(10px) saturate(120%);
+    }
+    .sheet-card {
+      background:linear-gradient(168deg, rgba(30,20,12,.94), rgba(10,7,4,.96));
+      /* SIN backdrop-filter a propósito: la tarjeta ya es 94-96% opaca, así que
+         el desenfoque no se vería, pero el navegador sí lo pagaría. El vidrio
+         de verdad lo pone .sheet-bg, que es quien tiene algo detrás. */
+      border:1px solid var(--glass-borde-vivo);
+      box-shadow:var(--glass-sombra), 0 0 70px rgba(232,116,0,.12);
+    }
+    .sheet-header {
+      background:linear-gradient(180deg, rgba(232,116,0,.20), rgba(232,116,0,0));
+      border-bottom:1px solid var(--glass-borde);
+    }
+    .sheet-back:hover { background:rgba(232,116,0,.20); border-color:var(--glass-borde-vivo); }
+
+    /* ---------- TARJETAS INTERIORES ----------
+       Mismo vidrio, sin desenfoque: van DENTRO de una hoja que ya es casi
+       opaca, así que un blur ahí no se vería y sí se pagaría. El vidrio se
+       consigue con translucidez + borde cálido + el velo diagonal. */
+    .paquete-card, .noticia-card, .video-card, .dir-card {
+      position:relative; overflow:hidden;
+      background:linear-gradient(158deg, rgba(46,30,18,.55), rgba(16,11,7,.62));
+      border:1px solid var(--glass-borde);
+      border-radius:16px;
+      box-shadow:0 10px 30px rgba(0,0,0,.38);
+      transition:transform .2s ease, border-color .2s ease, box-shadow .25s ease;
+    }
+    .paquete-card:hover, .noticia-card:hover,
+    .video-card:hover, .dir-card:hover {
+      transform:translateY(-4px);
+      border-color:var(--glass-borde-vivo);
+      box-shadow:0 14px 40px rgba(0,0,0,.46), 0 0 26px rgba(232,116,0,.22);
+    }
+    /* La tarjeta "Más Popular" conserva el amarillo: es el ACENTO de marca,
+       y sirve para distinguirla de las demás sin repetir el naranja. */
+    .paquete-card.destacado {
+      border:1px solid rgba(255,204,0,.55);
+      background:linear-gradient(158deg, rgba(58,44,10,.62), rgba(20,15,4,.70));
+      box-shadow:0 12px 34px rgba(0,0,0,.44), 0 0 30px rgba(255,204,0,.16);
+    }
+    .noticia-card, .video-card { border-radius:14px; }
+
+    /* ---------- BOTONES DE ACCIÓN ----------
+       "Naranja al frente": el botón que empuja a reservar/pagar es naranja
+       sólido; el amarillo se reserva para textos y realces. */
+    .btn-primario, .btn-confirmar-horario {
+      background:var(--grad-naranja);
+      color:#1b0d00;
+      border:1.5px solid rgba(255,190,120,.55);
+      box-shadow:0 10px 26px rgba(232,116,0,.30);
+    }
+    .btn-primario:hover, .btn-confirmar-horario:not(:disabled):hover {
+      background:var(--grad-naranja); opacity:1;
+      color:#1b0d00; filter:brightness(1.12);
+      box-shadow:0 12px 34px rgba(232,116,0,.46);
+    }
+    .btn-secundario:hover { border-color:var(--naranja-claro); color:var(--naranja-claro); }
+
+    /* ---------- respeto a quien pide menos movimiento ---------- */
+    @media (prefers-reduced-motion:reduce) {
+      .mosaico-destacado::after { animation:none; opacity:0; }
+    }
   </style>
 </head>
 <body>
@@ -5846,37 +6556,70 @@
         <span></span><span></span><span></span>
       </button>
     </div>
-    <nav id="nav-drawer" aria-label="Menú principal">
-      <ul class="nav-links">
-        <li><a href="#inicio" onclick="cerrarVista();return false;">Inicio</a></li>
-        <li><a href="#" onclick="abrirVista('horarios');return false;">Reservar</a></li>
-        <li><a href="#" onclick="abrirVista('estrellas');return false;">Estrellas &amp; Planes</a></li>
-        <li><a href="#" onclick="abrirVista('perfil');return false;">Mi Perfil</a></li>
-        <li><a href="#" onclick="abrirVista('aprende');return false;">Aprende</a></li>
-        <li><a href="#" onclick="abrirVista('academia');return false;" class="nav-cta">La Academia</a></li>
-      </ul>
-    </nav>
   </header>
+
+  <!-- ═══════ SIDEBAR · navegación ÚNICA de la app ═══════
+       Vive FUERA del <header> a propósito: así deja de aplicarle todo el CSS
+       viejo de "header > nav" (aquel drawer ya no existe en el DOM; el <header>
+       hoy sólo lleva logo + acciones + ☰) y pasa a ser un riel fijo a la DERECHA
+       en escritorio / panel deslizante en teléfono. Conserva id="nav-drawer"
+       para reutilizar hamburguesa + velo + Escape + el botón "Ver Más" del
+       mosaico, que ya estaban probados. -->
+  <nav id="nav-drawer" class="sidebar" aria-label="Menú principal">
+    <div class="sidebar-top">
+      <span class="sidebar-marca">Circa<span class="acento">nícula</span></span>
+      <!-- Un solo botón, dos trabajos según el tamaño de pantalla: en teléfono
+           CIERRA el panel deslizante; en escritorio PLIEGA el riel (y la ☰ de
+           arriba-derecha lo trae de vuelta). El texto y el ícono los cambia
+           `pintarBotonRiel()` para que nunca prometa algo distinto de lo que hace. -->
+      <button type="button" class="sidebar-cerrar" data-sidebar-cerrar
+              aria-label="Cerrar menú" title="Cerrar menú">✕</button>
+    </div>
+    <div class="sidebar-nav">
+      <button type="button" class="sb-item" data-inicio="1">
+        <span class="sb-ico">🏠</span><span class="sb-txt">Inicio</span>
+      </button>
+
+      <p class="sidebar-grupo">Tu clase</p>
+      <button type="button" class="sb-item sb-brillo" data-vista="horarios">
+        <span class="sb-ico">📅</span><span class="sb-txt">Reservar</span>
+      </button>
+      <button type="button" class="sb-item sb-brillo" data-vista="estrellas">
+        <span class="sb-ico">⭐</span><span class="sb-txt">Estrellas &amp; Planes</span>
+        <span class="sb-badge" id="sb-saldo">— ⭐</span>
+      </button>
+      <button type="button" class="sb-item" data-vista="perfil">
+        <span class="sb-ico">🪽</span><span class="sb-txt">Mi Perfil</span>
+      </button>
+      <button type="button" class="sb-item" data-vista="aprende">
+        <span class="sb-ico">🎬</span><span class="sb-txt">Aprende</span>
+      </button>
+
+      <p class="sidebar-grupo">Explora</p>
+      <button type="button" class="sb-item" data-vista="academia">
+        <span class="sb-ico">🎪</span><span class="sb-txt">La Academia</span>
+      </button>
+      <button type="button" class="sb-item" data-vista="comunidad">
+        <span class="sb-ico">🫂</span><span class="sb-txt">Comunidad</span>
+      </button>
+      <button type="button" class="sb-item" data-vista="labor">
+        <span class="sb-ico">💛</span><span class="sb-txt">Labor Social</span>
+      </button>
+
+      <!-- Sólo staff de clase (rank ≤ 2). Se revela desde el bloque de
+           visibilidad por rank; por omisión va oculto. -->
+      <p class="sidebar-grupo sb-solo-staff" style="display:none;">Staff</p>
+      <button type="button" class="sb-item sb-solo-staff" data-vista="calendario" style="display:none;">
+        <span class="sb-ico">🗓️</span><span class="sb-txt">Calendario de Clases</span>
+      </button>
+    </div>
+  </nav>
   <div id="nav-overlay" class="nav-overlay" aria-hidden="true"></div>
 
-  <!-- BARRA INFERIOR (solo móvil/PWA) -->
-  <nav id="mob-bottom-nav" class="mob-bottom-nav" aria-label="Accesos rápidos">
-    <button type="button" class="mob-nav-item active" data-nav="inicio" aria-label="Inicio">
-      <span class="mob-nav-ico">🏠</span><span>Inicio</span>
-    </button>
-    <button type="button" class="mob-nav-item" data-nav="horarios" aria-label="Horarios">
-      <span class="mob-nav-ico">📅</span><span>Horarios</span>
-    </button>
-    <button type="button" class="mob-nav-item" data-nav="precios" aria-label="Precios">
-      <span class="mob-nav-ico">⭐</span><span>Precios</span>
-    </button>
-    <button type="button" class="mob-nav-item" data-nav="seccion-mis-clases" aria-label="Mi cuenta">
-      <span class="mob-nav-ico">🪽</span><span>Cuenta</span>
-    </button>
-    <button type="button" class="mob-nav-item" data-nav="mas" aria-label="Más opciones">
-      <span class="mob-nav-ico">☰</span><span>Más</span>
-    </button>
-  </nav>
+  <!-- Aquí vivía la BARRA INFERIOR de 5 accesos (Inicio · Horarios · Precios ·
+       Cuenta · Más). Se retiró: repetía la navegación del sidebar y ocupaba
+       una franja fija de la pantalla. Su disparador ahora es la hamburguesa
+       de arriba-derecha, que abre el mismo sidebar deslizándose por un lado. -->
 
   <!-- BOTÓN FLOTANTE "MI PERFIL" (visible solo con sesión) -->
   <button id="fab-perfil" class="fab-perfil" onclick="irAMiCuenta()" title="Ir a Mi Perfil" style="display:none;">
@@ -5925,19 +6668,21 @@
         <span class="mosaico-txt">Mi Perfil</span>
         <span class="mosaico-sub">Tus datos y clases</span>
       </button>
-      <!-- 4 · LA ACADEMIA (todo lo demás: reglas, contacto, eventos, equipo, comunidad…) -->
-      <button type="button" class="mosaico" onclick="abrirVista('academia')">
-        <span class="mosaico-ico">🎪</span>
-        <span class="mosaico-txt">La Academia</span>
-        <span class="mosaico-sub">Reglas, eventos, equipo y comunidad</span>
+      <!-- 4 · APRENDE (sube al grid: es acción de todos los días) -->
+      <button type="button" class="mosaico" onclick="abrirVista('aprende')">
+        <span class="mosaico-ico">🎬</span>
+        <span class="mosaico-txt">Aprende</span>
+        <span class="mosaico-sub">Clases online y rutinas grabadas</span>
       </button>
     </div>
-    <!-- BANNER ANCHO · Aprende con Nosotros (clases online / videos) -->
-    <button type="button" class="mosaico-ancho" onclick="abrirVista('aprende')">
-      <span class="mosaico-ancho-ico">🎬</span>
+    <!-- BANNER ANCHO · "VER MÁS" → abre el SIDEBAR.
+         El grid queda SÓLO con lo que se usa a diario; todo lo de explorar
+         (La Academia, Comunidad, Labor Social) vive ahora en el sidebar. -->
+    <button type="button" class="mosaico-ancho" id="btn-ver-mas" onclick="abrirSidebar()">
+      <span class="mosaico-ancho-ico">☰</span>
       <span class="mosaico-ancho-txt">
-        <span class="mosaico-ancho-tit">Aprende con Nosotros</span>
-        <span class="mosaico-ancho-sub">Clases online, tips y rutinas grabadas</span>
+        <span class="mosaico-ancho-tit">Ver Más</span>
+        <span class="mosaico-ancho-sub">La Academia, comunidad, eventos y más</span>
       </span>
       <span class="mosaico-ancho-flecha">→</span>
     </button>
@@ -6061,8 +6806,15 @@
     </div>
   </div>
 
-  <!-- PAQUETES · vista informativa (mensualidades) — vive dentro de su hoja -->
+  <!-- PAQUETES · el mostrario ÚNICO de Estrellas — vive dentro de su hoja.
+       El encabezado se heredó de la difunta sección #precios: sin él la hoja
+       arrancaba de golpe con las tarjetas y no decía la regla del juego. -->
   <section id="paquetes-view" class="seccion" style="display:none;" data-nav-skip="true">
+    <div class="seccion-header">
+      <span class="seccion-eyebrow">1 ⭐ = 1 clase</span>
+      <h2 class="seccion-titulo">Compra tus Estrellas</h2>
+      <div class="titulo-linea"></div>
+    </div>
     <div id="paquetes-cards"></div>
   </section>
 
@@ -6284,7 +7036,7 @@
       <span class="seccion-eyebrow">Organiza tu semana</span>
       <h2 class="seccion-titulo">Horarios</h2>
       <div class="titulo-linea"></div>
-      <p class="seccion-desc">Lunes a Viernes. Elige tu plan, toca las horas que quieras y aparta tu lugar.</p>
+      <p class="seccion-desc">Lunes a Viernes. Toca las horas que quieras y apártalas con tus Estrellas: 1 ⭐ = 1 clase.</p>
     </div>
     <!-- LEYENDA · qué clase es cuál (para reservar sin dudas) -->
     <div class="clase-leyenda">
@@ -6297,13 +7049,20 @@
         <span class="clase-chip"><b>Aro</b> Mar & Jue · 8–9 pm</span>
       </div>
     </div>
-    <div class="plan-selector">
-      <button class="plan-btn" data-plan="individual">Clase Individual</button>
-      <button class="plan-btn" data-plan="basico">Plan Básico</button>
-      <button class="plan-btn activo" data-plan="medio">Plan Medio</button>
-      <button class="plan-btn" data-plan="avanzado">Plan Avanzado</button>
+    <!-- Aquí vivía el selector de 4 planes (Individual · Básico · Medio · Avanzado).
+         Se retiró: reservar ya no pregunta "¿qué plan tienes?" sino "¿cuántas
+         Estrellas te quedan?". El plan sólo existe al COMPRAR (es un paquete con
+         descuento por volumen); a la hora de apartar, 1 ⭐ = 1 clase y da igual de
+         qué paquete salió. Además el plan aquí era decorativo: quien mandaba de
+         verdad era el saldo, porque el backend siempre validó por Estrellas. -->
+    <div class="reservar-saldo" id="reservar-saldo">
+      <div class="reservar-saldo-num"><span id="reservar-saldo-n">—</span><span class="reservar-saldo-est">⭐</span></div>
+      <div class="reservar-saldo-txt">
+        <strong id="reservar-saldo-tit">Estrellas disponibles</strong>
+        <span id="reservar-saldo-sub">1 ⭐ = 1 clase</span>
+      </div>
+      <button class="reservar-saldo-btn" type="button" onclick="accionEstrellas()">Comprar Estrellas</button>
     </div>
-    <p class="plan-info-badge" id="plan-info">Plan seleccionado: <strong>Medio</strong> — Selecciona hasta <strong>5 clases</strong> por semana</p>
     <div class="semana-aviso" id="semana-aviso" title="Solo apartas las clases de esta semana">
       <span class="semana-aviso-ico">📅</span>
       <span class="semana-aviso-txt">Mostrando la <strong>semana actual</strong> · <span id="semana-rango">—</span></span>
@@ -6381,44 +7140,9 @@
   </section>
 
   <!-- PRECIOS -->
-  <section id="precios" class="seccion colapsable" data-en-hoja>
-    <div class="seccion-header">
-      <span class="seccion-eyebrow">1 ⭐ = 1 clase</span>
-      <h2 class="seccion-titulo">Compra tus Estrellas</h2>
-      <div class="titulo-linea"></div>
-    </div>
-    <div class="precios-grid">
-      <div class="precio-card">
-        <p class="precio-plan-nombre">1 ⭐ Estrella</p>
-        <p class="precio-monto">$250</p>
-        <p class="precio-periodo">por estrella</p>
-        <p class="precio-horas"><strong>1 clase</strong> a tu elección</p>
-        <button class="btn-plan" onclick="abrirCompraCreditos(1)">Comprar Estrellas</button>
-      </div>
-      <div class="precio-card">
-        <p class="precio-plan-nombre">8 ⭐ Estrellas</p>
-        <p class="precio-monto">$800</p>
-        <p class="precio-periodo">$100 c/u</p>
-        <p class="precio-horas"><strong>8 clases</strong> a tu ritmo</p>
-        <button class="btn-plan" onclick="abrirCompraCreditos(8)">Comprar Estrellas</button>
-      </div>
-      <div class="precio-card destacado">
-        <span class="precio-badge">Más Popular</span>
-        <p class="precio-plan-nombre">20 ⭐ Estrellas</p>
-        <p class="precio-monto">$1,200</p>
-        <p class="precio-periodo">$60 c/u</p>
-        <p class="precio-horas"><strong>20 clases</strong> a tu ritmo</p>
-        <button class="btn-plan" onclick="abrirCompraCreditos(20)">Comprar Estrellas</button>
-      </div>
-      <div class="precio-card">
-        <p class="precio-plan-nombre">28 ⭐ Estrellas</p>
-        <p class="precio-monto">$1,600</p>
-        <p class="precio-periodo">$57 c/u</p>
-        <p class="precio-horas"><strong>28 clases</strong> a tu ritmo</p>
-        <button class="btn-plan" onclick="abrirCompraCreditos(28)">Comprar Estrellas</button>
-      </div>
-    </div>
-  </section>
+  <!-- La sección #precios (mostrario original, tarjetas anchas) se retiró: la
+       hoja de Estrellas la enseñaba y, seguidito, repetía los MISMOS cuatro
+       precios en #paquetes-view. Quedó una sola rejilla, la de arriba. -->
 
   <!-- MIS CLASES (solo logueadas) -->
   <section id="seccion-mis-clases" class="seccion colapsable" data-en-hoja>
@@ -6896,7 +7620,9 @@
       <button class="admin-btn" onclick="buscarPerfiles()">Actualizar</button>
     </div>
     <div class="dir-filtros">
-      <button class="dir-filtro active" data-filtro="todos" onclick="filtrarDir(this,'todos')">Todos</button>
+      <!-- "Todos" ya NO vuelca la lista completa: es el modo buscador (escribe y
+           aparecen). "Instructoras" sí lista de corrido porque son pocas. -->
+      <button class="dir-filtro active" data-filtro="todos" onclick="filtrarDir(this,'todos')">🔎 Buscar</button>
       <button class="dir-filtro" data-filtro="instructoras" onclick="filtrarDir(this,'instructoras')">🎓 Instructoras</button>
     </div>
     <div id="dir-resultados" class="dir-grid"></div>
@@ -7039,6 +7765,11 @@
       <span class="seccion-eyebrow">Hablemos</span>
       <h2 class="seccion-titulo">Contáctanos</h2>
       <div class="titulo-linea"></div>
+    </div>
+    <div class="nota-proximamente">
+      <b>⭐ Próximamente · Opinión de la semana</b>
+      <span>Pronto podrás dejar tu experiencia con foto o video corto: las alumnas votan la más emocionante
+      de la semana y la ganadora aparece en la portada la semana siguiente. Por ahora, tu mensaje nos llega directo.</span>
     </div>
     <div class="contacto-opciones">
       <button class="opcion-btn activo" data-opcion="general">Mensaje general</button>
@@ -7236,8 +7967,10 @@
     ['7:00 – 8:00',  'flow', 'flex',  'flow', 'flex',  'flow' ],
     ['8:00 – 9:00',  'fit',  'aro',   'fit',  'aro',   'fit'  ],
   ];
-  const planHoras = {individual:1, basico:2, medio:5, avanzado:7};
-  const planNombres = {individual:'Individual', basico:'Básico', medio:'Medio', avanzado:'Avanzado'};
+  // `planHoras` y `planNombres` vivían aquí: decían cuántas clases dejaba apartar
+  // cada plan. Murieron con el selector — ahora el tope lo pone tu saldo de ⭐.
+  // (Los nombres de los planes VIEJOS siguen en PLAN_DETALLE, que los usa el
+  //  listado de staff para leer reservas históricas que sí guardaron `plan`.)
   const claseNombres = {kids:'Kids', flow:'Telas', fit:'Telas', flex:'Flex', aro:'Aro', open:'Open Gym'};
 
   // Días por índice de columna (1=Lunes ... 5=Viernes)
@@ -7292,6 +8025,72 @@
     return (weekKey || weekKeyActual()) + '_' + slotIdDe(dia, hora);
   }
   window.slotIdWk = slotIdWk;
+
+  /* ── ¿CUÁNDO ocurre realmente una clase? (base de la regla de 12 h) ──────
+     El slotId trae la fecha (el lunes de su semana, o la fecha exacta si es
+     clase suelta) pero la hora va comprimida a "8-9", y ahí hay una trampa que
+     costaría caro adivinar: "8:00 – 10:00" es de la MAÑANA (Open Gym) y
+     "8:00 – 9:00" es de la NOCHE. Un `parseInt` ingenuo pondría el Open Gym y la
+     clase de Telas a la misma hora, y la devolución de la Estrella se calcularía
+     con 12 horas de error. Por eso la hora real vive en una tabla explícita.
+     ⚠️ Si algún día cambia `horarioBase`, ESTA tabla se cambia con él. */
+  const HORA_INICIO_24H = {
+    '8-10': [8, 0],     // Open Gym — la única de la mañana
+    '5-7' : [17, 30],   // Kids (5:30 pm)
+    '7-8' : [19, 0],
+    '8-9' : [20, 0],
+  };
+  // Hermosillo NO usa horario de verano: es UTC-7 todos los días del año. Eso
+  // permite fechar las clases con aritmética exacta en vez de confiar en el
+  // reloj del aparato. GEMELA de OFFSET_HORAS_HERMOSILLO en el backend.
+  const OFFSET_HORAS_HERMOSILLO = 7;
+
+  // Desarma el slotId SIN tocar fechas: pura cadena. Devuelve {ymd, h, m}.
+  // Se separa a propósito de "convertir a instante": el DÍA de la clase no
+  // depende de ninguna zona horaria, y mezclarlos fue lo que hizo que el pase
+  // de lista guardara marcas con fecha equivocada.
+  function partesDeSlot(sid) {
+    const p = String(sid || '').split('_');
+    const esYmd = s => /^\d{4}-\d{2}-\d{2}$/.test(s);
+    let y, m, d, mas = 0, horaC = null;
+    if (p.length >= 3 && esYmd(p[0]) && /^[1-5]$/.test(p[1])) {
+      [y, m, d] = p[0].split('-').map(Number);            // lunes de esa semana
+      mas = Number(p[1]) - 1;                             // + el día de la clase
+      horaC = p.slice(2).join('_');
+    } else if (p.length >= 2 && esYmd(p[0])) {
+      [y, m, d] = p[0].split('-').map(Number);            // clase suelta: fecha exacta
+      horaC = p.slice(1).join('_');
+    } else {
+      return null;    // formato viejo sin fecha: no se puede fechar, se deja pasar
+    }
+    const hm = HORA_INICIO_24H[horaC];
+    if (!hm) return null;
+    // El +mas días se resuelve con un Date local y se vuelve a leer como número:
+    // sirve para saltar fin de mes sin tablas de días. La hora NO se toca aquí.
+    const dd = new Date(y, m - 1, d + mas);
+    return { y: dd.getFullYear(), mes: dd.getMonth() + 1, dia: dd.getDate(), h: hm[0], min: hm[1] };
+  }
+
+  // "YYYY-MM-DD" del día REAL de la clase (lo usa el pase de lista para fechar
+  // bien la marca aunque la miss la ponga al día siguiente). Sin zonas horarias
+  // de por medio: el día sale del propio slotId.
+  window.fechaDeSlot = (sid) => {
+    const p = partesDeSlot(sid);
+    if (!p) return null;
+    return p.y + '-' + String(p.mes).padStart(2, '0') + '-' + String(p.dia).padStart(2, '0');
+  };
+
+  // Horas que faltan para la clase (negativo = ya pasó, null = no se pudo saber).
+  // Se mide contra la hora de HERMOSILLO, no contra la del aparato: si alguien
+  // trae el celular en otra zona (o con el reloj en automático de viaje), el
+  // aviso de "te regresa tu ⭐" tiene que coincidir con lo que va a decidir el
+  // servidor. Un desfase aquí se siente como promesa incumplida.
+  window.horasParaClase = (sid) => {
+    const p = partesDeSlot(sid);
+    if (!p) return null;
+    const inicio = Date.UTC(p.y, p.mes - 1, p.dia, p.h + OFFSET_HORAS_HERMOSILLO, p.min, 0, 0);
+    return (inicio - Date.now()) / 3600000;
+  };
   // Reconstruye {dia,hora,tipo,slotId} desde una key de selección ("8:00 – 9:00-2").
   // El tipo se recupera de horarioBase porque la key no lo lleva. El slotId lleva
   // la SEMANA en curso embebida (semana viva).
@@ -7451,15 +8250,75 @@
   // Cachés de la capa de seguimiento (se llenan tras login; siempre defensivas).
   let _misSlots     = new Set();  // slotIds que el ALUMNO ya apartó (reserva propia)
   let _misAsistidos = new Set();  // slotIds donde una miss le marcó asistencia
+  let _misFaltas    = new Set();  // slotIds donde una miss le marcó INASISTENCIA
   let _cuposCache   = {};         // slotId -> conteo de cupo (agregado público)
   let _reservasPorSlot = {};      // STAFF: slotId -> [{nombre,estado,uid}] (quién apartó)
+  let _asistPorSlot = {};         // STAFF: slotId -> { uid: 'asistio'|'falta' } (pase de lista)
   let _misDiasStaff = new Set();  // STAFF: columnas (1-5) donde imparto clase
   let _filtroMisClases = false;   // STAFF: filtro "solo mis clases" activo
   let _soloApartadas   = false;   // STAFF: ocultar clases vacías (ver solo apartadas)
   let _modoReservaStaff = false;  // STAFF: cuando true, el staff reserva como alumna (gasta ⭐)
 
   let slotsSeleccionados = new Set();
-  let planActual = 'medio';
+
+  /* ═══ EL TOPE DE CLASES LO PONEN LAS ESTRELLAS, NO UN PLAN ═══
+     Antes había un `planActual` y el tope salía de `planHoras[plan]`. Era un
+     tope de mentiras: el backend nunca miró el plan, siempre validó el saldo.
+     Ahora se lee el saldo REAL (el mismo número que se pinta en el perfil, así
+     nunca hay dos verdades) y se consulta EN CADA CLIC, no una vez al pintar:
+     si compras Estrellas con el calendario abierto, el tope sube solo. */
+  function estrellasDisponibles() {
+    const el = document.getElementById('perfil-creditos');
+    const n = el ? parseInt(el.textContent, 10) : NaN;
+    return Number.isFinite(n) ? Math.max(0, n) : 0;
+  }
+  // ¿Ya sabemos cuánto tiene esta persona? `_miRank` lo fija cargarPerfil, en el
+  // mismo tirón en que escribe el saldo. Sin este freno habría una carrera fea:
+  // durante el segundo que tarda Firebase, el marcador dice "0" (el del HTML) y
+  // le diríamos a alguien con Estrellas que no le alcanzan.
+  function saldoConocido() { return window._miRank != null; }
+  // Visitante (o perfil todavía en camino): se deja seleccionar para que vea cómo
+  // funciona. El freno de verdad llega después — confirmarHorario pide sesión y
+  // compara contra el saldo, y el backend valida saldo y cupo de forma atómica.
+  function topeSeleccion() {
+    return (window.usuarioActual && saldoConocido()) ? estrellasDisponibles() : 20;
+  }
+  // "¿Le muestro el marcador X / N ⭐?" Sólo cuando el número es de verdad.
+  function saldoVisible() { return !!window.usuarioActual && saldoConocido(); }
+
+  /* Pinta el recuadro de saldo de la vista Reservar. Se llama desde
+     `actualizarMosaicoSaldo`, que ya es el punto único por donde pasa cualquier
+     cambio de Estrellas (lo dispara un MutationObserver sobre #perfil-creditos),
+     así que el recuadro se entera solo: al entrar, al comprar y al agendar. */
+  window.actualizarBannerReservar = function () {
+    const caja = document.getElementById('reservar-saldo');
+    if (!caja) return;
+    const num = document.getElementById('reservar-saldo-n');
+    const tit = document.getElementById('reservar-saldo-tit');
+    const sub = document.getElementById('reservar-saldo-sub');
+    if (!saldoVisible()) {
+      caja.classList.add('vacio');
+      if (num) num.textContent = '—';
+      if (tit) tit.textContent = window.usuarioActual ? 'Consultando tus Estrellas…' : 'Inicia sesión para apartar';
+      if (sub) sub.textContent = '1 ⭐ = 1 clase · compra las tuyas y elige día y hora.';
+      actualizarContador();
+      return;
+    }
+    const n = estrellasDisponibles();
+    caja.classList.toggle('vacio', n === 0);
+    if (num) num.textContent = n;
+    if (tit) tit.textContent = n === 0 ? 'No te quedan Estrellas' : (n === 1 ? 'Te queda 1 clase' : 'Te quedan ' + n + ' clases');
+    if (sub) {
+      const exp = window._miCreditosExpiran;
+      const vence = (exp instanceof Date && !isNaN(exp))
+        ? ' · vencen el ' + exp.toLocaleDateString('es-MX', { day:'numeric', month:'short' })
+        : '';
+      sub.textContent = n === 0
+        ? 'Compra Estrellas y aparta las clases que quieras.'
+        : 'Puedes apartar hasta ' + n + (n === 1 ? ' clase' : ' clases') + vence + '.';
+    }
+    actualizarContador();
+  };
 
   // Aviso de SEMANA VIVA: pinta el Lun–Vie de la semana que se está reservando en
   // la burbuja amarilla (mismo cálculo que los slots: lunesDe salta al próximo
@@ -7493,12 +8352,11 @@
   }
   window.actualizarAvisoSemana = actualizarAvisoSemana;
 
-  function renderHorario(plan) {
-    planActual = plan;
+  function renderHorario() {
     slotsSeleccionados.clear();
     actualizarContador();
     actualizarAvisoSemana();
-    const maxSlots = planHoras[plan];
+    if (window.actualizarBannerReservar) window.actualizarBannerReservar();
     const body = document.getElementById('horario-body');
     body.innerHTML = '';
 
@@ -7541,7 +8399,15 @@
               abrirReservasSlot(div.dataset.slotId, row[0], i, tipo);
               return;
             }
-            // Capa de seguimiento: celdas bloqueadas (ya apartada / llena) no se seleccionan.
+            // MI clase ya apartada: antes la celda sólo temblaba (bloqueada) y no
+            // había NINGUNA salida. Ahora abre la cancelación. La celda entera es
+            // el botón — la ✕ de la esquina es sólo la señal — porque en teléfono
+            // un blanco de 17px se falla y parecería que "no se puede cancelar".
+            if (div.dataset.miClase === '1') {
+              window.cancelarMiClase(div.dataset.slotId, row[0], i, tipo);
+              return;
+            }
+            // Capa de seguimiento: celdas bloqueadas (llena / ya calificada) no se seleccionan.
             if(div.dataset.bloqueado === '1'){
               div.style.animation = 'shake .4s';
               setTimeout(() => div.style.animation='', 400);
@@ -7550,7 +8416,18 @@
             if(slotsSeleccionados.has(key)){
               slotsSeleccionados.delete(key);
               div.classList.remove('seleccionada');
-            } else if(slotsSeleccionados.size < maxSlots){
+              actualizarContador();
+              return;
+            }
+            // Sin Estrellas no hay reserva posible. En vez de una sacudida muda
+            // (que no explica nada), se abre directo la compra: es exactamente
+            // lo único que le falta a esa persona para poder apartar.
+            const tope = topeSeleccion();
+            if(tope === 0){
+              if (window.accionEstrellas) window.accionEstrellas();
+              return;
+            }
+            if(slotsSeleccionados.size < tope){
               slotsSeleccionados.add(key);
               div.classList.add('seleccionada');
             } else {
@@ -7574,59 +8451,120 @@
   function decorarHorario() {
     const cells = document.querySelectorAll('#horario-body .clase-cell.disponible');
     cells.forEach(div => {
-      div.classList.remove('mi-reserva', 'asistida', 'lleno', 'staff-view', 'fuera-mis-dias');
+      div.classList.remove('mi-reserva', 'asistida', 'falto', 'lleno', 'staff-view', 'fuera-mis-dias');
       div.dataset.bloqueado = '';
-      div.querySelectorAll('.mi-reserva-tag, .cupo-badge, .staff-reservas-badge').forEach(n => n.remove());
+      div.dataset.miClase = '';
+      div.querySelectorAll('.mi-reserva-tag, .cupo-badge, .staff-reservas-badge, .staff-asist-badge, .mi-reserva-cancelar')
+         .forEach(n => n.remove());
 
       const sid = div.dataset.slotId;
       const dia = Number(div.dataset.dia);
       // En "modo reservar" el staff se comporta como alumna (cupo + mi-reserva), no vista staff.
       const esStaff = (window._miRank != null && window._miRank <= 2) && !_modoReservaStaff;
 
-      // ── VISTA STAFF/MISS: cuántos apartaron + filtro de "mis días" ──
+      // ── VISTA STAFF/MISS: cuántas vienen, cuántas fueron y filtro de "mis días" ──
       // La celda es informativa (no se selecciona). El click abre "quién apartó".
       if (esStaff) {
         div.classList.add('staff-view');
         const lista = _reservasPorSlot[sid] || [];
+        const n = lista.length;
         const badge = document.createElement('span');
-        badge.className = 'staff-reservas-badge' + (lista.length ? '' : ' vacio');
-        badge.textContent = lista.length ? (lista.length + (lista.length === 1 ? ' apartó' : ' apartaron')) : 'libre';
+        badge.className = 'staff-reservas-badge' + (n ? '' : ' vacio') + (n >= CUPO_MAX ? ' full' : '');
+        badge.textContent = n ? (n >= CUPO_MAX ? 'Clase Full' : (n + '/' + CUPO_MAX)) : 'libre';
         div.appendChild(badge);
-        div.title = 'Toca para ver quién apartó esta clase';
+
+        // PASE DE LISTA A LA VISTA: antes había que entrar clase por clase y darle
+        // a "Marcar" para enterarse de algo. Ahora el resumen ✓ / ✗ / pendientes
+        // se lee desde el propio calendario.
+        if (n) {
+          let si = 0, no = 0;
+          const marcas = _asistPorSlot[sid] || {};
+          lista.forEach(r => {
+            const e = r.uid ? marcas[r.uid] : null;
+            if (e === 'asistio') si++; else if (e === 'falta') no++;
+          });
+          const pend = Math.max(0, n - si - no);
+          const resumen = document.createElement('span');
+          resumen.className = 'staff-asist-badge';
+          const chip = (cls, txt) => { const s = document.createElement('span'); s.className = cls; s.textContent = txt; return s; };
+          if (si)   resumen.appendChild(chip('si',   '✓' + si));
+          if (no)   resumen.appendChild(chip('no',   '✗' + no));
+          if (pend) resumen.appendChild(chip('pend', '·' + pend));
+          div.appendChild(resumen);
+          div.title = 'Vienen ' + n + ' de ' + CUPO_MAX + ' · asistieron ' + si + ', faltaron ' + no +
+                      (pend ? (', ' + pend + ' sin marcar') : '') + '. Toca para pasar lista.';
+        } else {
+          div.title = 'Nadie ha apartado esta clase todavía';
+        }
+
         if (_filtroMisClases && _misDiasStaff.size && !_misDiasStaff.has(dia)) {
           div.classList.add('fuera-mis-dias');
         }
         // "Solo apartadas": atenúa las clases sin reservas para que las misses
         // vean de un vistazo solo lo que tiene alumnas.
-        if (_soloApartadas && !lista.length) {
+        if (_soloApartadas && !n) {
           div.classList.add('sin-apartar');
         }
         return; // staff no usa selección de compra / cupo / mi-reserva
       }
 
-      // Cupo para TODOS ("n/6" o "Lleno"), solo si hay dato agregado público.
-      const n = _cuposCache[sid];
-      if (typeof n === 'number') {
+      // ── CUPOS A LA VISTA para cualquiera con sesión (T2.1) ──
+      // Antes el número sólo salía si Firestore YA tenía el doc cupos/{slot}; una
+      // clase que nadie había apartado no mostraba nada y parecía descompuesta.
+      // Sin doc el conteo es 0 (nadie apartó), no "desconocido", así que se
+      // enseñan los 6 lugares. Y se muestran los LIBRES, no los ocupados: es el
+      // número con el que se decide.
+      const ocupados = (typeof _cuposCache[sid] === 'number') ? _cuposCache[sid] : 0;
+      const libres = Math.max(0, CUPO_MAX - ocupados);
+      // A quien NO ha entrado no se le inventa un número: las reglas no le dejan
+      // leer 'cupos', así que su caché siempre sería 0 y diríamos "6 lugares"
+      // aunque la clase estuviera llena. Mejor callar que mentir.
+      if (window.usuarioActual) {
         const badge = document.createElement('span');
-        badge.className = 'cupo-badge';
-        const lleno = n >= CUPO_MAX;
-        badge.textContent = lleno ? 'Lleno' : (n + '/' + CUPO_MAX);
+        badge.className = 'cupo-badge' + (libres === 0 ? ' full' : (libres <= 2 ? ' pocos' : ''));
+        badge.textContent = libres === 0 ? 'Clase Full' : (libres + (libres === 1 ? ' lugar' : ' lugares'));
         div.appendChild(badge);
-        if (lleno && !esStaff && !_misSlots.has(sid)) {  // alumno no aparta una llena
+        if (libres === 0 && !_misSlots.has(sid)) {   // alumna no aparta una llena
           div.classList.add('lleno');
           div.dataset.bloqueado = '1';
         }
       }
 
-      // ALUMNO: clases que ya apartó (verde) y, si la miss marcó, "Asististe".
+      // ALUMNA: clases que ya apartó (verde) y cómo se las calificaron.
       if (_misSlots.has(sid)) {
         div.classList.add('mi-reserva');
         div.dataset.bloqueado = '1';   // ya es suya: no re-seleccionar
+        // El contador de lugares libres se quita aquí por dos razones: ya tienes
+        // tu lugar (el número no te sirve para decidir nada) y en el teléfono la
+        // pastilla quedaba DEBAJO de la ✕ de cancelar, tapada a medias. Peor
+        // todavía: en una clase llena decía "Clase Full" junto a "Apartada ✓",
+        // como si te hubieras quedado fuera.
+        const badgeLibres = div.querySelector('.cupo-badge');
+        if (badgeLibres) badgeLibres.remove();
         const tag = document.createElement('span');
         tag.className = 'mi-reserva-tag';
-        if (_misAsistidos.has(sid)) { div.classList.add('asistida'); tag.textContent = 'Asististe ✓'; }
-        else tag.textContent = 'Apartada ✓';
+        const yaCalificada = _misAsistidos.has(sid) || _misFaltas.has(sid);
+        if (_misAsistidos.has(sid))    { div.classList.add('asistida'); tag.textContent = 'Asististe ✓'; }
+        else if (_misFaltas.has(sid))  { div.classList.add('falto');    tag.textContent = 'No asististe'; }
+        else                           { tag.textContent = 'Apartada ✓'; }
         div.appendChild(tag);
+
+        // CANCELAR (T2.4): sólo tiene sentido en una clase que todavía no se
+        // calificó. Una vez que la miss pasó lista, la Estrella ya se consumió y
+        // "cancelar" sería borrar historia, no liberar un lugar.
+        if (!yaCalificada) {
+          div.dataset.miClase = '1';
+          const x = document.createElement('span');
+          x.className = 'mi-reserva-cancelar';
+          x.textContent = '✕';
+          div.appendChild(x);
+          const h = window.horasParaClase ? window.horasParaClase(sid) : null;
+          div.title = (h != null && h < 12)
+            ? 'Tu clase está apartada · toca para cancelar (faltan menos de 12 h: la ⭐ no se devuelve)'
+            : 'Tu clase está apartada · toca para cancelar y recuperar tu ⭐';
+        } else {
+          div.title = _misAsistidos.has(sid) ? 'Asististe a esta clase' : 'Quedó marcada como inasistencia';
+        }
       }
     });
   }
@@ -7637,8 +8575,8 @@
   //  • mis slots (alumno): resalta lo que apartó / asistió.
   // Si una pieza aún no existe (p.ej. reglas de 'cupos' sin publicar), se omite.
   async function cargarOverlayHorario() {
-    _misSlots = new Set(); _misAsistidos = new Set(); _cuposCache = {};
-    _reservasPorSlot = {}; _misDiasStaff = new Set();
+    _misSlots = new Set(); _misAsistidos = new Set(); _misFaltas = new Set(); _cuposCache = {};
+    _reservasPorSlot = {}; _asistPorSlot = {}; _misDiasStaff = new Set();
     const esStaff = (window._miRank != null && window._miRank <= 2);
     try {
       if (window.cargarCupos) {
@@ -7650,15 +8588,20 @@
       if (esStaff && window.cargarReservasPorSlot) {
         _reservasPorSlot = await window.cargarReservasPorSlot() || {};
       }
+      // STAFF/MISS: el pase de lista de la semana (para los contadores ✓/✗).
+      if (esStaff && window.cargarAsistenciasSemana) {
+        _asistPorSlot = await window.cargarAsistenciasSemana() || {};
+      }
       if (esStaff && u && window.cargarMisDiasStaff) {
         const dd = await window.cargarMisDiasStaff(u.uid) || [];
         dd.forEach(di => _misDiasStaff.add(di + 1)); // diaIdx 0=Lun -> columna 1
       }
-      // ALUMNO (o staff que también reserva): lo que apartó / asistió.
+      // ALUMNO (o staff que también reserva): lo que apartó / asistió / faltó.
       if (u && window.cargarMisSlots) {
         const r = await window.cargarMisSlots(u.uid) || {};
         (r.apartados || []).forEach(s => _misSlots.add(s));
         (r.asistidos || []).forEach(s => _misAsistidos.add(s));
+        (r.faltas    || []).forEach(s => _misFaltas.add(s));
       }
     } catch (e) { console.warn('overlay horario:', e); }
     // Mostrar la barra de control solo a staff.
@@ -7674,10 +8617,11 @@
   // ── TIEMPO REAL del calendario ─────────────────────────────────────────
   // Suscribe cupos (todas) y reservas (staff) para que el "n/6"/"Lleno" y el
   // "quién apartó" se refresquen en vivo cuando alguien aparta, sin recargar.
-  let _unsubCupos = null, _unsubReservas = null;
+  let _unsubCupos = null, _unsubReservas = null, _unsubAsist = null;
   function _detenerListenersHorario() {
     if (_unsubCupos)    { try { _unsubCupos(); }    catch(_){} _unsubCupos = null; }
     if (_unsubReservas) { try { _unsubReservas(); } catch(_){} _unsubReservas = null; }
+    if (_unsubAsist)    { try { _unsubAsist(); }    catch(_){} _unsubAsist = null; }
   }
   window._detenerListenersHorario = _detenerListenersHorario;
   function _iniciarListenersHorario(esStaff) {
@@ -7687,42 +8631,89 @@
       _unsubCupos = window.suscribirCupos((mapa) => { _cuposCache = mapa || {}; decorarHorario(); });
     }
     if (esStaff && window.suscribirReservas) {
-      _unsubReservas = window.suscribirReservas((mapa) => { _reservasPorSlot = mapa || {}; decorarHorario(); });
+      _unsubReservas = window.suscribirReservas((mapa) => {
+        _reservasPorSlot = mapa || {}; decorarHorario(); _pintarReservasSlot();
+      });
+    }
+    // Pase de lista en vivo: si dos misses marcan a la vez, los contadores del
+    // calendario y el modal abierto se mueven solos en ambas pantallas.
+    if (esStaff && window.suscribirAsistencias) {
+      _unsubAsist = window.suscribirAsistencias((mapa) => {
+        _asistPorSlot = mapa || {}; decorarHorario(); _pintarReservasSlot();
+      });
     }
   }
 
   // ── STAFF/MISS: modal "quién apartó esta clase" + filtro de mis días (T3-F) ──
   const _ESTADO_LBL = { pendiente_pago:'Pendiente', pago_reportado:'En confirmación', activa:'Activa' };
+  // Qué clase tiene abierta el modal. Se guarda para poder REPINTARLO solo cuando
+  // llega un cambio en vivo (otra miss marcando) sin cerrarlo en las narices.
+  let _slotAbierto = null;
   function abrirReservasSlot(sid, hora, dia, tipo) {
+    const modal = document.getElementById('reservas-slot-modal');
+    if (!modal) return;
+    _slotAbierto = { sid, hora, dia, tipo };
+    _pintarReservasSlot();
+    modal.style.display = 'flex';
+  }
+  // Sanea lo que va a viajar DENTRO de un atributo onclick. Son ids nuestros
+  // (uid de Firebase, slotId generado aquí), pero un id con comilla rompería el
+  // HTML y abriría la puerta a inyectar. Filtrar es más barato que confiar.
+  const _idSeguro = (s) => String(s || '').replace(/[^A-Za-z0-9_-]/g, '');
+  function _pintarReservasSlot() {
+    if (!_slotAbierto) return;
+    const { sid, hora, dia, tipo } = _slotAbierto;
     const modal = document.getElementById('reservas-slot-modal');
     const tit   = document.getElementById('reservas-slot-titulo');
     const cap   = document.getElementById('reservas-slot-cap');
     const lista = document.getElementById('reservas-slot-lista');
-    if (!modal || !lista) return;
+    if (!modal || !lista || modal.style.display === 'none') return;
     const reservas = _reservasPorSlot[sid] || [];
+    const marcas   = _asistPorSlot[sid] || {};
+    let si = 0, no = 0;
+    reservas.forEach(r => { const e = r.uid ? marcas[r.uid] : null; if (e === 'asistio') si++; else if (e === 'falta') no++; });
+    const pend = Math.max(0, reservas.length - si - no);
+
     if (tit) tit.textContent = (claseNombres[tipo] || 'Clase') + ' · ' + (DIAS_NOMBRE[dia] || '') + ' · ' + hora;
-    if (cap) cap.textContent = reservas.length + ' de ' + CUPO_MAX + ' lugares apartados';
+    if (cap) {
+      cap.innerHTML = reservas.length + ' de ' + CUPO_MAX + ' lugares apartados' +
+        (reservas.length >= CUPO_MAX ? ' · <strong style="color:var(--naranja)">Clase Full</strong>' : '') +
+        '<br><span class="pase-resumen">' +
+          '<span class="si">✓ ' + si + ' asistieron</span>' +
+          '<span class="no">✗ ' + no + ' faltaron</span>' +
+          '<span class="pend">' + pend + ' sin marcar</span>' +
+        '</span>';
+    }
     if (!reservas.length) {
       lista.innerHTML = '<p class="vacio">Nadie ha apartado esta clase todavía.</p>';
-    } else {
-      lista.innerHTML = reservas.map(r => {
-        const est = r.estado || 'pendiente_pago';
-        const nom = String(r.nombre || 'Alumno').replace(/[<>&]/g, '');
-        const pcls = (window.planCls ? window.planCls(r.plan) : '');
-        const pnom = (r.plan && window.PLAN_DETALLE && window.PLAN_DETALLE[r.plan]) ? window.PLAN_DETALLE[r.plan].nombre : '';
-        const ptag = pnom ? '<span class="r-plan-tag ' + pcls + '">' + pnom + '</span>' : '';
-        const btn = r.uid
-          ? '<button class="r-asist-btn" onclick="marcarAsistenciaUI(\'' + r.uid + '\',\'' + sid + '\',this)">Marcar</button>'
-          : '';
-        return '<div class="reserva-fila ' + pcls + '"><span class="r-nombre">' + nom + ptag +
-               '</span><span class="r-estado ' + est + '">' + (_ESTADO_LBL[est] || est) + '</span>' + btn + '</div>';
-      }).join('');
+      return;
     }
-    modal.style.display = 'flex';
+    lista.innerHTML = reservas.map(r => {
+      const est = r.estado || 'pendiente_pago';
+      const nom = String(r.nombre || 'Alumno').replace(/[<>&]/g, '');
+      const pcls = (window.planCls ? window.planCls(r.plan) : '');
+      const pnom = (r.plan && window.PLAN_DETALLE && window.PLAN_DETALLE[r.plan]) ? window.PLAN_DETALLE[r.plan].nombre : '';
+      const ptag = pnom ? '<span class="r-plan-tag ' + pcls + '">' + pnom + '</span>' : '';
+      const uid  = _idSeguro(r.uid);
+      const sidS = _idSeguro(sid);
+      const marca = uid ? marcas[uid] : null;
+      let btns = '';
+      if (uid) {
+        const llamar = (acc) => 'pasarLista(\'' + uid + '\',\'' + sidS + '\',\'' + acc + '\',this)';
+        btns = '<span class="r-btns">' +
+          '<button class="r-asist-btn' + (marca === 'asistio' ? ' hecho' : '') + '" onclick="' + llamar('asistio') + '">Asistió</button>' +
+          '<button class="r-falta-btn' + (marca === 'falta'   ? ' hecho' : '') + '" onclick="' + llamar('falta')   + '">No asistió</button>' +
+          (marca ? '<button class="r-limpiar-btn" title="Quitar la marca" onclick="' + llamar('limpiar') + '">↺</button>' : '') +
+        '</span>';
+      }
+      return '<div class="reserva-fila ' + pcls + '"><span class="r-nombre">' + nom + ptag +
+             '</span><span class="r-estado ' + est + '">' + (_ESTADO_LBL[est] || est) + '</span>' + btns + '</div>';
+    }).join('');
   }
   window.cerrarReservasSlotModal = () => {
     const m = document.getElementById('reservas-slot-modal');
     if (m) m.style.display = 'none';
+    _slotAbierto = null;
   };
   window.toggleFiltroMisClases = () => {
     _filtroMisClases = !_filtroMisClases;
@@ -7765,7 +8756,7 @@
     if (txt) txt.innerHTML = _modoReservaStaff
       ? '<strong>Modo reservar:</strong> selecciona tus clases y confírmalas; se pagan con tus ⭐ Estrellas (1 ⭐ = 1 clase).'
       : '<strong>Modo staff:</strong> toca cualquier clase para ver quién la apartó y pasar lista. Cupo máximo: 6 por clase.';
-    renderHorario(planActual);   // re-render limpia selección y aplica el modo
+    renderHorario();   // re-render limpia selección y aplica el modo
   };
 
   // Todos los slotIds reales de la rejilla (sin celdas 'empty') de la SEMANA EN
@@ -7779,17 +8770,88 @@
     return ids;
   };
 
-  // STAFF: pase de lista desde el modal "quién apartó" (T3-E).
-  window.marcarAsistenciaUI = async (uid, sid, btn) => {
-    if (!window.marcarAsistencia || !btn) return;
-    btn.disabled = true; btn.textContent = '…';
-    const r = await window.marcarAsistencia(uid, sid);
-    if (r && r.ok) {
-      btn.textContent = r.already ? 'Ya estaba ✓' : 'Asistió ✓';
-      btn.classList.add('hecho');
+  // ALUMNA: cancelar una clase que ya aparté (T2.4).
+  // La REGLA de negocio vive en el servidor (es quien mueve la ⭐ y el cupo);
+  // aquí sólo se avisa con claridad ANTES de tocar nada, porque la diferencia
+  // entre cancelar a las 13 h y a las 11 h es una Estrella que no vuelve.
+  window.cancelarMiClase = async (sid, hora, dia, tipo) => {
+    if (!window.usuarioActual) { if (window.abrirLoginModal) window.abrirLoginModal('login'); return; }
+    const nombre = claseNombres[tipo] || 'clase';
+    const cuando = (DIAS_LARGO[dia] ? (DIAS_LARGO[dia] + ' ') : '') + (hora || '');
+    const h = window.horasParaClase ? window.horasParaClase(sid) : null;
+
+    if (h != null && h < 0) {
+      await window.uiAlert('Esa clase ya pasó, no se puede cancelar.', { titulo: 'Ya pasó' });
+      return;
     }
-    else {
-      btn.disabled = false; btn.textContent = 'Marcar';
+    // h === null = no supimos calcular la hora (slot viejo o formato raro). No se
+    // promete nada: el servidor decidirá y el mensaje final dirá qué ocurrió.
+    const aTiempo = (h == null) ? null : (h >= 12);
+    const faltan = (h == null) ? '' : (h < 24
+      ? ('faltan ' + Math.max(0, Math.floor(h)) + ' h')
+      : ('faltan ' + Math.floor(h / 24) + ' días'));
+
+    // OJO: uiConfirm pinta con textContent (una línea por '\n'), NO con innerHTML.
+    // Nada de <strong> aquí: se vería el tag tal cual.
+    const cuerpo =
+      aTiempo === true
+        ? `Vas a cancelar ${nombre} · ${cuando} (${faltan}).\n\nComo avisas con más de 12 horas, tu Estrella ⭐ regresa a tu cuenta y el lugar queda libre para otra alumna.`
+        : aTiempo === false
+          ? `Vas a cancelar ${nombre} · ${cuando} (${faltan}).\n\n⚠️ Faltan MENOS DE 12 HORAS: esta Estrella ⭐ NO se devuelve. El lugar sí queda libre por si alguien más lo aprovecha.`
+          : `Vas a cancelar ${nombre} · ${cuando}.\n\nSi faltan más de 12 horas tu Estrella ⭐ regresa; si falta menos, se pierde.`;
+
+    const ok = await window.uiConfirm(cuerpo, {
+      titulo: 'Cancelar tu clase',
+      okText: 'Sí, cancelar',
+      cancelText: 'Mejor no',
+      peligro: aTiempo !== true,
+    });
+    if (!ok) return;
+
+    const r = await window.cancelarClase(sid);
+    if (!r || !r.ok) return;   // cancelarClase ya explicó el motivo
+
+    // El servidor dice POR QUÉ no hubo devolución. Sin ese dato tendríamos que
+    // adivinar "fue tarde", y a quien se le vencieron las Estrellas le estaríamos
+    // echando la culpa de algo que no hizo.
+    const finales = {
+      tarde:        'Listo, cancelamos tu clase y liberamos el lugar. Por el aviso con menos de 12 horas, la Estrella ⭐ no se devuelve.',
+      expiradas:    'Listo, cancelamos tu clase y liberamos el lugar. No pudimos devolverte la Estrella ⭐ porque tu paquete ya venció.',
+      ya_cancelada: 'Esa clase ya estaba cancelada. El lugar está libre.',
+    };
+    await window.uiAlert(
+      r.reembolso
+        ? `Listo, cancelamos tu clase y te devolvimos 1 ⭐.${(r.nuevoSaldo != null) ? (' Ahora tienes ' + r.nuevoSaldo + ' ⭐.') : ''}`
+        : (finales[r.motivoReembolso] || 'Listo, cancelamos tu clase y liberamos el lugar.'),
+      { titulo: r.reembolso ? 'Estrella devuelta ⭐' : 'Clase cancelada' }
+    );
+
+    if (window.cargarOverlayHorario) await window.cargarOverlayHorario();
+    if (window.renderMisClasesSemana) window.renderMisClasesSemana();
+  };
+
+  // STAFF: pase de lista desde el modal "quién apartó" (T3-E + T2.3).
+  // accion: 'asistio' | 'falta' | 'limpiar'.
+  window.pasarLista = async (uid, sid, accion, btn) => {
+    if (!window.marcarAsistencia) return;
+    const fila = btn ? btn.closest('.reserva-fila') : null;
+    if (fila) { fila.style.opacity = '.45'; fila.style.pointerEvents = 'none'; }
+    const r = (accion === 'limpiar')
+      ? (window.desmarcarAsistencia ? await window.desmarcarAsistencia(uid, sid) : { ok:false, code:'no disponible' })
+      : await window.marcarAsistencia(uid, sid, accion);
+    if (fila) { fila.style.opacity = ''; fila.style.pointerEvents = ''; }
+
+    if (r && r.ok) {
+      // Se refleja al instante en la caché local en vez de esperar al listener:
+      // el snapshot llega en un parpadeo, pero ese parpadeo se nota y da la
+      // sensación de que el botón "no hizo nada".
+      const m = (_asistPorSlot[sid] = _asistPorSlot[sid] || {});
+      if (accion === 'limpiar') delete m[uid]; else m[uid] = accion;
+      decorarHorario();
+      _pintarReservasSlot();
+      return;
+    }
+    {
       const code = (r && r.code) || 'error';
       const diag = (r && r.diag) || '';
       const esReglas = /permission|denied|insufficient/i.test(code);
@@ -7820,26 +8882,18 @@
   };
 
   function actualizarContador() {
-    const max = planHoras[planActual] || 5;
     const contador = document.getElementById('slots-count');
     const btn = document.getElementById('btn-confirmar');
-    if(contador) contador.textContent = slotsSeleccionados.size + ' / ' + max;
-    if(btn) btn.disabled = slotsSeleccionados.size === 0;
+    // Al visitante no se le enseña un "/ 20" que no significa nada: ese tope es
+    // sólo un freno técnico mientras no hay sesión. Con sesión sí se muestra
+    // "2 / 5 ⭐", que es la cuenta real de lo que puede apartar.
+    if (contador) contador.textContent = saldoVisible()
+      ? slotsSeleccionados.size + ' / ' + topeSeleccion() + ' ⭐'
+      : slotsSeleccionados.size;
+    if (btn) btn.disabled = slotsSeleccionados.size === 0;
   }
 
-  renderHorario('medio');
-  document.querySelectorAll('.plan-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      document.querySelectorAll('.plan-btn').forEach(b => b.classList.remove('activo'));
-      btn.classList.add('activo');
-      const p = btn.dataset.plan;
-      renderHorario(p);
-      const esInd = p === 'individual';
-      document.getElementById('plan-info').innerHTML = esInd
-        ? 'Plan seleccionado: <strong>Individual</strong> — Selecciona <strong>1 clase</strong> suelta (pago único $250 MXN)'
-        : `Plan seleccionado: <strong>${planNombres[p]}</strong> — Selecciona hasta <strong>${planHoras[p]} clases</strong> por semana`;
-    });
-  });
+  renderHorario();
 
   /* ACORDEÓN */
   document.querySelectorAll('.accordion-btn').forEach(btn => {
@@ -7885,8 +8939,6 @@
   let _reservaPendiente = null;
 
   async function confirmarHorario() {
-    const plan = document.querySelector('.plan-btn.activo')?.dataset.plan || 'medio';
-
     // 1) Validar que haya al menos una clase seleccionada
     if (slotsSeleccionados.size === 0) {
       await window.uiAlert('Selecciona al menos una clase en el calendario.', { titulo: 'Falta tu clase' });
@@ -7899,23 +8951,31 @@
       return;
     }
 
-    // 3) CLASE SUELTA: pedir la FECHA exacta (día de la semana correcto) y validar
-    //    el cupo de esa fecha (máx 6 -> "Clase Llena"). El slot pasa a llevar fecha.
-    const slots = slotsEstructurados();
-    let fecha = null;
-    if (plan === 'individual') {
-      const elegido = await pedirFechaIndividual(slots[0]);
-      if (!elegido) return;  // canceló o no hubo fecha válida
-      fecha = elegido.fecha;
-      slots[0] = { ...slots[0], slotId: elegido.fechaSlotId, fecha };
+    // 3) Aviso temprano si no alcanzan las Estrellas. El backend igual lo valida
+    //    (es la única verdad), pero avisar aquí ahorra un viaje y un susto.
+    //    Si el saldo aún no llegó de Firebase no se adivina: se deja pasar y que
+    //    mande el backend, que es preferible a acusar en falso de "no te alcanza".
+    const disponibles = estrellasDisponibles();
+    if (saldoConocido() && slotsSeleccionados.size > disponibles) {
+      const ir = await window.uiConfirm(
+        'Seleccionaste ' + slotsSeleccionados.size + ' clases y te quedan ' + disponibles + ' ⭐. ¿Comprar más Estrellas?',
+        { titulo: '⭐ No alcanzan', okText: 'Comprar Estrellas', cancelText: 'Ahora no' });
+      if (ir && window.abrirCompraCreditos) window.abrirCompraCreditos();
+      return;
     }
 
-    // 4) Guardar selección y abrir modal para confirmar el nombre
+    // 4) Guardar selección y abrir modal para confirmar el nombre.
+    //    Ya no se pide fecha aparte: el calendario muestra la SEMANA VIVA con sus
+    //    fechas reales, así que tocar una celda ya es elegir día. (El selector de
+    //    fecha `pedirFechaIndividual` sigue vivo para las Alumnas Externas, que
+    //    reservan sin ver este calendario.)
+    const slots = slotsEstructurados();
     const clases = slotsFormateados();
-    _reservaPendiente = { plan, clases, slots, fecha };
+    _reservaPendiente = { plan: 'creditos', clases, slots, fecha: null };
 
+    const n = slots.length;
     document.getElementById('nombre-modal-resumen').textContent =
-      `${planNombres[plan]} · ${clases}` + (fecha ? ` · ${fechaBonita(fecha)}` : '');
+      `${clases} · ${n} ⭐` + (saldoConocido() ? ` (te quedarán ${Math.max(0, disponibles - n)})` : '');
     const input = document.getElementById('nombre-modal-input');
     input.value = window.usuarioActual.displayName || '';
     document.getElementById('nombre-modal').style.display = 'flex';
@@ -8083,97 +9143,173 @@
   })();
 
   /* ===== NAVEGACIÓN MÓVIL / PWA =====
-     Header compacto + drawer lateral + barra inferior con accesos rápidos.
-     Reemplaza el header apilado y los nav-dots (ocultos en móvil). */
+     Header compacto + sidebar. En teléfono/tablet el sidebar se desliza desde
+     un costado y lo dispara la hamburguesa de arriba-derecha; de 1024px para
+     arriba es un riel fijo siempre visible. Reemplaza el header apilado y los
+     nav-dots (ocultos en móvil). */
   (function initNavegacionMovil() {
     const MQ = window.matchMedia('(max-width:768px)');
     const burger  = document.getElementById('nav-burger');
     const drawer  = document.getElementById('nav-drawer');
     const overlay = document.getElementById('nav-overlay');
-    const bottom  = document.getElementById('mob-bottom-nav');
-    if (!burger || !drawer || !overlay || !bottom) return;
+    // ⚠️ La barra inferior ya NO se busca aquí. Cuando existía, este guard la
+    // exigía; si se hubiera borrado el <nav> sin tocar esta línea, la función
+    // habría salido por el `return` y se habría llevado por delante TODA la
+    // navegación (hamburguesa, sidebar, Escape, "Ver Más"), en silencio.
+    if (!burger || !drawer || !overlay) return;
 
-    const mobNavMap = {
-      inicio:'inicio', noticias:'mas', 'proximos-eventos':'mas', 'eventos-pasados':'mas',
-      horarios:'horarios', precios:'precios', 'seccion-mis-clases':'seccion-mis-clases',
-      'labor-social':'mas', reglas:'mas', contacto:'mas'
-    };
+    /* De 1024px para arriba el SIDEBAR es un RIEL FIJO a la izquierda: no
+       flota encima del contenido, lo recorre. Por eso ahí NO hay que bloquear
+       el scroll del cuerpo ni encender el velo. Por debajo de 1024 sí se
+       desliza encima y entonces sí: velo + scroll bloqueado.
+       Son DOS mecanismos distintos y hay que no confundirlos:
+         · FLOTANTE (<1024) → clase `.abierto` en el propio panel.
+         · RIEL     (≥1024) → clase `.sidebar-plegado` en el <body>. */
+    const SIDEBAR_FIJO = window.matchMedia('(min-width:1024px)');
+    const PLEGADO_KEY  = 'circ_sidebar_plegado';
 
-    const irASeccion = (id) => {
-      if (id === 'seccion-mis-clases') {
-        if (window.irAMiCuenta) { window.irAMiCuenta(); return; }
-      }
-      if (window._abrirColapsable) window._abrirColapsable(id);
-      const sec = document.getElementById(id);
-      if (sec) {
-        if (id === 'seccion-mis-clases') sec.style.display = 'block';
-        sec.scrollIntoView({ behavior:'smooth', block:'start' });
-      }
-    };
-
-    const cerrarDrawer = () => {
+    /* ── El panel FLOTANTE (teléfono/tablet) ── */
+    const limpiarFlotante = () => {
       drawer.classList.remove('abierto');
-      burger.classList.remove('abierto');
-      burger.setAttribute('aria-expanded', 'false');
       overlay.classList.remove('visible');
       overlay.setAttribute('aria-hidden', 'true');
       document.body.style.overflow = '';
     };
 
+    const cerrarDrawer = () => {
+      if (SIDEBAR_FIJO.matches) return;
+      limpiarFlotante();
+      burger.classList.remove('abierto');
+      burger.setAttribute('aria-expanded', 'false');
+      pintarBotonRiel();
+    };
+
     const abrirDrawer = () => {
+      if (SIDEBAR_FIJO.matches) return;
       drawer.classList.add('abierto');
       burger.classList.add('abierto');
       burger.setAttribute('aria-expanded', 'true');
       overlay.classList.add('visible');
       overlay.setAttribute('aria-hidden', 'false');
       document.body.style.overflow = 'hidden';
+      pintarBotonRiel();
     };
 
+    /* ── El RIEL de escritorio: plegar / desplegar ──
+       Antes esto no existía: en pantalla grande el riel era permanente y el ✕
+       estaba escondido por CSS, así que no había manera de quitarlo de en medio.
+       La preferencia se guarda para que no haya que plegarlo en cada visita;
+       si localStorage está bloqueado (modo privado, iOS con cookies apagadas)
+       simplemente no se recuerda, pero el botón sigue funcionando. */
+    const estaPlegado = () => document.body.classList.contains('sidebar-plegado');
+
+    const plegarRiel = (plegado, recordar = true) => {
+      document.body.classList.toggle('sidebar-plegado', plegado);
+      burger.classList.toggle('abierto', !plegado);
+      burger.setAttribute('aria-expanded', plegado ? 'false' : 'true');
+      if (recordar) { try { localStorage.setItem(PLEGADO_KEY, plegado ? '1' : '0'); } catch (e) {} }
+      pintarBotonRiel();
+    };
+
+    /* El botón de la esquina del menú hace DOS cosas distintas según el tamaño.
+       Si el ícono y el texto no cambiaran con él, estaría mintiendo: en
+       escritorio un "✕ Cerrar menú" haría pensar que el menú desaparece para
+       siempre, cuando en realidad se pliega y vuelve con la ☰. */
+    function pintarBotonRiel() {
+      const fijo = SIDEBAR_FIJO.matches;
+      drawer.querySelectorAll('[data-sidebar-cerrar]').forEach(b => {
+        // ⟩ y no ⟨: el riel vive a la DERECHA, así que al plegarse se va hacia
+        // allá. Una flecha apuntando al lado contrario del movimiento es de esas
+        // mentiras chiquitas que hacen dudar si el botón hizo lo que dijo.
+        b.textContent = fijo ? '⟩' : '✕';
+        const txt = fijo ? 'Plegar el menú (vuelve con ☰)' : 'Cerrar menú';
+        b.setAttribute('aria-label', txt);
+        b.setAttribute('title', txt);
+      });
+      if (burger) {
+        const txt = SIDEBAR_FIJO.matches
+          ? (estaPlegado() ? 'Mostrar menú' : 'Plegar menú')
+          : (drawer.classList.contains('abierto') ? 'Cerrar menú' : 'Abrir menú');
+        burger.setAttribute('aria-label', txt);
+        burger.setAttribute('title', txt);
+      }
+    }
+
+    // Lo usan el botón "Ver Más" del grid y cualquier atajo a "ver el menú".
+    // En escritorio con el riel ya a la vista no hay nada que abrir: se le da
+    // un destello para señalar dónde vive el menú. Pero si está PLEGADO, lo que
+    // toca es desplegarlo — antes destellaba un riel invisible (no pasaba nada).
+    window.abrirSidebar = () => {
+      if (!SIDEBAR_FIJO.matches) { abrirDrawer(); return; }
+      if (estaPlegado()) { plegarRiel(false); return; }
+      drawer.classList.remove('destello');
+      void drawer.offsetWidth;                 // reinicia la animación
+      drawer.classList.add('destello');
+      setTimeout(() => drawer.classList.remove('destello'), 1300);
+    };
+    window.cerrarSidebar = cerrarDrawer;
+
     burger.addEventListener('click', () => {
+      if (SIDEBAR_FIJO.matches) { plegarRiel(!estaPlegado()); return; }
       drawer.classList.contains('abierto') ? cerrarDrawer() : abrirDrawer();
     });
     overlay.addEventListener('click', cerrarDrawer);
     document.addEventListener('keydown', e => {
-      if (e.key === 'Escape' && drawer.classList.contains('abierto')) cerrarDrawer();
+      if (e.key !== 'Escape') return;
+      // Escape sólo retira lo que TAPA contenido. En escritorio el riel no tapa
+      // nada, así que Escape no lo pliega: sería un cambio de layout sorpresa.
+      if (drawer.classList.contains('abierto')) cerrarDrawer();
+    });
+    drawer.querySelectorAll('[data-sidebar-cerrar]').forEach(b => {
+      b.addEventListener('click', () => {
+        if (SIDEBAR_FIJO.matches) plegarRiel(true);
+        else cerrarDrawer();
+      });
     });
 
-    drawer.querySelectorAll('.nav-links a[href^="#"]').forEach(a => {
-      a.addEventListener('click', () => { if (MQ.matches) cerrarDrawer(); });
-    });
-
-    // Barra inferior → abre HOJAS del app-shell (no scroll).
-    const NAV_A_VISTA = { horarios:'horarios', precios:'estrellas', 'seccion-mis-clases':'perfil' };
-    bottom.querySelectorAll('.mob-nav-item').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const id = btn.dataset.nav;
-        if (id === 'mas') { abrirDrawer(); return; }
+    /* Al cruzar los 1024px cambia el mecanismo, y hay que limpiar el del otro
+       lado. Sin esto, si abres el panel en teléfono y giras a horizontal (o
+       agrandas la ventana), `cerrarDrawer` se salía por el `return` de riel
+       fijo y el <body> se quedaba con `overflow:hidden`: la página dejaba de
+       hacer scroll y parecía congelada. */
+    const sincronizarRiel = () => {
+      if (SIDEBAR_FIJO.matches) {
+        limpiarFlotante();
+        let guardado = null;
+        try { guardado = localStorage.getItem(PLEGADO_KEY); } catch (e) {}
+        plegarRiel(guardado === '1', false);
+      } else {
+        // En teléfono el riel plegado no significa nada: manda `.abierto`.
+        document.body.classList.remove('sidebar-plegado');
         cerrarDrawer();
-        if (id === 'inicio') {
+      }
+      pintarBotonRiel();
+    };
+    sincronizarRiel();
+    if (SIDEBAR_FIJO.addEventListener) SIDEBAR_FIJO.addEventListener('change', sincronizarRiel);
+
+    /* Navegación del sidebar: cada botón abre su VISTA (hoja). Si el sidebar
+       venía deslizado encima (móvil/tablet) se cierra primero, para que no
+       le quede montado a la hoja que acaba de abrir. */
+    drawer.querySelectorAll('.sb-item').forEach(btn => {
+      btn.addEventListener('click', () => {
+        drawer.querySelectorAll('.sb-item').forEach(b => b.classList.remove('activo'));
+        btn.classList.add('activo');
+        cerrarDrawer();
+        if (btn.dataset.inicio) {
           if (window.cerrarVista) window.cerrarVista();
           window.scrollTo({ top:0, behavior:'smooth' });
           return;
         }
-        const vista = NAV_A_VISTA[id];
-        if (vista && window.abrirVista) { window.abrirVista(vista); return; }
-        irASeccion(id);
+        const vista = btn.dataset.vista;
+        if (vista && window.abrirVista) window.abrirVista(vista);
       });
     });
 
-    const marcarActivo = (secId) => {
-      const key = mobNavMap[secId];
-      bottom.querySelectorAll('.mob-nav-item').forEach(b => {
-        b.classList.toggle('active', b.dataset.nav === key);
-      });
-    };
-
-    const secsMob = Array.from(document.querySelectorAll('section[id]'))
-      .filter(s => s.style.display !== 'none' && !s.dataset.navSkip);
-    secsMob.forEach(sec => {
-      new IntersectionObserver(entries => {
-        if (!MQ.matches) return;
-        if (entries[0].isIntersecting) marcarActivo(sec.id);
-      }, { threshold:0.35 }).observe(sec);
-    });
+    /* Aquí vivían los handlers de la barra inferior, su `marcarActivo` y un
+       IntersectionObserver por sección que iba encendiendo el ícono activo.
+       Todo eso murió con la barra: sin botones que resaltar, el observador
+       sólo era trabajo del navegador en cada scroll a cambio de nada. */
 
     const sync = () => {
       document.body.classList.toggle('mob-nav-on', MQ.matches);
@@ -8203,14 +9339,30 @@
     const titIc = host.querySelector('.sheet-ico');
 
     // key → { titulo, icono, secciones:[ids], necesitaSesion?, onOpen? }
-    // Reestructura: 4 mosaicos (Reservar · Estrellas & Planes · Mi Perfil ·
-    // La Academia) + banner ancho (Aprende). Estrellas absorbe Paquetes;
-    // La Academia absorbe Reglas, Contacto, Comunidad y Colaboradores.
+    // Reestructura PWA: el GRID queda con las 4 acciones de todos los días
+    // (Reservar · Estrellas & Planes · Mi Perfil · Aprende) y el banner ancho
+    // "Ver Más" abre el SIDEBAR, que es donde vive todo lo de explorar.
+    // Por eso La Academia adelgaza y Comunidad / Labor Social salen a vistas
+    // propias: antes eran un scroll larguísimo dentro de una sola hoja.
+    // Equipo y Colaboradores se retiran de la navegación por decisión de
+    // producto — su HTML queda DORMIDO (no se borró), así que devolverlos
+    // es solamente volver a listarlos aquí.
     const VISTAS = {
-      horarios:  { titulo:'Reservar',            icono:'📅', secciones:['horarios'] },
-      estrellas: { titulo:'Estrellas & Planes',  icono:'⭐', secciones:['precios','paquetes-view'], onOpen:pintarPaquetes },
+      horarios:  { titulo:'Reservar',            icono:'📅', secciones:['horarios'], onOpen:()=>window.actualizarBannerReservar&&window.actualizarBannerReservar() },
+      estrellas: { titulo:'Estrellas & Planes',  icono:'⭐', secciones:['paquetes-view'], onOpen:pintarPaquetes },
       perfil:    { titulo:'Mi Perfil',           icono:'🪽', secciones:['seccion-mis-clases'], necesitaSesion:true },
-      academia:  { titulo:'La Academia',         icono:'🎪', secciones:['contacto','noticias','proximos-eventos','eventos-pasados','reglas','comunidad','colaboradores','equipo','galeria-seccion','labor-social'] },
+      // 'contacto' iba PRIMERO: lo primero que veías al entrar a La Academia era
+      // un formulario pidiéndote escribir, antes de haberte enseñado nada. Ahora
+      // cierra la vista: primero se muestra lo que hacemos (noticias, eventos,
+      // galería, reglas) y al final se pide la opinión.
+      academia:  { titulo:'La Academia',         icono:'🎪', secciones:['noticias','proximos-eventos','eventos-pasados','galeria-seccion','reglas','contacto'] },
+      comunidad: { titulo:'Comunidad',           icono:'🫂', secciones:['comunidad'], necesitaSesion:true, onOpen:()=>window.buscarPerfiles&&window.buscarPerfiles() },
+      labor:     { titulo:'Labor Social',        icono:'💛', secciones:['labor-social'] },
+      // Calendario de horas del STAFF. Antes se pintaba suelto en el home y
+      // se sentía como "un segundo calendario"; ahora tiene su propia entrada
+      // (visible sólo para staff). Fusionarlo con Reservar en pestañas es la
+      // tarea #67 — hasta entonces, aquí conserva su acceso.
+      calendario:{ titulo:'Calendario de Clases', icono:'🗓️', secciones:['calendario'], necesitaSesion:true, onOpen:()=>window.calIniciar&&window.calIniciar() },
       aprende:   { titulo:'Aprende con Nosotros', icono:'🎬', secciones:['videos'], necesitaSesion:true, onOpen:()=>window.renderVideosAprende&&window.renderVideosAprende() },
     };
 
@@ -8284,32 +9436,44 @@
       };
     });
 
-    // Refleja el saldo de ⭐ en el mosaico de Estrellas (lee el nº del perfil).
+    // Refleja el saldo de ⭐ en el mosaico de Estrellas Y en la insignia del sidebar.
     window.actualizarMosaicoSaldo = function(n){
-      const el = document.getElementById('mosaico-saldo');
-      if (!el) return;
       let v = n;
       if (v == null){
         const p = document.getElementById('perfil-creditos');
         v = p ? (parseInt(p.textContent,10) || 0) : null;
       }
-      el.textContent = (v == null ? '—' : v) + ' ⭐';
+      const txt = (v == null ? '—' : v) + ' ⭐';
+      const el = document.getElementById('mosaico-saldo');
+      if (el) el.textContent = txt;
+      const sb = document.getElementById('sb-saldo');   // espejo en el sidebar
+      if (sb) sb.textContent = txt;
+      // Tercer espejo: el recuadro de saldo de Reservar, que además fija el tope
+      // de clases seleccionables. Un solo punto de actualización para los tres.
+      if (window.actualizarBannerReservar) window.actualizarBannerReservar();
     };
     const _pc = document.getElementById('perfil-creditos');
     if (_pc && window.MutationObserver){
       new MutationObserver(() => window.actualizarMosaicoSaldo()).observe(_pc, { childList:true, characterData:true, subtree:true });
     }
 
-    // Contenido de PAQUETES (mensualidades) — tarjetas informativas.
+    /* Contenido de PAQUETES — el ÚNICO mostrario de la app.
+       Los "planes" ya no son un compromiso ni una suscripción: son sólo
+       PAQUETES DE ESTRELLAS con descuento por volumen. Por eso el botón
+       compra (`abrirCompraCreditos`) en vez de mandar al calendario: reservar
+       se hace después, con las Estrellas que tengas, sin preguntar de qué
+       paquete salieron. `porEstrella` se calcula solo — así nadie tiene que
+       acordarse de actualizar dos números cuando cambie un precio. */
     function pintarPaquetes(){
       const cont = document.getElementById('paquetes-cards');
       if (!cont || cont.dataset.listo) return;
       const PLANES = [
-        { nombre:'Individual', sesiones:'1 clase suelta', clases:'1 clase', precio:'$250',   periodo:'pago único',  destacado:false },
-        { nombre:'Básico',     sesiones:'2 clases/sem',   clases:'8 clases al mes', precio:'$800',   periodo:'mensualidad', destacado:false },
-        { nombre:'Medio',      sesiones:'5 clases/sem',   clases:'20 clases al mes', precio:'$1,200', periodo:'mensualidad', destacado:true  },
-        { nombre:'Avanzado',   sesiones:'7 clases/sem',   clases:'28 clases al mes', precio:'$1,600', periodo:'mensualidad', destacado:false },
+        { nombre:'Individual', estrellas:1,  sesiones:'clase suelta',  precio:250,  periodo:'pago único',  destacado:false },
+        { nombre:'Básico',     estrellas:8,  sesiones:'2 clases/sem',  precio:800,  periodo:'mensualidad', destacado:false },
+        { nombre:'Medio',      estrellas:20, sesiones:'5 clases/sem',  precio:1200, periodo:'mensualidad', destacado:true  },
+        { nombre:'Avanzado',   estrellas:28, sesiones:'7 clases/sem',  precio:1600, periodo:'mensualidad', destacado:false },
       ];
+      const pesos = (n) => '$' + n.toLocaleString('es-MX');
       const grid = document.createElement('div');
       grid.className = 'paquetes-grid';
       PLANES.forEach(p => {
@@ -8318,20 +9482,25 @@
         if (p.destacado){ const b = document.createElement('span'); b.className = 'paquete-badge'; b.textContent = 'Más popular'; card.appendChild(b); }
         const nom = document.createElement('p'); nom.className = 'paquete-nombre'; nom.textContent = p.nombre; card.appendChild(nom);
         const ses = document.createElement('p'); ses.className = 'paquete-sesiones'; ses.textContent = p.sesiones; card.appendChild(ses);
-        const pre = document.createElement('p'); pre.className = 'paquete-precio'; pre.textContent = p.precio; card.appendChild(pre);
-        const per = document.createElement('p'); per.className = 'paquete-periodo'; per.textContent = p.periodo; card.appendChild(per);
-        const cl = document.createElement('p'); cl.className = 'paquete-clases'; cl.textContent = '= ' + p.clases; card.appendChild(cl);
+        const pre = document.createElement('p'); pre.className = 'paquete-precio'; pre.textContent = pesos(p.precio); card.appendChild(pre);
+        // El precio POR estrella es el argumento de venta del paquete grande.
+        const per = document.createElement('p'); per.className = 'paquete-periodo';
+        per.textContent = p.estrellas === 1 ? p.periodo : pesos(Math.round(p.precio / p.estrellas)) + ' por clase';
+        card.appendChild(per);
+        const cl = document.createElement('p'); cl.className = 'paquete-clases';
+        cl.textContent = p.estrellas + ' ⭐ = ' + p.estrellas + (p.estrellas === 1 ? ' clase' : ' clases');
+        card.appendChild(cl);
         card.appendChild(document.createElement('div')).className = 'paquete-sep';
         const btn = document.createElement('button');
         btn.type = 'button'; btn.className = 'paquete-btn';
-        btn.textContent = 'Agendar con este plan';
-        btn.addEventListener('click', () => window.abrirVista('horarios'));
+        btn.textContent = 'Comprar Estrellas';
+        btn.addEventListener('click', () => window.abrirCompraCreditos && window.abrirCompraCreditos(p.estrellas));
         card.appendChild(btn);
         grid.appendChild(card);
       });
       const nota = document.createElement('p');
       nota.className = 'paquetes-nota';
-      nota.textContent = 'Las mensualidades y clases sueltas se pagan con Estrellas ⭐ (1 ⭐ = 1 clase). Compra tus Estrellas desde el mosaico ⭐ Estrellas.';
+      nota.textContent = 'Compras Estrellas y con ellas apartas: 1 ⭐ = 1 clase, el día y la hora que tú quieras. Vencen el día 2 del mes siguiente.';
       cont.appendChild(grid); cont.appendChild(nota);
       cont.dataset.listo = '1';
     }
