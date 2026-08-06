@@ -3922,6 +3922,85 @@
         return { ok: false };
       }
     };
+
+    // ── CIERRES DE HORARIO (vacaciones / clase suelta cancelada) ──────────
+    // cierres/{id} = { desde, hasta, horas: null|['8-9'], motivo, creadoPor, ts }
+    // Lectura PÚBLICA a propósito: quien todavía no tiene cuenta también merece
+    // ver "Vacaciones" en el calendario. Enterarse de que no hay clase DESPUÉS
+    // de registrarse es la peor forma de conocer una academia.
+    window.cargarCierres = async () => {
+      try {
+        const snap = await getDocs(collection(db, "cierres"));
+        return snap.docs.map(d => ({ id: d.id, ...(d.data() || {}) }));
+      } catch (e) { console.warn('cargarCierres:', e); return []; }
+    };
+    window.suscribirCierres = (cb) => {
+      try {
+        return onSnapshot(collection(db, "cierres"), (snap) => {
+          cb(snap.docs.map(d => ({ id: d.id, ...(d.data() || {}) })));
+        }, (e) => console.warn('suscribirCierres:', e));
+      } catch (e) { console.warn('suscribirCierres:', e); return null; }
+    };
+
+    // Cerrar y reabrir van por el BACKEND, no por Firestore directo, y no es
+    // burocracia: cerrar arrastra tres cosas que tienen que pasar juntas o no
+    // pasar — cancelar las reservas de adentro, devolver una ⭐ por cada una y
+    // dejar el cupo en 0. Desde el navegador eso sería medio hecho en cuanto se
+    // cierre la pestaña, y además las reglas le prohíben al cliente tocar una
+    // reserva 'activa' o escribir créditos (justo para que nadie se los regale).
+    window.cerrarHorario = async ({ desde, hasta, horas, motivo }) => {
+      if (!usuarioActual) { abrirLoginModal('login'); return { ok: false }; }
+      try {
+        const idToken = await usuarioActual.getIdToken();
+        const resp = await fetch(BACKEND_URL + '/cerrar', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + idToken },
+          body: JSON.stringify({ desde, hasta, horas: horas || null, motivo: motivo || '' }),
+        });
+        let out = {};
+        try { out = await resp.json(); } catch (_) { out = {}; }
+        if (!resp.ok || !out.ok) {
+          const motivoErr = out.motivo || (resp.status === 404 ? 'no_desplegado' : 'error');
+          const msg = {
+            no_desplegado: 'La función de cerrar clases aún no está publicada en el servidor.',
+            sin_permiso: 'Solo el Dueño o Administración pueden cerrar el horario.',
+            fecha_invalida: 'Revisa las fechas: deben estar completas.',
+            rango_invertido: 'La fecha de inicio va antes que la de fin.',
+            hora_invalida: 'Esa hora no existe en el horario.',
+          }[motivoErr] || (out.error || 'No se pudo cerrar el horario.');
+          await uiAlert(msg, { titulo: 'No se pudo cerrar', peligro: true });
+          return { ok: false, motivo: motivoErr };
+        }
+        return out;
+      } catch (e) {
+        console.error('cerrarHorario:', e);
+        await uiAlert('No se pudo cerrar el horario. ' + (e.message || ''), { titulo: 'Error', peligro: true });
+        return { ok: false };
+      }
+    };
+
+    window.reabrirHorario = async (id) => {
+      if (!usuarioActual) { abrirLoginModal('login'); return { ok: false }; }
+      try {
+        const idToken = await usuarioActual.getIdToken();
+        const resp = await fetch(BACKEND_URL + '/reabrir', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + idToken },
+          body: JSON.stringify({ id }),
+        });
+        let out = {};
+        try { out = await resp.json(); } catch (_) { out = {}; }
+        if (!resp.ok || !out.ok) {
+          await uiAlert(out.error || 'No se pudo reabrir el horario.', { titulo: 'No se pudo reabrir', peligro: true });
+          return { ok: false };
+        }
+        return out;
+      } catch (e) {
+        console.error('reabrirHorario:', e);
+        await uiAlert('No se pudo reabrir. ' + (e.message || ''), { titulo: 'Error', peligro: true });
+        return { ok: false };
+      }
+    };
   </script>
 
   <style>
@@ -4727,6 +4806,31 @@
     }
     .clase-cell.fuera-mis-dias { opacity: .26; filter: grayscale(.6); }
     .clase-cell.fuera-mis-dias:hover { filter: grayscale(.6) brightness(1.05); }
+
+    /* ── CLASE CERRADA (vacaciones / la miss no puede) ──────────────────
+       Gris a propósito, NO escondida: una celda que desaparece se lee como
+       "se descompuso la página". En gris con su motivo encima se lee como
+       "ese día no hay", que es justo lo que pasó. */
+    .clase-cell.cerrada {
+      opacity: .5; cursor: not-allowed;
+      filter: grayscale(1);
+      background-image: repeating-linear-gradient(
+        45deg, transparent, transparent 5px,
+        rgba(255,255,255,.05) 5px, rgba(255,255,255,.05) 10px);
+    }
+    .clase-cell.cerrada:hover { transform: none; filter: grayscale(1); }
+    .clase-cell.cerrada .clase-nombre { text-decoration: line-through; opacity: .6; }
+    /* Mismo trato que .cupo-badge: anclada a los DOS lados con ancho de
+       contenido, para que un motivo largo no se salga de una celda de ~58 px. */
+    .cierre-tag {
+      position: absolute; top: 3px; left: 2px; right: 2px; z-index: 2;
+      width: fit-content; max-width: calc(100% - 4px); margin-inline: auto;
+      font-size: .5rem; letter-spacing: .2px; line-height: 1; white-space: nowrap;
+      font-family: 'Cinzel', serif; text-align: center;
+      color: #fff; background: rgba(120,120,120,.85);
+      border-radius: 999px; padding: 2px 4px; pointer-events: none;
+      overflow: hidden; text-overflow: ellipsis;
+    }
     .horario-staff-bar {
       display: none; align-items: center; gap: 12px; flex-wrap: wrap;
       margin: 4px 0 16px; padding: 10px 14px; border-radius: 8px;
@@ -4742,6 +4846,39 @@
     }
     .staff-filtro-btn:hover { background: rgba(255,204,0,.12); }
     .staff-filtro-btn.activo { background: var(--amarillo); color: var(--negro); font-weight: 800; border-color: var(--amarillo); }
+
+    /* ── PANEL DUEÑO/ADMIN: cerrar clases ──────────────────────────────
+       En rojo apagado, no en amarillo de marca: es la única herramienta del
+       calendario que le quita algo a alguien. Que no se confunda con los
+       botones de ver/filtrar que están junto a ella. */
+    .cierres-panel {
+      display: none; margin: 0 0 16px; padding: 12px 14px; border-radius: 8px;
+      background: rgba(232,116,0,.05); border: 1px solid rgba(232,116,0,.22);
+    }
+    .cierres-panel-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+    .cierres-panel-tit {
+      font-family: 'Cinzel', serif; font-size: .78rem; letter-spacing: 1px;
+      color: var(--naranja, #e87400);
+    }
+    .cierres-panel-sub { font-size: .68rem; opacity: .6; line-height: 1.5; flex: 1 1 220px; }
+    .cierres-nuevo-btn { border-color: rgba(232,116,0,.5); color: var(--naranja, #e87400); }
+    .cierres-nuevo-btn:hover { background: rgba(232,116,0,.12); }
+    .cierres-lista { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; }
+    .cierres-lista .vacio { font-size: .72rem; opacity: .45; padding: 4px 0; }
+    .cierre-fila {
+      display: flex; align-items: center; justify-content: space-between; gap: 10px;
+      flex-wrap: wrap; padding: 9px 12px; border-radius: 6px; background: var(--gris-medio);
+    }
+    .cierre-fila .c-txt { font-size: .78rem; color: var(--blanco); line-height: 1.5; }
+    .cierre-fila .c-motivo { color: var(--naranja, #e87400); font-weight: 700; }
+    .cierre-fila .c-detalle { display: block; font-size: .66rem; opacity: .55; }
+    .cierre-reabrir-btn {
+      padding: 6px 13px; border-radius: 6px; cursor: pointer; white-space: nowrap;
+      font-family: 'Cinzel', serif; font-size: .64rem; letter-spacing: .8px;
+      background: transparent; border: 1px solid rgba(124,252,154,.45); color: #7CFC9A;
+      transition: all .25s;
+    }
+    .cierre-reabrir-btn:hover { background: rgba(124,252,154,.14); }
     /* "Solo apartadas": clases sin reservas se atenúan para destacar las que sí tienen alumnas */
     .clase-cell.staff-view.sin-apartar { opacity: .26; filter: grayscale(.7); }
     /* Modal "quién apartó": lista de reservas. */
@@ -7075,6 +7212,16 @@
       <button class="staff-filtro-btn" id="staff-filtro-btn" onclick="toggleFiltroMisClases()">Ver solo mis clases</button>
       <button class="staff-filtro-btn staff-cupo-btn" id="staff-cupo-btn" onclick="staffSincronizarCupos(this)">Actualizar cupos</button>
     </div>
+    <!-- Panel DUEÑO/ADMIN (Rank ≤ 1): cerrar el estudio por vacaciones o quitar
+         una clase suelta. Oculto para instructoras y alumnas. -->
+    <div class="cierres-panel" id="cierres-panel">
+      <div class="cierres-panel-head">
+        <span class="cierres-panel-tit">🚫 Cerrar clases</span>
+        <span class="cierres-panel-sub">Vacaciones, un puente, o una clase que no se va a dar. A quien ya había apartado se le regresa su ⭐ automáticamente.</span>
+        <button class="staff-filtro-btn cierres-nuevo-btn" onclick="abrirCerrarHorario()">+ Cerrar fechas</button>
+      </div>
+      <div class="cierres-lista" id="cierres-lista"></div>
+    </div>
     <div class="horario-wrap cal-gc">
       <table class="horario-grid">
         <thead>
@@ -8080,6 +8227,39 @@
     return p.y + '-' + String(p.mes).padStart(2, '0') + '-' + String(p.dia).padStart(2, '0');
   };
 
+  // Hora comprimida de un slotId ("8-9"). Se saca aparte de partesDeSlot porque
+  // los cierres razonan por HORA del horario, no por instante.
+  function horaCompactaDeSlot(sid) {
+    const p = String(sid || '').split('_');
+    const esYmd = s => /^\d{4}-\d{2}-\d{2}$/.test(s);
+    if (p.length >= 3 && esYmd(p[0]) && /^[1-5]$/.test(p[1])) return p.slice(2).join('_');
+    if (p.length >= 2 && esYmd(p[0])) return p.slice(1).join('_');
+    return null;   // formato viejo sin fecha
+  }
+  window.horaCompactaDeSlot = horaCompactaDeSlot;
+
+  // ── ¿Esta clase está cerrada? ──────────────────────────────────────────
+  // GEMELA de cierreQueTapa() en el backend. Las fechas son 'AAAA-MM-DD', así
+  // que compararlas como texto YA es compararlas como calendario.
+  // ⚠️ Esto es sólo la PINTURA: el candado que impide reservar vive en el
+  // servidor (/agendar). Aquí se avisa; allá se impide.
+  let _cierresCache = [];
+  function cierreDeSlot(sid) {
+    if (!_cierresCache.length) return null;
+    const ymd = window.fechaDeSlot ? window.fechaDeSlot(sid) : null;
+    const horaC = horaCompactaDeSlot(sid);
+    if (!ymd || !horaC) return null;
+    for (const c of _cierresCache) {
+      if (!c || !c.desde || !c.hasta) continue;
+      if (ymd < c.desde || ymd > c.hasta) continue;
+      const hs = Array.isArray(c.horas) ? c.horas : null;
+      if (hs && hs.length && !hs.includes(horaC)) continue;   // cierre de una clase suelta
+      return c;
+    }
+    return null;
+  }
+  window.cierreDeSlot = cierreDeSlot;
+
   // Horas que faltan para la clase (negativo = ya pasó, null = no se pudo saber).
   // Se mide contra la hora de HERMOSILLO, no contra la del aparato: si alguien
   // trae el celular en otra zona (o con el reloj en automático de viaje), el
@@ -8393,6 +8573,29 @@
           div.appendChild(span);
 
           div.addEventListener('click', () => {
+            // CLASE CERRADA: antes que cualquier otra cosa. Una sacudida muda
+            // dejaría pensando "¿se descompuso?"; aquí se dice por qué, y al
+            // Dueño/Admin se le ofrece reabrirla desde el mismo lugar donde la vio.
+            if (div.dataset.cerrada === '1') {
+              const c = cierreDeSlot(div.dataset.slotId);
+              const puedeAbrir = (window._miRank != null && window._miRank <= 1);
+              const detalle = (c && c.motivo) ? ('Motivo: ' + c.motivo + '.') : '';
+              if (puedeAbrir && c && c.id) {
+                uiConfirm('Esta clase está cerrada. ' + detalle + '\n\n¿Quieres volver a abrirla?',
+                          { titulo: 'Clase cerrada', okText: 'Reabrir', cancelText: 'Dejarla cerrada' })
+                  .then(async (si) => {
+                    if (!si) return;
+                    const r = await window.reabrirHorario(c.id);
+                    if (r && r.ok) {
+                      await uiAlert('Listo, esa clase vuelve a estar disponible.', { titulo: 'Horario reabierto' });
+                      if (window.refrescarCierres) window.refrescarCierres();
+                    }
+                  });
+              } else {
+                uiAlert('Esta clase no se va a dar. ' + detalle, { titulo: 'Sin clase' });
+              }
+              return;
+            }
             // STAFF/MISS en modo staff: la celda es informativa -> abre "quién apartó".
             // En "modo reservar" (_modoReservaStaff) el staff selecciona como alumna.
             if (window._miRank != null && window._miRank <= 2 && !_modoReservaStaff) {
@@ -8451,14 +8654,33 @@
   function decorarHorario() {
     const cells = document.querySelectorAll('#horario-body .clase-cell.disponible');
     cells.forEach(div => {
-      div.classList.remove('mi-reserva', 'asistida', 'falto', 'lleno', 'staff-view', 'fuera-mis-dias');
+      div.classList.remove('mi-reserva', 'asistida', 'falto', 'lleno', 'staff-view', 'fuera-mis-dias', 'cerrada');
       div.dataset.bloqueado = '';
       div.dataset.miClase = '';
-      div.querySelectorAll('.mi-reserva-tag, .cupo-badge, .staff-reservas-badge, .staff-asist-badge, .mi-reserva-cancelar')
+      div.dataset.cerrada = '';
+      div.querySelectorAll('.mi-reserva-tag, .cupo-badge, .staff-reservas-badge, .staff-asist-badge, .mi-reserva-cancelar, .cierre-tag')
          .forEach(n => n.remove());
 
       const sid = div.dataset.slotId;
       const dia = Number(div.dataset.dia);
+
+      // ── CLASE CERRADA: se decide ANTES que nada ──────────────────────
+      // Va primero porque si ese día no hay clase, todo lo demás sobra: no
+      // tiene sentido anunciar "4 lugares" de una clase que no va a existir.
+      // Se pinta igual para alumnas, staff y visitantes sin cuenta: el que no
+      // haya clase no es información reservada.
+      const cierre = cierreDeSlot(sid);
+      if (cierre) {
+        div.classList.add('cerrada');
+        div.dataset.bloqueado = '1';
+        div.dataset.cerrada = '1';
+        const tag = document.createElement('span');
+        tag.className = 'cierre-tag';
+        tag.textContent = cierre.motivo || 'Sin clase';
+        div.appendChild(tag);
+        div.title = 'Esta clase no se va a dar' + (cierre.motivo ? ' · ' + cierre.motivo : '');
+        return;   // ni cupo, ni mi-reserva, ni vista staff
+      }
       // En "modo reservar" el staff se comporta como alumna (cupo + mi-reserva), no vista staff.
       const esStaff = (window._miRank != null && window._miRank <= 2) && !_modoReservaStaff;
 
@@ -8579,6 +8801,9 @@
     _reservasPorSlot = {}; _asistPorSlot = {}; _misDiasStaff = new Set();
     const esStaff = (window._miRank != null && window._miRank <= 2);
     try {
+      // Los CIERRES van primero y SIN pedir sesión: si la academia está de
+      // vacaciones, eso se tiene que ver aunque falle todo lo demás.
+      if (window.cargarCierres) _cierresCache = await window.cargarCierres() || [];
       if (window.cargarCupos) {
         const cupos = await window.cargarCupos();
         if (cupos) _cuposCache = cupos;
@@ -8607,6 +8832,12 @@
     // Mostrar la barra de control solo a staff.
     const bar = document.getElementById('horario-staff-bar');
     if (bar) bar.style.display = esStaff ? 'flex' : 'none';
+    // Cerrar clases es decisión de negocio, no de quien la imparte: sólo
+    // Dueño (0) y Administración (1). Las instructoras no ven este panel.
+    const panelCierres = document.getElementById('cierres-panel');
+    const puedeCerrar = (window._miRank != null && window._miRank <= 1);
+    if (panelCierres) panelCierres.style.display = puedeCerrar ? 'block' : 'none';
+    if (puedeCerrar && window._pintarListaCierres) window._pintarListaCierres();
     // Las MISSES (rank 2) arrancan viendo solo clases apartadas; dueño/admin ven todo.
     if (esStaff) { _soloApartadas = (window._miRank === 2); _syncSoloApartadasBtn(); }
     decorarHorario();
@@ -8617,15 +8848,35 @@
   // ── TIEMPO REAL del calendario ─────────────────────────────────────────
   // Suscribe cupos (todas) y reservas (staff) para que el "n/6"/"Lleno" y el
   // "quién apartó" se refresquen en vivo cuando alguien aparta, sin recargar.
-  let _unsubCupos = null, _unsubReservas = null, _unsubAsist = null;
+  let _unsubCupos = null, _unsubReservas = null, _unsubAsist = null, _unsubCierres = null;
   function _detenerListenersHorario() {
     if (_unsubCupos)    { try { _unsubCupos(); }    catch(_){} _unsubCupos = null; }
     if (_unsubReservas) { try { _unsubReservas(); } catch(_){} _unsubReservas = null; }
     if (_unsubAsist)    { try { _unsubAsist(); }    catch(_){} _unsubAsist = null; }
+    if (_unsubCierres)  { try { _unsubCierres(); }  catch(_){} _unsubCierres = null; }
   }
   window._detenerListenersHorario = _detenerListenersHorario;
+  // Relee los cierres a mano (tras cerrar/reabrir desde el panel). El listener
+  // ya los trae solos, pero cuando no hay sesión no hay listener: esto cubre
+  // ese caso y además hace que el cambio se sienta inmediato.
+  window.refrescarCierres = async () => {
+    if (!window.cargarCierres) return;
+    _cierresCache = await window.cargarCierres() || [];
+    decorarHorario();
+    if (window._pintarListaCierres) window._pintarListaCierres();
+  };
   function _iniciarListenersHorario(esStaff) {
     _detenerListenersHorario();
+    // Los cierres son de lectura PÚBLICA, así que este listener va ANTES del
+    // corte por sesión: un visitante sin cuenta también tiene que ver que la
+    // academia cerró, y verlo moverse en vivo si cierra mientras mira.
+    if (window.suscribirCierres) {
+      _unsubCierres = window.suscribirCierres((lista) => {
+        _cierresCache = lista || [];
+        decorarHorario();
+        if (window._pintarListaCierres) window._pintarListaCierres();
+      });
+    }
     if (!window.usuarioActual) return;   // sin sesión no hay permiso de lectura (evita listener roto)
     if (window.suscribirCupos) {
       _unsubCupos = window.suscribirCupos((mapa) => { _cuposCache = mapa || {}; decorarHorario(); });
@@ -8643,6 +8894,179 @@
       });
     }
   }
+
+  // ══════════════════════════════════════════════════════════════════════
+  //  DUEÑO/ADMIN: cerrar y reabrir clases (vacaciones o una clase suelta)
+  // ══════════════════════════════════════════════════════════════════════
+
+  // Las 4 horas del horario, como opciones legibles. Se derivan de horarioBase
+  // para que si algún día cambia el horario, esta lista cambie sola.
+  function _horasDelHorario() {
+    return horarioBase.map(row => {
+      const compacta = slotIdDe(1, row[0]).split('_')[1];
+      // ⚠️ EL a.m./p.m. NO ES ADORNO. En el horario hay DOS clases que empiezan
+      // "a las 8": Open Gym a las 8 de la MAÑANA y Telas/Aro a las 8 de la NOCHE.
+      // Escritas como en horarioBase ("8:00 – 10:00" y "8:00 – 9:00") se parecen
+      // demasiado, y aquí equivocarse no es un typo: cancela clases de gente real
+      // y le devuelve Estrellas. El sufijo sale de HORA_INICIO_24H, que es la
+      // misma tabla con la que el backend fecha las clases: no se puede desfasar.
+      const hm = HORA_INICIO_24H[compacta];
+      const sufijo = hm ? (hm[0] < 12 ? ' a.m.' : ' p.m.') : '';
+      const texto = row[0] + sufijo;
+      // Qué clases caen en esa hora (varían por día: L/Mi/V Telas, Ma/Ju Flex…).
+      const tipos = [...new Set(row.slice(1).filter(t => t && t !== 'empty'))]
+        .map(t => claseNombres[t] || t);
+      return { compacta, texto, etiqueta: texto + (tipos.length ? ' · ' + tipos.join(' / ') : '') };
+    });
+  }
+
+  // ¿A cuántas personas les pega este cierre? Cuenta sobre las reservas que el
+  // staff ya tiene cargadas. Se avisa ANTES de cerrar porque cerrar no es un
+  // gesto de vista: cancela reservas de gente real y mueve Estrellas. Que el
+  // número salga después sería enterarse del daño cuando ya no hay marcha atrás.
+  function _contarAfectadas(desde, hasta, horas) {
+    let personas = 0;
+    const nombres = [];
+    for (const sid in _reservasPorSlot) {
+      const ymd = window.fechaDeSlot ? window.fechaDeSlot(sid) : null;
+      const horaC = horaCompactaDeSlot(sid);
+      if (!ymd || !horaC) continue;
+      if (ymd < desde || ymd > hasta) continue;
+      if (horas && horas.length && !horas.includes(horaC)) continue;
+      (_reservasPorSlot[sid] || []).forEach(r => {
+        if (r.estado !== 'activa') return;     // sólo las activas se reembolsan
+        personas++;
+        if (r.nombre && !nombres.includes(r.nombre)) nombres.push(r.nombre);
+      });
+    }
+    return { personas, nombres };
+  }
+
+  // Escapa texto que va a terminar dentro de innerHTML. Existe aparte del
+  // escapeHtml del bloque de arriba porque aquél vive en un <script type=
+  // "module">, que tiene su PROPIO alcance: desde acá no se ve. Copiarlo es
+  // más honesto que colgarlo del window sólo para esto.
+  const _htmlSeguro = (s) => String(s == null ? '' : s).replace(/[&<>"']/g,
+    c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
+
+  const _fmtFechaCorta = (ymd) => {
+    const p = String(ymd || '').split('-').map(Number);
+    if (p.length !== 3) return ymd || '';
+    const MESES = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+    return p[2] + ' ' + (MESES[p[1] - 1] || '') + (p[0] !== new Date().getFullYear() ? ' ' + p[0] : '');
+  };
+
+  window.abrirCerrarHorario = async () => {
+    if (window._miRank == null || window._miRank > 1) {
+      await uiAlert('Solo el Dueño o Administración pueden cerrar el horario.', { titulo: 'Sin permiso' });
+      return;
+    }
+    const hoy = ymdLocal(new Date());
+    const horas = _horasDelHorario();
+    const datos = await uiForm({
+      titulo: '🚫 Cerrar clases',
+      mensaje: 'Elige el rango de días. Para cerrar UN solo día, pon la misma fecha en las dos.',
+      okText: 'Revisar', cancelText: 'Cancelar',
+      campos: [
+        { id: 'desde',  label: 'Desde',  tipo: 'date', valor: hoy, min: hoy },
+        { id: 'hasta',  label: 'Hasta',  tipo: 'date', valor: hoy, min: hoy },
+        { id: 'hora',   label: '¿Qué clases?',
+          opciones: [{ value: '', label: 'Todas las del día' }]
+            .concat(horas.map(h => ({ value: h.compacta, label: h.etiqueta }))) },
+        { id: 'motivo', label: 'Motivo (lo verán las alumnas)', valor: 'Vacaciones',
+          placeholder: 'Vacaciones', maxlength: 40 },
+      ],
+    });
+    if (!datos) return;
+
+    const desde = (datos.desde || '').trim();
+    const hasta = (datos.hasta || '').trim() || desde;
+    const motivo = (datos.motivo || '').trim() || 'Sin clase';
+    const listaHoras = datos.hora ? [datos.hora] : null;
+
+    if (!desde || !hasta) { await uiAlert('Faltan las fechas.', { titulo: 'Datos incompletos' }); return; }
+    if (desde > hasta) {
+      await uiAlert('La fecha "Desde" tiene que ir antes que la de "Hasta".', { titulo: 'Fechas al revés' });
+      return;
+    }
+
+    const { personas, nombres } = _contarAfectadas(desde, hasta, listaHoras);
+    const queCierra = listaHoras
+      ? (horas.find(h => h.compacta === listaHoras[0]) || {}).texto || listaHoras[0]
+      : 'todas las clases';
+    const cuando = (desde === hasta) ? ('el ' + _fmtFechaCorta(desde))
+                                     : ('del ' + _fmtFechaCorta(desde) + ' al ' + _fmtFechaCorta(hasta));
+
+    let aviso = 'Vas a cerrar ' + queCierra + ' ' + cuando + '.\nMotivo: ' + motivo + '.\n\n';
+    if (personas === 0) {
+      aviso += 'Nadie tiene clases apartadas en esas fechas, así que no hay que devolverle nada a nadie.';
+    } else {
+      aviso += personas + (personas === 1 ? ' alumna tiene' : ' alumnas tienen') + ' clase apartada ahí.\n' +
+               'Se le' + (personas === 1 ? '' : 's') + ' cancela y se le' + (personas === 1 ? '' : 's') +
+               ' devuelve ' + personas + ' ⭐ en total.';
+      if (nombres.length) aviso += '\n\n' + nombres.slice(0, 8).join(', ') + (nombres.length > 8 ? ' y más…' : '');
+    }
+    aviso += '\n\n¿Cerramos?';
+
+    const ok = await uiConfirm(aviso, {
+      titulo: 'Confirmar cierre',
+      okText: 'Sí, cerrar', cancelText: 'Mejor no',
+      peligro: personas > 0,
+    });
+    if (!ok) return;
+
+    const r = await window.cerrarHorario({ desde, hasta, horas: listaHoras, motivo });
+    if (!r || !r.ok) return;   // cerrarHorario ya explicó el motivo
+
+    await uiAlert(
+      'Listo. Esas clases ya salen cerradas en el calendario.' +
+      (r.canceladas ? ('\n\nSe cancelaron ' + r.canceladas + ' reserva' + (r.canceladas === 1 ? '' : 's') +
+                       ' y se devolvieron ' + r.estrellasDevueltas + ' ⭐.') : ''),
+      { titulo: 'Horario cerrado' });
+    if (window.refrescarCierres) await window.refrescarCierres();
+  };
+
+  window.reabrirCierre = async (id) => {
+    const c = _cierresCache.find(x => x.id === id);
+    const cuando = c ? ((c.desde === c.hasta) ? ('el ' + _fmtFechaCorta(c.desde))
+                                              : ('del ' + _fmtFechaCorta(c.desde) + ' al ' + _fmtFechaCorta(c.hasta))) : '';
+    const ok = await uiConfirm(
+      'Se vuelven a abrir esas clases ' + cuando + '.\n\n' +
+      'Ojo: a quien ya se le devolvió su ⭐ NO se le quita — que reacomodó su semana no tiene por qué pagar el cambio. ' +
+      'Si quieres que vuelvan, tendrán que apartar de nuevo.',
+      { titulo: 'Reabrir el horario', okText: 'Sí, reabrir', cancelText: 'Dejarlo cerrado' });
+    if (!ok) return;
+    const r = await window.reabrirHorario(id);
+    if (r && r.ok && window.refrescarCierres) await window.refrescarCierres();
+  };
+
+  // Lista de cierres puestos. Sólo los que todavía sirven de algo (no vencidos):
+  // una lista que crece para siempre deja de leerse a los dos meses.
+  window._pintarListaCierres = function () {
+    const cont = document.getElementById('cierres-lista');
+    if (!cont) return;
+    const hoy = ymdLocal(new Date());
+    const vivos = _cierresCache
+      .filter(c => c && c.hasta && c.hasta >= hoy)
+      .sort((a, b) => String(a.desde).localeCompare(String(b.desde)));
+    if (!vivos.length) {
+      cont.innerHTML = '<p class="vacio">No hay cierres puestos: el horario está abierto completo.</p>';
+      return;
+    }
+    const horas = _horasDelHorario();
+    cont.innerHTML = vivos.map(c => {
+      const cuando = (c.desde === c.hasta) ? _fmtFechaCorta(c.desde)
+                                           : (_fmtFechaCorta(c.desde) + ' — ' + _fmtFechaCorta(c.hasta));
+      const hs = Array.isArray(c.horas) && c.horas.length
+        ? c.horas.map(h => (horas.find(x => x.compacta === h) || {}).texto || h).join(', ')
+        : 'todas las clases del día';
+      // El motivo lo escribe una persona y termina dentro del HTML: se escapa.
+      const motivo = _htmlSeguro(c.motivo || 'Sin clase');
+      return '<div class="cierre-fila"><span class="c-txt"><span class="c-motivo">' + motivo + '</span> · ' +
+             _htmlSeguro(cuando) + '<span class="c-detalle">' + _htmlSeguro(hs) + '</span></span>' +
+             '<button class="cierre-reabrir-btn" onclick="reabrirCierre(\'' + _idSeguro(c.id) + '\')">Reabrir</button></div>';
+    }).join('');
+  };
 
   // ── STAFF/MISS: modal "quién apartó esta clase" + filtro de mis días (T3-F) ──
   const _ESTADO_LBL = { pendiente_pago:'Pendiente', pago_reportado:'En confirmación', activa:'Activa' };

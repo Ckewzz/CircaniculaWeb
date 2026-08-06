@@ -296,6 +296,39 @@ service cloud.firestore {
       allow delete: if isStaffClase();
     }
 
+    // ── CIERRES DE HORARIO (vacaciones / clase suelta cancelada) ──────
+    //  cierres/{id} = { desde:'AAAA-MM-DD', hasta:'AAAA-MM-DD',
+    //                   horas: null | ['8-9'], motivo, creadoPor, ts }
+    //  `horas: null` = el día completo. Con lista = sólo esas clases.
+    //
+    //  LECTURA PÚBLICA (sin sesión) A PROPÓSITO: quien entra a ver horarios sin
+    //  cuenta tiene que ver "Vacaciones" igual que una alumna. Si esto exigiera
+    //  sesión, un visitante vería el horario abierto, se registraría para
+    //  apartar, y hasta entonces se enteraría de que no hay clase. No hay nada
+    //  privado aquí: es justo lo que uno pegaría en la puerta del estudio.
+    //
+    //  ESCRITURA: sólo Dueño/Administración (Rank ≤ 1). NO las Instructoras:
+    //  cerrar el estudio es decisión de negocio, no de quien da la clase.
+    //
+    //  ⚠️  Estas reglas NO son el candado que impide reservar. El candado real
+    //  vive en el backend (POST /agendar consulta los cierres dentro de su
+    //  transacción), porque la reserva se crea allá. Esto sólo protege QUIÉN
+    //  puede declarar un cierre.
+    match /cierres/{id} {
+      allow read: if true;
+      allow create: if isAdmin()
+        && request.resource.data.creadoPor == request.auth.uid
+        && request.resource.data.desde is string
+        && request.resource.data.hasta is string
+        && request.resource.data.desde.size() == 10
+        && request.resource.data.hasta.size() == 10
+        && request.resource.data.desde <= request.resource.data.hasta;
+      // Un cierre no se edita: se quita y se vuelve a poner. Así el registro de
+      // por qué no hubo clase no se puede reescribir después.
+      allow update: if false;
+      allow delete: if isAdmin();
+    }
+
     // ── PASE DE LISTA / ASISTENCIAS (T3-E) ────────────────────────────
     //  asistencias/{uid_slotId_fecha} = { uid, slotId, fecha, marcadoPor, ts }.
     //  La marca el STAFF (Rank ≤ 2); 'marcadoPor' debe ser quien la crea. El
