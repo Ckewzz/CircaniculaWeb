@@ -230,6 +230,11 @@
 
     // Tope de créditos (espejo del backend pricing.js → MAX_CREDITOS).
     const MAX_CREDITOS = 40;
+    // Este bloque es <script type="module">: su `const` NO se ve desde los
+    // bloques planos de abajo (el mostrario de Estrellas vive allá). Se publica
+    // en `window` para que la tarjeta "Estrellas Libres" diga el tope REAL sin
+    // volver a escribir el 40 — dos copias del mismo número se desfasan solas.
+    window.MAX_CREDITOS = MAX_CREDITOS;
 
     // Precio TOTAL en pesos para N créditos. ESPEJO EXACTO de pricing.js (solo
     // para MOSTRAR el precio en la UI; el monto real lo calcula y cobra el
@@ -6567,6 +6572,41 @@
     }
     .noticia-card, .video-card { border-radius:14px; }
 
+    /* "Estrellas Libres" · la tarjeta a la medida, al final del mostrario.
+       Vive AQUÍ y no allá arriba con las demás reglas de .paquete-card por una
+       razón concreta: este bloque Liquid Glass reescribe `border`, `background`
+       y `border-radius` de .paquete-card, y tiene la MISMA especificidad, así
+       que gana el que va después. Puesta arriba, el punteado se perdía y salía
+       el borde naranja sólido de todas. Se resolvió por orden, no subiéndole la
+       especificidad con un truco.
+
+       GEOMETRÍA: ocupa la FILA COMPLETA (grid-column:1/-1) a propósito. La
+       rejilla es `auto-fit`, o sea que el número de columnas cambia solo con el
+       ancho (4 · 3 · 2 · 1); una quinta tarjeta normal quedaría huérfana en
+       cuanto la fila no cierre exacta —a 966 px, por ejemplo, los 4 paquetes ya
+       caen en 3+1—. Ocupando el renglón entero SIEMPRE queda limpia y debajo de
+       los cuatro, en cualquier pantalla y sin una media query por tamaño.
+
+       El punteado dice, sin gastar texto, que esta no es un escalón fijo como
+       las otras cuatro sino una cantidad que decide la persona. */
+    .paquete-libre {
+      grid-column:1 / -1;
+      flex-direction:row; align-items:center; text-align:left;
+      gap:16px; padding:16px 18px;
+      background:linear-gradient(158deg, rgba(46,30,18,.38), rgba(16,11,7,.46));
+      border:1px dashed rgba(255,204,0,.34);
+    }
+    .paquete-libre:hover { border-color:rgba(255,204,0,.62); }
+    .paquete-libre-info { flex:1 1 auto; min-width:0; }
+    .paquete-libre .paquete-nombre { margin:0 0 3px; }
+    .paquete-libre .paquete-sesiones { margin:0; }
+    .paquete-libre .paquete-btn { width:auto; flex:0 0 auto; margin:0; padding:10px 20px; white-space:nowrap; }
+    /* En pantalla angosta el renglón no cabe: se apila y el botón toma el ancho. */
+    @media (max-width:480px) {
+      .paquete-libre { flex-direction:column; align-items:stretch; text-align:center; gap:12px; }
+      .paquete-libre .paquete-btn { width:100%; }
+    }
+
     /* ---------- BOTONES DE ACCIÓN ----------
        "Naranja al frente": el botón que empuja a reservar/pagar es naranja
        sólido; el amarillo se reserva para textos y realces. */
@@ -9922,6 +9962,39 @@
         card.appendChild(btn);
         grid.appendChild(card);
       });
+
+      /* ESTRELLAS LIBRES · la compra a la medida, al final del mostrario.
+         No es un quinto paquete: es la MISMA puerta que el botón de Horarios
+         (`abrirCompraCreditos()` SIN número → pregunta cuántas quieres). Existe
+         porque los cuatro de arriba son escalones fijos y casi nunca le cuadran
+         exacto a nadie: quien necesita 3, 12 o 17 clases hoy tiene que comprar
+         de más. El precio no lo inventa esta tarjeta —lo calcula el mismo
+         `precioCreditosCliente` (espejo de pricing.js), que es una escala
+         CONTINUA de 1 al tope—, y el cobro real lo hace el servidor. Por eso
+         aquí no se pinta ningún precio: el número exacto sale en el paso
+         siguiente, ya con la cantidad elegida, y no puede desfasarse. */
+      const libre = document.createElement('div');
+      libre.className = 'paquete-card paquete-libre';
+      const libreInfo = document.createElement('div');
+      libreInfo.className = 'paquete-libre-info';
+      const libreNom = document.createElement('p');
+      libreNom.className = 'paquete-nombre';
+      libreNom.textContent = '⭐ Estrellas Libres';
+      const libreSub = document.createElement('p');
+      libreSub.className = 'paquete-sesiones';
+      // El tope viene del bloque module (window.MAX_CREDITOS). Si por lo que sea
+      // no cargó, se omite el rango en vez de inventar un número.
+      const tope = window.MAX_CREDITOS;
+      libreSub.textContent = 'Tú eliges cuántas' + (tope ? ', de 1 a ' + tope : '') +
+        '. Entre más compras, más barata te sale cada clase.';
+      libreInfo.appendChild(libreNom); libreInfo.appendChild(libreSub);
+      const libreBtn = document.createElement('button');
+      libreBtn.type = 'button'; libreBtn.className = 'paquete-btn';
+      libreBtn.textContent = 'Elegir cuántas';
+      libreBtn.addEventListener('click', () => window.abrirCompraCreditos && window.abrirCompraCreditos());
+      libre.appendChild(libreInfo); libre.appendChild(libreBtn);
+      grid.appendChild(libre);
+
       const nota = document.createElement('p');
       nota.className = 'paquetes-nota';
       nota.textContent = 'Compras Estrellas y con ellas apartas: 1 ⭐ = 1 clase, el día y la hora que tú quieras. Vencen el día 2 del mes siguiente.';
