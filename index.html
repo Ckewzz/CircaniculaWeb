@@ -5107,8 +5107,11 @@
     .perfil-rol-linea strong { color:rgba(255,255,255,.95); }
     .perfil-rol-linea a { color:var(--amarillo); word-break:break-all; }
     .perfil-vis-toggles { display:flex; flex-direction:column; gap:9px; margin-top:8px; }
-    .vis-toggle { display:flex; align-items:center; gap:9px; font-size:.82rem;
-      color:rgba(255,255,255,.8); cursor:pointer; }
+    /* `flex-start` y no `center`: si la etiqueta cae en dos renglones, el check
+       tiene que quedarse pegado al PRIMERO, no flotando a media altura. */
+    .vis-toggle { display:flex; align-items:flex-start; gap:9px; font-size:.82rem;
+      line-height:1.35; color:rgba(255,255,255,.8); cursor:pointer; }
+    .vis-toggle input { margin-top:1px; }
     /* Tarjeta de visibilidad suelta: vive fuera de los desplegables, entre la
        identidad y el menú. Lleva un filo amarillo a la izquierda para que se
        lea como un control tuyo y no como una sección más del menú. */
@@ -5378,7 +5381,13 @@
     .admin-acordeon-body { padding:12px 14px; }
     .admin-acordeon-avanzado { border-color:rgba(255,255,255,.14); }
     .admin-acordeon-avanzado > summary { color:rgba(255,255,255,.6); }
-    .admin-hint { font-size:.74rem; color:rgba(255,255,255,.55); text-align:center; margin:0 0 12px; }
+    /* El texto que explica QUÉ hace cada cosa. Estaba en .74rem al 55% de
+       blanco: legible en una pantalla de escritorio a oscuras, pero es
+       justo lo que hay que poder leer de un vistazo en el teléfono, y no se
+       leía. Sube a ~12.6px al 66% y con más interlínea. No es cosmético:
+       aquí se avisa qué se borra y qué no tiene deshacer. */
+    .admin-hint { font-size:.79rem; line-height:1.55; color:rgba(255,255,255,.66); text-align:center; margin:0 0 12px; }
+    .admin-hint strong, .admin-hint b { color:rgba(255,255,255,.9); }
 
     /* ===== GRUPOS DEL PANEL DE ADMINISTRACIÓN =====
        Dos bloques con etiqueta en vez de una torre seguida de secciones: el
@@ -5392,7 +5401,7 @@
       text-transform:uppercase; color:rgba(255,204,0,.85);
     }
     .admin-grupo-sub {
-      margin:0 0 11px; font-size:.72rem; line-height:1.5; color:rgba(255,255,255,.45);
+      margin:0 0 11px; font-size:.76rem; line-height:1.55; color:rgba(255,255,255,.58);
     }
     /* Buscador de alumna: es la puerta de TODAS las acciones del Dueño, por eso
        va hasta arriba y siempre abierto (antes vivía escondido tras un botón). */
@@ -5926,9 +5935,31 @@
     .sheet-body .seccion-header { text-align:center; margin-bottom:26px; }
     .sheet-body .seccion-header .titulo-linea { margin:0 auto; }
     .sheet-body .seccion-header .seccion-desc { margin-left:auto; margin-right:auto; }
-    /* El título de sección se repite con el título de la hoja (ambos dicen lo
-       mismo, uno encima del otro). Se achica para que mande el de la hoja. */
+    /* Cuando la hoja apila VARIAS secciones (hoy sólo La Academia) el título de
+       cada una es lo único que las separa, así que se queda: nomás se achica
+       para no competir con el título de la hoja, que manda. */
     .sheet-body .seccion-titulo { font-size:clamp(1.15rem,2.4vw,1.5rem); }
+
+    /* ── UN SOLO TÍTULO POR HOJA ──
+       Si la hoja enseña UNA sección (o una pestaña a la vez), el nombre ya
+       viene dicho arriba —y con pestañas, dos veces: "📅 Calendario" y luego
+       "🗓️ Equipo"—. Repetirlo una tercera vez en el cuerpo no informa: sólo
+       empuja el contenido real hacia abajo. Se apaga el trío decorativo
+       (rótulo, título y rayita) y se conserva la descripción, que sí dice algo
+       que no está en ninguna otra parte (las reglas del juego).
+       El margen del encabezado se muda a la descripción a propósito: así, en
+       las secciones que no tienen descripción, el encabezado queda en CERO y
+       no deja un hueco de 26px defendiendo algo invisible. */
+    #sheet-host[data-solo] .sheet-body > .seccion > .seccion-header > .seccion-eyebrow,
+    #sheet-host[data-solo] .sheet-body > .seccion > .seccion-header > .seccion-titulo,
+    #sheet-host[data-solo] .sheet-body > .seccion > .seccion-header > .titulo-linea { display:none; }
+    #sheet-host[data-solo] .sheet-body > .seccion > .seccion-header { margin-bottom:0; }
+    /* Sin el título encima, la descripción es lo primero que se lee y puede
+       usar más ancho: a 480px las explicaciones largas caían en cuatro
+       renglones angostos justo antes del contenido. */
+    #sheet-host[data-solo] .sheet-body > .seccion > .seccion-header > .seccion-desc {
+      margin:0 auto 22px; max-width:600px;
+    }
     /* dentro de la hoja el acordeón queda SIEMPRE abierto (aunque el resize lo cierre) */
     .sheet-body > .colapsable > .seccion-header::after { display:none !important; }
     .sheet-body > .colapsable.cerrado > *:not(.seccion-header) { display:block !important; }
@@ -7095,6 +7126,10 @@
       <span class="seccion-eyebrow">1 ⭐ = 1 clase</span>
       <h2 class="seccion-titulo">Compra tus Estrellas</h2>
       <div class="titulo-linea"></div>
+      <!-- La regla del juego se decía en el rótulo de arriba y otra vez en la
+           nota del fondo. Aquí queda una sola vez y ANTES de los precios, que
+           es cuando sirve: se entiende qué se está comprando. -->
+      <p class="seccion-desc"><strong>1 ⭐ = 1 clase</strong>, el día y la hora que tú elijas. Entre más Estrellas compres, más barata te sale cada clase.</p>
     </div>
     <div id="paquetes-cards"></div>
   </section>
@@ -7317,7 +7352,9 @@
       <span class="seccion-eyebrow">Organiza tu semana</span>
       <h2 class="seccion-titulo">Horarios</h2>
       <div class="titulo-linea"></div>
-      <p class="seccion-desc">Lunes a Viernes. Toca las horas que quieras y apártalas con tus Estrellas: 1 ⭐ = 1 clase.</p>
+      <!-- Decía "Lunes a Viernes" y justo debajo la leyenda lo repite en cada
+           clase y la parrilla lo enseña en sus cinco columnas. -->
+      <p class="seccion-desc">Toca las horas que quieras y apártalas con tus Estrellas: <strong>1 ⭐ = 1 clase</strong>.</p>
     </div>
     <!-- LEYENDA · qué clase es cuál (para reservar sin dudas) -->
     <div class="clase-leyenda">
@@ -7439,7 +7476,10 @@
   <section id="seccion-mis-clases" class="seccion colapsable" data-en-hoja>
     <div class="seccion-header">
       <span class="seccion-eyebrow">Tu cuenta</span>
-      <h2 class="seccion-titulo">Mis Clases</h2>
+      <!-- Decía "Mis Clases". Desde que el Calendario tiene su pestaña
+           "🎟️ Mis clases", ese nombre aquí mandaba a la alumna al lugar
+           equivocado: esta hoja es su perfil, no su agenda. -->
+      <h2 class="seccion-titulo">Mi Perfil</h2>
       <div class="titulo-linea"></div>
     </div>
     <!-- PANEL DE PERFIL -->
@@ -7479,9 +7519,14 @@
         <h3 class="perfil-sub">👁️ Quién ve tu perfil</h3>
         <p class="admin-hint">Tú decides qué se muestra. Apaga «Aparecer en Buscar Perfil» para <strong>ocultarte por completo</strong> del directorio.</p>
         <div class="perfil-vis-toggles">
-          <label class="vis-toggle"><input type="checkbox" id="vis-perfilPublico" onchange="toggleVisibilidad('perfilPublico', this.checked)"> Aparecer en «Buscar Perfil» <span style="opacity:.55">(apágalo para ocultar tu perfil)</span></label>
-          <label class="vis-toggle"><input type="checkbox" id="vis-mostrarStats" onchange="toggleVisibilidad('mostrarStats', this.checked)"> Mostrar mis stats y títulos</label>
-          <label class="vis-toggle"><input type="checkbox" id="vis-mostrarSemblanza" onchange="toggleVisibilidad('mostrarSemblanza', this.checked)"> Mostrar mi semblanza docente</label>
+          <!-- Traía "(apágalo para ocultar tu perfil)" al lado, que es palabra
+               por palabra lo que ya dice la explicación de arriba. Además
+               `.vis-toggle` es un flex: ese span era un renglón APARTE del
+               texto, así que en el teléfono la fila se partía en dos columnas
+               y el check quedaba huérfano a la izquierda. -->
+          <label class="vis-toggle"><input type="checkbox" id="vis-perfilPublico" onchange="toggleVisibilidad('perfilPublico', this.checked)"> <span>Aparecer en «Buscar Perfil»</span></label>
+          <label class="vis-toggle"><input type="checkbox" id="vis-mostrarStats" onchange="toggleVisibilidad('mostrarStats', this.checked)"> <span>Mostrar mis stats y títulos</span></label>
+          <label class="vis-toggle"><input type="checkbox" id="vis-mostrarSemblanza" onchange="toggleVisibilidad('mostrarSemblanza', this.checked)"> <span>Mostrar mi semblanza docente</span></label>
         </div>
       </div>
 
@@ -7524,7 +7569,7 @@
       <details class="admin-acordeon perfil-acordeon" ontoggle="if(this.open){window.renderMisClasesSemana&&window.renderMisClasesSemana();}">
         <summary>📆 Mis clases y asistencias</summary>
         <div class="admin-acordeon-body">
-          <p class="admin-hint">Tus clases agrupadas por semana. Las que ya tomaste salen con <strong>✓</strong>. La <strong>semana viva</strong> se limpia sola cada lunes; las semanas pasadas quedan como historial.</p>
+          <p class="admin-hint">Agrupadas por semana; las que ya tomaste salen con <strong>✓</strong>. La semana en curso se limpia sola cada lunes y las anteriores quedan como historial.</p>
           <div id="mis-clases-semana" data-mis-clases><p style="opacity:.6;">Toca para cargar tus clases…</p></div>
         </div>
       </details>
@@ -7757,9 +7802,13 @@
       </details>
     </div><!-- /perfil-panel -->
 
+    <!-- Los dos botones del fondo llamaban a `abrirVista('academia')`: ninguno
+         llevaba a donde prometía. "Buscar Perfil" abría La Academia (que no
+         tiene buscador) y "Colaboradores" apuntaba a una sección que se sacó
+         del alcance. Ahora los dos van a algo que existe. -->
     <div class="comunidad-links">
-      <a href="#" class="btn-pildora" onclick="abrirVista('academia');return false;"><span class="btn-pildora-ico">🔎</span> Buscar Perfil</a>
-      <a href="#" class="btn-pildora" onclick="abrirVista('academia');return false;"><span class="btn-pildora-ico">🤝</span> Colaboradores</a>
+      <a href="#" class="btn-pildora" onclick="abrirVista('comunidad');return false;"><span class="btn-pildora-ico">🔎</span> Buscar Perfil</a>
+      <a href="#" class="btn-pildora" onclick="abrirVista('horarios');return false;"><span class="btn-pildora-ico">📅</span> Reservar clase</a>
     </div>
   </section>
 
@@ -7968,7 +8017,7 @@
       <span class="seccion-eyebrow">Agenda del equipo</span>
       <h2 class="seccion-titulo">Calendario de horarios</h2>
       <div class="titulo-linea"></div>
-      <p class="seccion-desc">Aquí ves las <strong>clases de la semana</strong> (parrilla base, en amarillo). Las instructoras y el staff además publican sus horas y disponibilidad. Una vez establecidas, las horas <strong>no se modifican</strong>: solo se cancelan.</p>
+      <p class="seccion-desc">La parrilla base va en amarillo; encima, el staff publica sus horas y disponibilidad. Una vez puestas, las horas <strong>no se editan</strong>: sólo se cancelan.</p>
     </div>
     <div class="cal-toolbar">
       <div class="cal-nav">
@@ -7996,7 +8045,7 @@
       <span class="seccion-eyebrow">Tu semana</span>
       <h2 class="seccion-titulo">Mis clases y asistencias</h2>
       <div class="titulo-linea"></div>
-      <p class="seccion-desc">Tus clases agrupadas por semana. Las que ya tomaste salen con <strong>✓</strong>. La <strong>semana viva</strong> se limpia sola cada lunes; las semanas pasadas quedan como historial.</p>
+      <p class="seccion-desc">Agrupadas por semana; las que ya tomaste salen con <strong>✓</strong>. La semana en curso se limpia sola cada lunes y las anteriores quedan como historial.</p>
     </div>
     <div data-mis-clases><p style="opacity:.6;">Cargando…</p></div>
   </section>
@@ -10121,6 +10170,12 @@
       if (host.classList.contains('abierto')) restaurar();
       titTx.textContent = v.titulo;
       titIc.textContent = v.icono || '';
+      // Se ve UNA sección a la vez: con pestañas siempre, y sin ellas cuando la
+      // vista sólo trae una. En ese caso el título de la hoja ya la nombra y el
+      // CSS apaga el título repetido de adentro. La Academia, que apila seis,
+      // no entra aquí: ahí cada título es lo único que separa una de otra.
+      if (v.pestanas || (v.secciones && v.secciones.length === 1)) host.dataset.solo = '1';
+      else delete host.dataset.solo;
       if (v.pestanas){
         montarPestanas(v, pestanaInicial);
       } else {
@@ -10141,6 +10196,7 @@
       host.setAttribute('aria-hidden','true');
       delete host.dataset.vista;
       delete host.dataset.pestana;
+      delete host.dataset.solo;
       document.body.style.overflow = '';
     };
 
@@ -10247,8 +10303,11 @@
       // El tope viene del bloque module (window.MAX_CREDITOS). Si por lo que sea
       // no cargó, se omite el rango en vez de inventar un número.
       const tope = window.MAX_CREDITOS;
+      // Dice para QUÉ sirve esta tarjeta, no la regla de precio: eso ya se lee
+      // arriba, antes de los cuatro paquetes, y repetirlo aquí abajo no
+      // resolvía la duda de "¿y si no necesito ninguno de esos cuatro?".
       libreSub.textContent = 'Tú eliges cuántas' + (tope ? ', de 1 a ' + tope : '') +
-        '. Entre más compras, más barata te sale cada clase.';
+        '. Para cuando necesitas 3, 12 o 17 y ningún paquete te cuadra.';
       libreInfo.appendChild(libreNom); libreInfo.appendChild(libreSub);
       const libreBtn = document.createElement('button');
       libreBtn.type = 'button'; libreBtn.className = 'paquete-btn';
@@ -10259,7 +10318,10 @@
 
       const nota = document.createElement('p');
       nota.className = 'paquetes-nota';
-      nota.textContent = 'Compras Estrellas y con ellas apartas: 1 ⭐ = 1 clase, el día y la hora que tú quieras. Vencen el día 2 del mes siguiente.';
+      // Sólo la letra chica: el "1 ⭐ = 1 clase" ya se dijo arriba, antes de los
+      // precios. Repetirlo aquí abajo hacía que la única condición que de
+      // verdad importa —la fecha en que vencen— se leyera como relleno.
+      nota.textContent = 'Letra chica: tus Estrellas vencen el día 2 del mes siguiente. Apartas de lunes a viernes, según el cupo de cada clase.';
       cont.appendChild(grid); cont.appendChild(nota);
       cont.dataset.listo = '1';
     }
