@@ -993,8 +993,12 @@
 
         // Zona de peligro (eliminar mi propia cuenta): todos MENOS el Dueño
         // (el super-admin se gestiona aparte y no debe autoeliminarse por error).
+        // Se esconde el desplegable completo, no sólo la tarjeta: es lo único
+        // que le queda dentro, así que al Dueño le abriría en vacío.
         const peligroCard = document.getElementById('perfil-peligro-card');
         if (peligroCard) peligroCard.style.display = esDueno(rank) ? 'none' : 'block';
+        const configCard = document.getElementById('perfil-config-card');
+        if (configCard) configCard.style.display = esDueno(rank) ? 'none' : '';
 
         // Panel de confirmación de pagos: staff de clase (Rank ≤ 2). Aquí el
         // staff verifica en Stripe y confirma la reserva (la pone 'activa').
@@ -5105,6 +5109,21 @@
     .perfil-vis-toggles { display:flex; flex-direction:column; gap:9px; margin-top:8px; }
     .vis-toggle { display:flex; align-items:center; gap:9px; font-size:.82rem;
       color:rgba(255,255,255,.8); cursor:pointer; }
+    /* Tarjeta de visibilidad suelta: vive fuera de los desplegables, entre la
+       identidad y el menú. Lleva un filo amarillo a la izquierda para que se
+       lea como un control tuyo y no como una sección más del menú. */
+    .perfil-vis-suelta {
+      margin:18px 0 4px; border-left:3px solid rgba(255,204,0,.55);
+    }
+    .perfil-vis-suelta .perfil-sub { margin:0 0 4px; }
+    .perfil-vis-suelta .admin-hint { margin:0 0 2px; }
+    @media (min-width:900px) {
+      /* En escritorio hay ancho de sobra: los 3 interruptores caben en fila y
+         así la tarjeta no empuja el menú del perfil hacia abajo. */
+      .perfil-vis-suelta .perfil-vis-toggles {
+        flex-direction:row; flex-wrap:wrap; gap:9px 22px;
+      }
+    }
     .vis-toggle input { width:16px; height:16px; accent-color:var(--amarillo); cursor:pointer; }
 
     /* ===== DIRECTORIO / COLABORADORES ===== */
@@ -5398,7 +5417,13 @@
        del perfil se ensancha (680 -> 1020px) porque si no, el riel se comería
        el ancho del contenido en vez de aprovecharlo. */
     @media (min-width:900px) {
-      [data-vista="perfil"] .sheet-card { width:min(1020px,94vw); }
+      /* El Calendario se ensancha igual que el Perfil, y por la misma razón
+         de fondo: adentro hay una REJILLA de días. La agenda del equipo tiene
+         7 columnas y a 680px la del viernes salía cortada. Se aplica a toda
+         la vista, no sólo a la pestaña Equipo, para que la hoja no cambie de
+         tamaño de un brinco al saltar de pestaña. */
+      [data-vista="perfil"] .sheet-card,
+      [data-vista="horarios"] .sheet-card { width:min(1020px,94vw); }
       .perfil-acordeon[open] {
         display:grid; grid-template-columns:230px minmax(0,1fr); align-items:start;
       }
@@ -5836,6 +5861,35 @@
       display:flex; align-items:center; justify-content:center; transition:.15s;
     }
     .sheet-close:hover { opacity:1; border-color:rgba(255,95,95,.5); color:#ff8a8a; }
+
+    /* ── PESTAÑAS de la hoja ──
+       Franja fija entre el encabezado y el cuerpo. En teléfono la fila se
+       desliza a lo ancho en vez de partirse en dos renglones: con dos
+       renglones el cuerpo brincaría de altura al cambiar de vista.
+       El `display:none` del atributo `hidden` lo pisa `.sheet-tabs`
+       (0,1,0 le gana a la regla del navegador), por eso se repite abajo. */
+    .sheet-tabs {
+      flex:0 0 auto; display:flex; gap:8px; align-items:center;
+      padding:10px clamp(14px, 4vw, 22px);
+      overflow-x:auto; scrollbar-width:none; -webkit-overflow-scrolling:touch;
+      border-bottom:1px solid rgba(255,255,255,.08);
+      background:rgba(0,0,0,.22);
+    }
+    .sheet-tabs::-webkit-scrollbar { display:none; }
+    .sheet-tabs[hidden] { display:none; }
+    .sheet-tab {
+      flex:0 0 auto; cursor:pointer; white-space:nowrap;
+      padding:8px 15px; border-radius:999px;
+      font-family:inherit; font-size:.88rem; letter-spacing:.3px;
+      background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.12);
+      color:var(--blanco); opacity:.72; transition:.15s;
+    }
+    .sheet-tab:hover { opacity:1; border-color:rgba(255,204,0,.4); }
+    .sheet-tab[aria-selected="true"] {
+      opacity:1; font-weight:600; color:#1a1000;
+      background:linear-gradient(135deg,#ffcc00,#e87400);
+      border-color:transparent; box-shadow:0 4px 14px rgba(232,116,0,.35);
+    }
     .sheet-body {
       flex:1 1 auto; overflow-y:auto; -webkit-overflow-scrolling:touch;
       /* El margen lateral CRECE con la hoja (18px en teléfono, hasta 30px en
@@ -5851,6 +5905,16 @@
       display:block !important; max-width:none !important;
     }
     .sheet-body > .seccion + .seccion { margin-top:34px !important; border-top:1px solid rgba(255,255,255,.07); padding-top:26px !important; }
+    /* La sección de la pestaña que NO está activa. Lleva !important porque la
+       regla de arriba impone `display:block !important` y un estilo en línea
+       no le gana; y la clase (0,3,1) le gana a (0,2,1) con ambos !important. */
+    .sheet-body > .seccion.pestana-oculta { display:none !important; }
+    /* Con pestañas sólo se ve UNA sección a la vez, pero `+ .seccion` mira el
+       ORDEN en el DOM, no lo que se ve: sin esto, las pestañas 2 y 3 salían
+       con una raya divisoria arriba y 34px de aire separándolas de nada. */
+    #sheet-host[data-pestana] .sheet-body > .seccion + .seccion {
+      margin-top:0 !important; padding-top:0 !important; border-top:none !important;
+    }
 
     /* ── Encabezados CENTRADOS dentro de las hojas ──
        En la página larga el encabezado va a la izquierda y funciona: hay 50px
@@ -5881,6 +5945,12 @@
       @keyframes sheetPop { from{transform:translateY(3%);opacity:.5} to{transform:translateY(0);opacity:1} }
       .sheet-card { animation:sheetPop .2s ease; }
       .sheet-body { padding-bottom:calc(26px + env(safe-area-inset-bottom,0px)); }
+      /* En un iPhone de 375px las tres pestañas se pasaban 15px y la última
+         quedaba mordida por el filo — parecía un error, no una invitación a
+         deslizar. Se aprieta el relleno para que las tres quepan enteras;
+         en pantallas aún más angostas el deslizamiento sigue ahí de red. */
+      .sheet-tabs { padding:9px 12px; gap:7px; }
+      .sheet-tab  { padding:8px 12px; font-size:.84rem; }
     }
 
     /* --- Tarjetas de PAQUETES (mensualidades) dentro de su hoja --- */
@@ -6811,12 +6881,12 @@
         <span class="sb-ico">💛</span><span class="sb-txt">Labor Social</span>
       </button>
 
-      <!-- Sólo staff de clase (rank ≤ 2). Se revela desde el bloque de
-           visibilidad por rank; por omisión va oculto. -->
-      <p class="sidebar-grupo sb-solo-staff" style="display:none;">Staff</p>
-      <button type="button" class="sb-item sb-solo-staff" data-vista="calendario" style="display:none;">
-        <span class="sb-ico">🗓️</span><span class="sb-txt">Calendario de Clases</span>
-      </button>
+      <!-- Aquí vivía el grupo "Staff" con su acceso a "Calendario de Clases".
+           Se retiró en #67: ese calendario ya no es una vista aparte, es la
+           pestaña "Equipo" dentro de 📅 Reservar. Mantener las dos puertas
+           era justo el problema que se vino a resolver. El filtro por rank
+           ahora lo hace la pestaña sola (`rankMax`), no la clase
+           .sb-solo-staff — que se deja definida por si vuelve a hacer falta. -->
     </div>
   </nav>
   <div id="nav-overlay" class="nav-overlay" aria-hidden="true"></div>
@@ -7007,6 +7077,12 @@
         <h2 class="sheet-title" id="sheet-title"><span class="sheet-ico"></span><span class="sheet-title-txt">—</span></h2>
         <button type="button" class="sheet-close" data-sheet-cerrar aria-label="Cerrar">✕</button>
       </div>
+      <!-- BARRA DE PESTAÑAS · vive FUERA de .sheet-body a propósito: el cuerpo
+           es lo que scrollea, y si las pestañas fueran parte de él se irían
+           hacia arriba al bajar. Aquí quedan fijas debajo del título. Nace
+           vacía y oculta: sólo la llena abrirVista() en las vistas que
+           declaran `pestanas` (hoy únicamente el Calendario). -->
+      <div class="sheet-tabs" id="sheet-tabs" role="tablist" hidden></div>
       <div class="sheet-body" id="sheet-body"></div>
     </div>
   </div>
@@ -7395,6 +7471,20 @@
         </div>
       </div>
 
+      <!-- VISIBILIDAD · SUELTA A PROPÓSITO (no va dentro de un desplegable).
+           Todo lo demás del perfil se pliega, esto no: son los interruptores
+           que deciden quién te ve, y no se debe tener que escarbar para saber
+           si estás expuesta. Antes vivía escondida dentro de ⚙️ Configuración. -->
+      <div id="perfil-visibilidad-card" class="perfil-rol-card perfil-vis-suelta">
+        <h3 class="perfil-sub">👁️ Quién ve tu perfil</h3>
+        <p class="admin-hint">Tú decides qué se muestra. Apaga «Aparecer en Buscar Perfil» para <strong>ocultarte por completo</strong> del directorio.</p>
+        <div class="perfil-vis-toggles">
+          <label class="vis-toggle"><input type="checkbox" id="vis-perfilPublico" onchange="toggleVisibilidad('perfilPublico', this.checked)"> Aparecer en «Buscar Perfil» <span style="opacity:.55">(apágalo para ocultar tu perfil)</span></label>
+          <label class="vis-toggle"><input type="checkbox" id="vis-mostrarStats" onchange="toggleVisibilidad('mostrarStats', this.checked)"> Mostrar mis stats y títulos</label>
+          <label class="vis-toggle"><input type="checkbox" id="vis-mostrarSemblanza" onchange="toggleVisibilidad('mostrarSemblanza', this.checked)"> Mostrar mi semblanza docente</label>
+        </div>
+      </div>
+
       <!-- ══ MENÚ DE TARJETAS DEL PERFIL (estilo Equilibrium) ══
            Cada opción es una tarjeta desplegable del MISMO tono que el popup;
            1 grid por tarjeta. La identidad (arriba) queda siempre visible. -->
@@ -7435,7 +7525,7 @@
         <summary>📆 Mis clases y asistencias</summary>
         <div class="admin-acordeon-body">
           <p class="admin-hint">Tus clases agrupadas por semana. Las que ya tomaste salen con <strong>✓</strong>. La <strong>semana viva</strong> se limpia sola cada lunes; las semanas pasadas quedan como historial.</p>
-          <div id="mis-clases-semana"><p style="opacity:.6;">Toca para cargar tus clases…</p></div>
+          <div id="mis-clases-semana" data-mis-clases><p style="opacity:.6;">Toca para cargar tus clases…</p></div>
         </div>
       </details>
 
@@ -7466,21 +7556,13 @@
         </div>
       </details>
 
-      <!-- 4 · CONFIGURACIÓN · visibilidad + eliminar cuenta -->
-      <details class="admin-acordeon perfil-acordeon">
+      <!-- 4 · CONFIGURACIÓN · sólo la zona de peligro. La visibilidad se salió
+           de aquí y vive suelta arriba. Como lo único que queda dentro se
+           esconde para el Dueño, el desplegable ENTERO se oculta con él: si no,
+           al Dueño le quedaría un "⚙️ Configuración" que abre en vacío. -->
+      <details class="admin-acordeon perfil-acordeon" id="perfil-config-card">
         <summary>⚙️ Configuración</summary>
         <div class="admin-acordeon-body">
-          <!-- VISIBILIDAD DEL PERFIL (todos) -->
-          <div id="perfil-visibilidad-card" class="perfil-rol-card">
-            <h3 class="perfil-sub">👁️ Visibilidad de tu perfil</h3>
-            <p class="admin-hint">Tú decides qué se muestra. Desactiva «Aparecer en Buscar Perfil» para <strong>ocultar tu perfil por completo</strong> del directorio (útil si tienes una cuenta de dueño y prefieres aparecer solo con otra cuenta de instructor).</p>
-            <div class="perfil-vis-toggles">
-              <label class="vis-toggle"><input type="checkbox" id="vis-perfilPublico" onchange="toggleVisibilidad('perfilPublico', this.checked)"> Aparecer en «Buscar Perfil» <span style="opacity:.55">(apágalo para ocultar tu perfil)</span></label>
-              <label class="vis-toggle"><input type="checkbox" id="vis-mostrarStats" onchange="toggleVisibilidad('mostrarStats', this.checked)"> Mostrar mis stats y títulos</label>
-              <label class="vis-toggle"><input type="checkbox" id="vis-mostrarSemblanza" onchange="toggleVisibilidad('mostrarSemblanza', this.checked)"> Mostrar mi semblanza docente</label>
-            </div>
-          </div>
-
           <!-- ZONA DE PELIGRO · eliminar mi propia cuenta (todos menos el Dueño).
                Botón pequeño + confirmación extra "¿Estás seguro?" a propósito. -->
           <div id="perfil-peligro-card" class="perfil-rol-card perfil-peligro" style="display:none;">
@@ -7902,6 +7984,21 @@
     </div>
     <div id="cal-grid" class="cal-grid"></div>
     <p class="cal-pie">Tip: navega a la semana que quieras y agrega tu horario ahí. Elige “solo esta semana” o “todo el mes”.</p>
+  </section>
+
+  <!-- MIS CLASES · pestaña del Calendario. Es EXACTAMENTE la misma lista que
+       vive plegada en el perfil: no se duplicó el código que la arma, sólo el
+       sitio donde se pinta. renderMisClasesSemana escribe en TODOS los
+       [data-mis-clases] a la vez, así que las dos copias no se pueden
+       desincronizar (era el riesgo real de tener la lista en dos lados). -->
+  <section id="mis-clases-view" class="seccion" style="display:none;" data-nav-skip="true">
+    <div class="seccion-header">
+      <span class="seccion-eyebrow">Tu semana</span>
+      <h2 class="seccion-titulo">Mis clases y asistencias</h2>
+      <div class="titulo-linea"></div>
+      <p class="seccion-desc">Tus clases agrupadas por semana. Las que ya tomaste salen con <strong>✓</strong>. La <strong>semana viva</strong> se limpia sola cada lunes; las semanas pasadas quedan como historial.</p>
+    </div>
+    <div data-mis-clases><p style="opacity:.6;">Cargando…</p></div>
   </section>
 
   <!-- VIDEOS — oculto hasta tener contenido real -->
@@ -8419,11 +8516,15 @@
     return null;
   }
   window.renderMisClasesSemana = async function () {
-    const cont = document.getElementById('mis-clases-semana');
-    if (!cont) return;
+    // La lista vive en DOS lugares: plegada en el perfil y como pestaña del
+    // Calendario. Se pintan las dos de una sola pasada (una consulta, N
+    // destinos) para que no puedan mostrar cosas distintas.
+    const destinos = Array.from(document.querySelectorAll('[data-mis-clases]'));
+    if (!destinos.length) return;
+    const pintar = html => destinos.forEach(c => { c.innerHTML = html; });
     const u = window.usuarioActual;
-    if (!u) { cont.innerHTML = '<p style="opacity:.6;">Inicia sesión para ver tus clases.</p>'; return; }
-    cont.innerHTML = '<p style="opacity:.6;">Cargando…</p>';
+    if (!u) { pintar('<p style="opacity:.6;">Inicia sesión para ver tus clases.</p>'); return; }
+    pintar('<p style="opacity:.6;">Cargando…</p>');
     let data = { apartados: [], asistidos: [] };
     try { data = (await window.cargarMisSlots(u.uid)) || data; } catch (e) { console.warn('misClasesSemana:', e); }
     const asistidos = new Set(data.asistidos || []);
@@ -8434,9 +8535,9 @@
       (porSemana[info.week] = porSemana[info.week] || []).push({ label: info.label, asistio: asistidos.has(sid), orden: info.orden });
     });
     const weeks = Object.keys(porSemana).sort().reverse();  // más reciente primero
-    if (!weeks.length) { cont.innerHTML = '<p style="opacity:.6;">Aún no tienes clases apartadas. Ve a <strong>Horarios</strong> para reservar.</p>'; return; }
+    if (!weeks.length) { pintar('<p style="opacity:.6;">Aún no tienes clases apartadas. Ve a la pestaña <strong>Reservar</strong> para apartar la tuya.</p>'); return; }
     const wkActual = window.weekKeyActual ? window.weekKeyActual() : null;
-    cont.innerHTML = weeks.map(wk => {
+    pintar(weeks.map(wk => {
       const items = porSemana[wk].sort((a, b) => a.orden - b.orden);
       const esActual = wk === wkActual;
       return `<div class="semana-grupo${esActual ? ' actual' : ''}">
@@ -8444,7 +8545,7 @@
         <div class="semana-grupo-grid">${items.map(it =>
           `<span class="semana-chip${it.asistio ? ' asistio' : ''}">${it.label}${it.asistio ? ' ✓' : ''}</span>`).join('')}</div>
       </div>`;
-    }).join('');
+    }).join(''));
   };
 
   // ── FECHA EXACTA PARA CLASE SUELTA (#45) + TOPE POR FECHA (#46) ─────────
@@ -9818,7 +9919,9 @@
           return;
         }
         const vista = btn.dataset.vista;
-        if (vista && window.abrirVista) window.abrirVista(vista);
+        // `data-pestana` es opcional: deja que un acceso del sidebar aterrice
+        // en una pestaña concreta de la vista, no siempre en la primera.
+        if (vista && window.abrirVista) window.abrirVista(vista, btn.dataset.pestana);
       });
     });
 
@@ -9851,6 +9954,7 @@
     const host = document.getElementById('sheet-host');
     if (!host) return;
     const body  = document.getElementById('sheet-body');
+    const barra = document.getElementById('sheet-tabs');
     const titTx = host.querySelector('.sheet-title-txt');
     const titIc = host.querySelector('.sheet-ico');
 
@@ -9863,8 +9967,33 @@
     // Equipo y Colaboradores se retiran de la navegación por decisión de
     // producto — su HTML queda DORMIDO (no se borró), así que devolverlos
     // es solamente volver a listarlos aquí.
+    // Una vista se declara de una de dos formas:
+    //   secciones: [...]  → todas se apilan en el cuerpo, una debajo de otra.
+    //   pestanas:  [...]  → cada una es una sección aparte y sólo se ve la
+    //                       activa; la barra de pestañas se arma sola.
+    // Nunca las dos: `pestanas` manda si están ambas.
     const VISTAS = {
-      horarios:  { titulo:'Reservar',            icono:'📅', secciones:['horarios'], onOpen:()=>window.actualizarBannerReservar&&window.actualizarBannerReservar() },
+      // CALENDARIO UNIFICADO (#67). Antes eran DOS entradas separadas
+      // ("Reservar" y "Calendario de Clases", esta última sólo en el sidebar
+      // y sólo para staff) más la lista de "Mis clases" enterrada en el
+      // perfil: tres calendarios distintos en tres lugares distintos.
+      // Ahora es UNA puerta con tres pestañas. La llave sigue siendo
+      // 'horarios' a propósito: agendarPrueba(), los mosaicos y el sidebar ya
+      // apuntan ahí, así que unificar no rompió ningún acceso existente.
+      horarios:  {
+        titulo:'Calendario', icono:'📅',
+        pestanas:[
+          { id:'reservar', etiqueta:'📅 Reservar',   seccion:'horarios',        onOpen:()=>window.actualizarBannerReservar&&window.actualizarBannerReservar() },
+          { id:'mias',     etiqueta:'🎟️ Mis clases', seccion:'mis-clases-view', necesitaSesion:true, onOpen:()=>window.renderMisClasesSemana&&window.renderMisClasesSemana() },
+          // Agenda de horas del equipo. Se abre para rank ≤ 3 (asistente
+          // incluido) porque el botón "+ Agregar horario" que vive dentro ya
+          // se muestra con ese mismo criterio: con el corte anterior (≤ 2) la
+          // asistente tenía permiso de agendar y ningún camino para llegar.
+          // `unaVez` porque calIniciar() reancla en la semana de HOY: sin él,
+          // volver a esta pestaña te tiraría de la semana que navegaste.
+          { id:'equipo',   etiqueta:'🗓️ Equipo',     seccion:'calendario',      rankMax:3, unaVez:true, onOpen:()=>window.calIniciar&&window.calIniciar() },
+        ]
+      },
       estrellas: { titulo:'Estrellas & Planes',  icono:'⭐', secciones:['paquetes-view'], onOpen:pintarPaquetes },
       perfil:    { titulo:'Mi Perfil',           icono:'🪽', secciones:['seccion-mis-clases'], necesitaSesion:true },
       // 'contacto' iba PRIMERO: lo primero que veías al entrar a La Academia era
@@ -9874,17 +10003,19 @@
       academia:  { titulo:'La Academia',         icono:'🎪', secciones:['noticias','proximos-eventos','eventos-pasados','galeria-seccion','reglas','contacto'] },
       comunidad: { titulo:'Comunidad',           icono:'🫂', secciones:['comunidad'], necesitaSesion:true, onOpen:()=>window.buscarPerfiles&&window.buscarPerfiles() },
       labor:     { titulo:'Labor Social',        icono:'💛', secciones:['labor-social'] },
-      // Calendario de horas del STAFF. Antes se pintaba suelto en el home y
-      // se sentía como "un segundo calendario"; ahora tiene su propia entrada
-      // (visible sólo para staff). Fusionarlo con Reservar en pestañas es la
-      // tarea #67 — hasta entonces, aquí conserva su acceso.
-      calendario:{ titulo:'Calendario de Clases', icono:'🗓️', secciones:['calendario'], necesitaSesion:true, onOpen:()=>window.calIniciar&&window.calIniciar() },
       aprende:   { titulo:'Aprende con Nosotros', icono:'🎬', secciones:['videos'], necesitaSesion:true, onOpen:()=>window.renderVideosAprende&&window.renderVideosAprende() },
+      // 'calendario' YA NO existe como vista propia: se volvió la pestaña
+      // "Equipo" de 'horarios' (#67). Se deja este alias para que cualquier
+      // enlace viejo o marcador que todavía diga `calendario` caiga en la
+      // pestaña correcta en vez de no hacer absolutamente nada.
+      calendario:{ alias:'horarios', pestana:'equipo' },
     };
 
-    let abiertos = [];   // [{ nodo, marcador, displayPrevio }]
+    let abiertos = [];             // [{ nodo, marcador, displayPrevio }]
+    let pestanasVivas = [];        // las que de verdad se pintaron (ya filtradas)
+    let yaAbiertas = new Set();    // ids cuyo onOpen ya corrió en esta apertura
 
-    function moverAlSheet(id){
+    function moverAlSheet(id, visible){
       const nodo = document.getElementById(id);
       if (!nodo) return;
       const marcador = document.createComment('sheet-slot:'+id);
@@ -9892,6 +10023,12 @@
       const displayPrevio = nodo.style.display;
       body.appendChild(nodo);
       nodo.style.display = 'block';
+      // Ocultar por CLASE, no por style.display: la hoja tiene un
+      // `.sheet-body > .seccion { display:block !important }` que le gana a
+      // cualquier estilo en línea, así que un display:none aquí no serviría
+      // de nada. Las secciones inactivas viajan al cuerpo desde el principio
+      // (conservan estado y marcador de regreso) pero nacen ocultas.
+      nodo.classList.toggle('pestana-oculta', visible === false);
       nodo.classList.remove('cerrado');
       if (window._abrirColapsable) window._abrirColapsable(id);
       abiertos.push({ nodo, marcador, displayPrevio });
@@ -9901,15 +10038,82 @@
       abiertos.forEach(({ nodo, marcador, displayPrevio }) => {
         if (marcador.parentNode) marcador.parentNode.insertBefore(nodo, marcador);
         nodo.style.display = displayPrevio;
+        nodo.classList.remove('pestana-oculta');
         if (marcador.parentNode) marcador.parentNode.removeChild(marcador);
       });
       abiertos = [];
       if (body) body.scrollTop = 0;
+      if (barra){ barra.innerHTML = ''; barra.hidden = true; }
+      pestanasVivas = [];
+      yaAbiertas = new Set();
     }
 
-    window.abrirVista = function(key){
-      const v = VISTAS[key];
+    // ── PESTAÑAS ────────────────────────────────────────────────────────────
+    // Una pestaña se filtra ANTES de pintarse, no se pinta deshabilitada: una
+    // pestaña gris que no puedes tocar sólo informa de lo que te falta.
+    function pestanaPermitida(p){
+      if (p.necesitaSesion && !window.usuarioActual) return false;
+      if (p.rankMax != null){
+        const r = window._miRank;
+        if (r == null || r > p.rankMax) return false;
+      }
+      return true;
+    }
+
+    function activarPestana(id){
+      const p = pestanasVivas.find(x => x.id === id);
+      if (!p) return;
+      pestanasVivas.forEach(x => {
+        const nodo = document.getElementById(x.seccion);
+        if (nodo) nodo.classList.toggle('pestana-oculta', x !== p);
+      });
+      if (barra) barra.querySelectorAll('.sheet-tab').forEach(b =>
+        b.setAttribute('aria-selected', String(b.dataset.tab === id)));
+      // `unaVez` protege a la agenda del equipo: su onOpen reancla la semana.
+      if (typeof p.onOpen === 'function' && !(p.unaVez && yaAbiertas.has(id))){
+        try { p.onOpen(); } catch(e){ console.warn('pestaña onOpen', e); }
+      }
+      yaAbiertas.add(id);
+      body.scrollTop = 0;
+      host.dataset.pestana = id;
+    }
+
+    function montarPestanas(v, inicial){
+      pestanasVivas = v.pestanas.filter(pestanaPermitida);
+      if (!pestanasVivas.length) return false;
+      const activa = pestanasVivas.some(p => p.id === inicial) ? inicial : pestanasVivas[0].id;
+      // Se mueven TODAS al cuerpo (ocultas menos la activa) en vez de moverlas
+      // al tocar cada pestaña: así el cambio de pestaña es instantáneo y no
+      // hay que rehacer el baile de marcadores en cada toque.
+      pestanasVivas.forEach(p => moverAlSheet(p.seccion, p.id === activa));
+      // Una sola pestaña no es una elección: sería un adorno que ocupa espacio.
+      if (pestanasVivas.length > 1){
+        barra.innerHTML = pestanasVivas.map(p =>
+          `<button type="button" class="sheet-tab" role="tab" data-tab="${p.id}" aria-selected="false">${p.etiqueta}</button>`
+        ).join('');
+        barra.hidden = false;
+      }
+      activarPestana(activa);
+      return true;
+    }
+
+    // Delegado: los botones se crean y destruyen en cada apertura, así que el
+    // oyente vive en la barra (que sí es permanente) y no en cada botón.
+    if (barra) barra.addEventListener('click', e => {
+      const btn = e.target.closest('.sheet-tab');
+      if (btn) activarPestana(btn.dataset.tab);
+    });
+
+    window.abrirVista = function(key, pestanaInicial){
+      let v = VISTAS[key];
       if (!v) return;
+      // Alias: entradas viejas que apuntan a una vista que se fusionó.
+      if (v.alias){
+        pestanaInicial = pestanaInicial || v.pestana;
+        key = v.alias;
+        v = VISTAS[key];
+        if (!v) return;
+      }
       if (v.necesitaSesion && !window.usuarioActual){
         if (window.abrirLoginModal) window.abrirLoginModal('login');
         return;
@@ -9917,8 +10121,13 @@
       if (host.classList.contains('abierto')) restaurar();
       titTx.textContent = v.titulo;
       titIc.textContent = v.icono || '';
-      v.secciones.forEach(moverAlSheet);
-      if (typeof v.onOpen === 'function'){ try { v.onOpen(); } catch(e){ console.warn('vista onOpen',e); } }
+      if (v.pestanas){
+        montarPestanas(v, pestanaInicial);
+      } else {
+        delete host.dataset.pestana;
+        v.secciones.forEach(id => moverAlSheet(id));
+        if (typeof v.onOpen === 'function'){ try { v.onOpen(); } catch(e){ console.warn('vista onOpen',e); } }
+      }
       host.classList.add('abierto');
       host.setAttribute('aria-hidden','false');
       host.dataset.vista = key;
@@ -9931,6 +10140,7 @@
       host.classList.remove('abierto');
       host.setAttribute('aria-hidden','true');
       delete host.dataset.vista;
+      delete host.dataset.pestana;
       document.body.style.overflow = '';
     };
 
