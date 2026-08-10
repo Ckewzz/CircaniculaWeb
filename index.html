@@ -2852,7 +2852,6 @@
     // publica el staff (el input usa 24h: "19:00"). Así, si una Miss se agenda a la
     // misma franja de una clase, se UNE a esa clase en vez de salir en bloque aparte.
     const HORARIO_FIJO = [
-      { ini:'8:00', fin:'10:00', min:[8*60,      10*60], tipos:['open','open','open','open','open'] },
       { ini:'5:30', fin:'7:00',  min:[17*60+30,  19*60], tipos:['kids','kids','kids','kids','kids'] },
       { ini:'7:00', fin:'8:00',  min:[19*60,     20*60], tipos:['flow','flex','flow','flex','flow'] },
       { ini:'8:00', fin:'9:00',  min:[20*60,     21*60], tipos:['fit', 'aro', 'fit', 'aro', 'fit' ] },
@@ -7360,7 +7359,6 @@
     <div class="clase-leyenda">
       <p class="clase-leyenda-tit">¿Qué clase es cuál?</p>
       <div class="clase-leyenda-grid">
-        <span class="clase-chip"><b>Open Gym</b> Lun–Vie · 8–10 am</span>
         <span class="clase-chip"><b>Kids</b> Lun–Vie · 5:30–7 pm</span>
         <span class="clase-chip"><b>Telas</b> L·Mi·V · 7–9 pm</span>
         <span class="clase-chip"><b>Flex</b> Mar & Jue · 7–8 pm</span>
@@ -7419,7 +7417,6 @@
       </table>
     </div>
     <div class="horario-leyenda">
-      <div class="leyenda-item"><div class="leyenda-dot" style="background:#4fd1c5;opacity:.7"></div>Open Gym (8–10 am)</div>
       <div class="leyenda-item"><div class="leyenda-dot" style="background:#e87400;opacity:.7"></div>Kids (5:30–7 pm)</div>
       <div class="leyenda-item"><div class="leyenda-dot" style="background:var(--amarillo);opacity:.7"></div>Telas (7–9 pm · L·Mi·V)</div>
       <div class="leyenda-item"><div class="leyenda-dot" style="background:#80d8ff;opacity:.7"></div>Flex (7–8 pm · Mar & Jue)</div>
@@ -8249,15 +8246,18 @@
     }, 4200 + fi * 900);
   });
 
-  /* LANDING SHOWCASE · parrilla MUESTRA (solo lectura) construida desde el
-     mismo horarioBase que usa la app. Colores alineados con la leyenda. */
+  /* LANDING SHOWCASE · parrilla MUESTRA (solo lectura) para el visitante.
+     ⚠️ NO se construye desde horarioBase: es una COPIA a mano. No puede leerlo
+     porque este bloque corre antes de que horarioBase se declare (más abajo en
+     este mismo script), y un `const` antes de su línea truena. Si cambia el
+     horario, se cambian LAS DOS —si no, la portada anuncia clases que ya no
+     existen y nadie se entera hasta que alguien viene a preguntar por ellas. */
   (function renderMuestra(){
     const body = document.getElementById('muestra-body');
     if (!body) return;
     const COL = { open:'#4fd1c5', kids:'#e87400', flow:'#ffcc00', fit:'#ffcc00', flex:'#80d8ff', aro:'#d8a0ff' };
     const NOM = { kids:'Kids', flow:'Telas', fit:'Telas', flex:'Flex', aro:'Aro', open:'Open Gym' };
     const base = [
-      ['8:00 – 10:00', 'open', 'open',  'open', 'open',  'open' ],
       ['5:30 – 7:00',  'kids', 'kids',  'kids', 'kids',  'kids' ],
       ['7:00 – 8:00',  'flow', 'flex',  'flow', 'flex',  'flow' ],
       ['8:00 – 9:00',  'fit',  'aro',   'fit',  'aro',   'fit'  ],
@@ -8346,8 +8346,11 @@
   /* HORARIO */
   // Horario real Circanícula — Lun-Vie
   // Columnas: Lunes, Martes, Miércoles, Jueves, Viernes
+  // Open Gym (8–10 a.m., Lun–Vie) salió del horario el 8-ago: dejó de tener
+  // alumnas. Se quita de la parrilla —que es lo que se puede reservar— pero NO
+  // de las tablas que DECODIFICAN slots viejos (HORA_INICIO_24H, claseNombres):
+  // esas leen reservas que ya existen, no ofrecen clases.
   const horarioBase = [
-    ['8:00 – 10:00', 'open', 'open',  'open', 'open',  'open' ],
     ['5:30 – 7:00',  'kids', 'kids',  'kids', 'kids',  'kids' ],
     ['7:00 – 8:00',  'flow', 'flex',  'flow', 'flex',  'flow' ],
     ['8:00 – 9:00',  'fit',  'aro',   'fit',  'aro',   'fit'  ],
@@ -8418,9 +8421,16 @@
      "8:00 – 9:00" es de la NOCHE. Un `parseInt` ingenuo pondría el Open Gym y la
      clase de Telas a la misma hora, y la devolución de la Estrella se calcularía
      con 12 horas de error. Por eso la hora real vive en una tabla explícita.
-     ⚠️ Si algún día cambia `horarioBase`, ESTA tabla se cambia con él. */
+     ⚠️ Esta tabla sólo CRECE. No es la parrilla de lo que se puede reservar
+     (eso es `horarioBase`): es el diccionario que le pone hora real a un slotId
+     que YA existe en Firestore. Quitar de aquí una hora que se sacó del horario
+     deja sin fechar las reservas viejas de esa hora, y sin fecha no se puede
+     saber si una cancelación llegó a tiempo: el backend resuelve a favor de la
+     alumna, así que el error sale gratis para ella y caro para la academia. */
   const HORA_INICIO_24H = {
-    '8-10': [8, 0],     // Open Gym — la única de la mañana
+    // Open Gym: fuera del horario desde el 8-ago. Se queda para leer sus
+    // reservas anteriores. GEMELA en server.js — no se toca ninguna de las dos.
+    '8-10': [8, 0],
     '5-7' : [17, 30],   // Kids (5:30 pm)
     '7-8' : [19, 0],
     '8-9' : [20, 0],
@@ -8537,9 +8547,15 @@
     const i = horarioBase.findIndex(r => slotIdDe(1, r[0]).split('_')[1] === horaCompact);
     return i < 0 ? 99 : i;
   }
+  // Clases que YA NO se dan, por hora comprimida. Sacar una clase del horario no
+  // debe reescribir el pasado: quien sí fue a Open Gym tiene esa clase en su
+  // historial de "Mis clases", y sin esta tabla se le degradaba a "Clase" a secas
+  // —el nombre se buscaba en la parrilla, y la fila ya no existe—. Aquí se
+  // apunta la que se retire, con el tipo que tenía.
+  const CLASES_RETIRADAS = { '8-10': 'open' };   // Open Gym, retirado el 8-ago
   function _tipoDe(dia, horaCompact) {
     const row = horarioBase.find(r => slotIdDe(1, r[0]).split('_')[1] === horaCompact);
-    return row ? row[dia] : null;
+    return row ? row[dia] : (CLASES_RETIRADAS[horaCompact] || null);
   }
   function _horaLbl(horaCompact) { return String(horaCompact).replace('-', '–'); }
   function _rangoSemanaLbl(wk) {
@@ -9141,17 +9157,19 @@
   //  DUEÑO/ADMIN: cerrar y reabrir clases (vacaciones o una clase suelta)
   // ══════════════════════════════════════════════════════════════════════
 
-  // Las 4 horas del horario, como opciones legibles. Se derivan de horarioBase
+  // Las horas del horario, como opciones legibles. Se derivan de horarioBase
   // para que si algún día cambia el horario, esta lista cambie sola.
   function _horasDelHorario() {
     return horarioBase.map(row => {
       const compacta = slotIdDe(1, row[0]).split('_')[1];
-      // ⚠️ EL a.m./p.m. NO ES ADORNO. En el horario hay DOS clases que empiezan
-      // "a las 8": Open Gym a las 8 de la MAÑANA y Telas/Aro a las 8 de la NOCHE.
-      // Escritas como en horarioBase ("8:00 – 10:00" y "8:00 – 9:00") se parecen
-      // demasiado, y aquí equivocarse no es un typo: cancela clases de gente real
-      // y le devuelve Estrellas. El sufijo sale de HORA_INICIO_24H, que es la
-      // misma tabla con la que el backend fecha las clases: no se puede desfasar.
+      // ⚠️ EL a.m./p.m. NO ES ADORNO, y se queda aunque hoy no haga falta.
+      // Mientras existió Open Gym había DOS clases que empezaban "a las 8"
+      // ("8:00 – 10:00" de la mañana y "8:00 – 9:00" de la noche) y elegir la
+      // equivocada aquí no es un typo: cancela clases de gente real y le
+      // devuelve Estrellas. Al salir Open Gym el choque desapareció, pero
+      // vuelve solo el día que se agregue cualquier clase matutina. El sufijo
+      // sale de HORA_INICIO_24H, la misma tabla con la que el backend fecha las
+      // clases: no se puede desfasar.
       const hm = HORA_INICIO_24H[compacta];
       const sufijo = hm ? (hm[0] < 12 ? ' a.m.' : ' p.m.') : '';
       const texto = row[0] + sufijo;
