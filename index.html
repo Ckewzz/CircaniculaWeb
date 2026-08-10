@@ -5983,6 +5983,92 @@
       .sheet-tab  { padding:8px 12px; font-size:.84rem; }
     }
 
+    /* ══ RECORRIDO GUIADO (tour) ══════════════════════════════════════════
+       Reflector + globo que acompaña la PRIMERA reserva. Vive a nivel de
+       <body>, NO dentro de la hoja: si viviera adentro heredaría el recorte
+       de `.sheet-body` (overflow-y:auto) y el globo se cortaría al filo, y
+       además chocaría con `.sheet-body > .seccion { display:block !important }`.
+       Z-INDEX 4600, elegido para caer en un hueco concreto:
+         320  sidebar   ·  4200 hoja  ·  4600 TOUR
+         5000 uiAlert/uiConfirm       ·  9500 modal de nombre
+       Arriba de la hoja (si no, el reflector quedaría por debajo de lo que
+       está señalando) y ABAJO de los diálogos (si sale un aviso a media
+       explicación, tiene que verse encima, no atrás). */
+    .tour-bg {
+      position:fixed; inset:0; z-index:4600; display:none;
+    }
+    .tour-bg.on { display:block; }
+    /* El reflector NO es una imagen con un hoyo: es una caja transparente con
+       una sombra de 9999px, así que "lo oscuro" es el resto de la pantalla y
+       el hueco siempre calza exacto con lo que se está señalando, sin importar
+       su tamaño. Una sola caja en vez de cuatro paneles alrededor. */
+    .tour-foco {
+      position:absolute; border-radius:14px; pointer-events:none;
+      box-shadow:0 0 0 9999px rgba(0,0,0,.76), var(--brillo);
+      border:2px solid var(--naranja-claro);
+      transition:top .28s cubic-bezier(.22,.9,.28,1), left .28s cubic-bezier(.22,.9,.28,1),
+                 width .28s cubic-bezier(.22,.9,.28,1), height .28s cubic-bezier(.22,.9,.28,1);
+    }
+    .tour-caja {
+      position:absolute; width:min(330px, calc(100vw - 24px));
+      background:linear-gradient(165deg,#1f1a12,#0d0d0d);
+      border:1px solid rgba(255,204,0,.34); border-radius:16px;
+      padding:16px 17px 14px; box-shadow:0 22px 60px rgba(0,0,0,.8);
+      animation:tourEntra .2s ease;
+    }
+    @keyframes tourEntra { from{opacity:0; transform:translateY(6px)} to{opacity:1; transform:translateY(0)} }
+    .tour-paso {
+      display:block; font-size:.72rem; letter-spacing:1.4px; text-transform:uppercase;
+      color:var(--naranja-claro); font-weight:700; margin-bottom:7px;
+    }
+    .tour-tit {
+      margin:0 0 6px; font-family:'Cinzel',serif; color:var(--amarillo);
+      font-size:1rem; letter-spacing:.4px; line-height:1.3;
+    }
+    .tour-txt { margin:0; color:rgba(255,255,255,.82); font-size:.85rem; line-height:1.5; }
+    .tour-txt strong { color:#fff; }
+    .tour-btns { display:flex; align-items:center; gap:9px; margin-top:14px; }
+    .tour-saltar {
+      background:none; border:none; cursor:pointer; padding:8px 2px;
+      color:rgba(255,255,255,.62); font-size:.76rem; font-family:inherit;
+    }
+    .tour-saltar:hover { color:rgba(255,255,255,.85); }
+    .tour-ok {
+      margin-left:auto; cursor:pointer; border:none; font-family:inherit;
+      background:linear-gradient(135deg,var(--amarillo),var(--naranja));
+      color:#1a1000; font-weight:700; font-size:.82rem; letter-spacing:.3px;
+      padding:10px 18px; border-radius:11px; transition:.15s;
+    }
+    .tour-ok:hover { transform:translateY(-2px); box-shadow:0 10px 24px rgba(232,116,0,.45); }
+    /* El FAB "Mi Perfil" flota en z-index 9000, o sea POR ENCIMA del tour.
+       Sin esto, quedaba una píldora amarilla brillando sobre la penumbra —y
+       peor: se podía tocar, y te sacaba del recorrido a media explicación.
+       Mismo patrón que `body.mob-nav-on .fab-perfil`. */
+    body.tour-on .fab-perfil { display:none !important; }
+    /* Enlace para volver a ver el recorrido. Discreto a propósito: le sirve a
+       quien ya lo vio (el recorrido sale UNA vez) y no debe competir con el
+       calendario, que es a lo que la persona vino. */
+    .tour-repetir {
+      display:inline-flex; align-items:center; gap:6px; margin:10px auto 0;
+      background:rgba(255,255,255,.05); border:1px solid rgba(255,204,0,.24);
+      color:rgba(255,255,255,.72); font-family:inherit; font-size:.8rem;
+      padding:7px 14px; border-radius:999px; cursor:pointer; transition:.15s;
+    }
+    .tour-repetir:hover { color:#fff; border-color:rgba(255,204,0,.55); background:rgba(255,204,0,.1); }
+    /* TRAMPA DEL MARGEN (la misma de T7, en un lugar nuevo): en modo `data-solo`
+       el encabezado de la sección se queda sin `margin-bottom` y ese aire se le
+       mudó al ÚLTIMO hijo que sobrevive, que era `.seccion-desc`. Al meter este
+       botón DESPUÉS de la descripción, le robó el puesto de "último hijo" sin
+       heredar el margen: quedaban 22px arriba y CERO abajo, pegado a la leyenda.
+       Se repone aquí, y acotado a `[data-solo]` para que no dispare de más
+       cuando el recorrido se reutilice en secciones normales (#63/#64/#65). */
+    #sheet-host[data-solo] .seccion-header > .tour-repetir { margin-bottom:20px; }
+    @media (prefers-reduced-motion:reduce){
+      .tour-foco { transition:none; }
+      .tour-caja { animation:none; }
+      .tour-ok:hover { transform:none; }
+    }
+
     /* --- Tarjetas de PAQUETES (mensualidades) dentro de su hoja --- */
     .paquetes-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:14px; }
     .paquete-card {
@@ -7117,6 +7203,27 @@
     </div>
   </div>
 
+  <!-- RECORRIDO GUIADO · el reflector que acompaña la primera reserva.
+       Nace aquí, hermano de la hoja y NO adentro: la hoja se vacía y se
+       rearma en cada apertura (moverAlSheet/restaurar), así que cualquier
+       cosa que viviera dentro se iría de viaje con las secciones.
+       La capa de fondo es transparente y a propósito: lo que oscurece es la
+       sombra del reflector. Esta capa sólo sirve de tapón — se come los
+       toques para que nadie apriete un botón de abajo sin querer mientras
+       lee. Sin ella, tocar "junto" al globo activaba el calendario. -->
+  <div id="tour-bg" class="tour-bg" role="dialog" aria-modal="true" aria-labelledby="tour-tit">
+    <div id="tour-foco" class="tour-foco"></div>
+    <div id="tour-caja" class="tour-caja">
+      <span class="tour-paso" id="tour-paso">—</span>
+      <h3 class="tour-tit" id="tour-tit">—</h3>
+      <p class="tour-txt" id="tour-txt">—</p>
+      <div class="tour-btns">
+        <button type="button" class="tour-saltar" id="tour-saltar">Saltar</button>
+        <button type="button" class="tour-ok" id="tour-ok">Entendido</button>
+      </div>
+    </div>
+  </div>
+
   <!-- PAQUETES · el mostrario ÚNICO de Estrellas — vive dentro de su hoja.
        El encabezado se heredó de la difunta sección #precios: sin él la hoja
        arrancaba de golpe con las tarjetas y no decía la regla del juego. -->
@@ -7354,6 +7461,11 @@
       <!-- Decía "Lunes a Viernes" y justo debajo la leyenda lo repite en cada
            clase y la parrilla lo enseña en sus cinco columnas. -->
       <p class="seccion-desc">Toca las horas que quieras y apártalas con tus Estrellas: <strong>1 ⭐ = 1 clase</strong>.</p>
+      <!-- El recorrido guiado sale SOLO la primera vez. Este botón es la
+           única forma de volver a verlo: sin él, quien lo saltó por accidente
+           (o quien lo vio hace tres meses) se quedaría sin manera de pedirlo,
+           y "sólo una vez" se volvería "nunca más". -->
+      <button type="button" class="tour-repetir" onclick="tourAgendar()">💡 ¿Cómo aparto una clase?</button>
     </div>
     <!-- LEYENDA · qué clase es cuál (para reservar sin dudas) -->
     <div class="clase-leyenda">
@@ -10012,6 +10124,224 @@
   };
 
   /* ══════════════════════════════════════════════════════════════════
+     RECORRIDO GUIADO · "¿Cómo aparto una clase?"   (#62)
+     Acompaña la PRIMERA reserva. El problema que resuelve no es que el
+     calendario esté mal, es que la persona nueva llega sin saber la regla del
+     juego: que las clases se pagan con Estrellas, que primero se eligen y
+     luego se confirman, y que el botón de abajo está apagado por una razón.
+     Cuatro pasos, uno por cada pieza real de la pantalla — no una serie de
+     dibujos: el reflector señala el elemento VIVO, así que si mañana el
+     calendario cambia de lugar, el recorrido lo sigue solo.
+     ══════════════════════════════════════════════════════════════════ */
+  (function initTourAgendar(){
+    const bg = document.getElementById('tour-bg');
+    if (!bg) return;
+    const foco   = document.getElementById('tour-foco');
+    const caja   = document.getElementById('tour-caja');
+    const ePaso  = document.getElementById('tour-paso');
+    const eTit   = document.getElementById('tour-tit');
+    const eTxt   = document.getElementById('tour-txt');
+    const bOk    = document.getElementById('tour-ok');
+    const bSalir = document.getElementById('tour-saltar');
+
+    /* La memoria del recorrido vive en localStorage, NO en Firestore, y es a
+       propósito: escribir en Firestore desde aquí sería un permiso más, una
+       espera más y —con AppCheck— una forma más de fallar en silencio. El
+       precio de esta decisión es que el recorrido puede repetirse si entras
+       desde otro teléfono; eso es una molestia de diez segundos, mientras que
+       un flag que no guarda dejaría el tutorial saliendo para siempre.
+       La llave lleva versión: el día que cambie el flujo de reservar se sube a
+       _v2 y todas lo vuelven a ver una vez, sin borrar nada a mano. */
+    const LLAVE = 'circ_tour_agendar_v1';
+    // localStorage truena (no devuelve null: LANZA) en Safari privado y con
+    // cookies bloqueadas. Sin el try, esa excepción mataría la apertura del
+    // calendario entero por culpa de un tutorial.
+    function yaLoVio(){ try { return localStorage.getItem(LLAVE) === '1'; } catch(e){ return false; } }
+    function marcarVisto(){ try { localStorage.setItem(LLAVE, '1'); } catch(e){} }
+
+    /* Cada paso apunta a un elemento REAL por selector, y el texto es una
+       función para poder decir la verdad según quién esté mirando: a quien no
+       ha iniciado sesión no se le puede prometer un saldo que no existe. */
+    const PASOS = [
+      {
+        sel: '#reservar-saldo',
+        tit: 'Todo se aparta con Estrellas',
+        txt: () => window.usuarioActual
+          ? 'Cada clase cuesta <strong>1 ⭐</strong>. Aquí ves cuántas te quedan; si se acaban, las compras con el botón naranja.'
+          : 'Cada clase cuesta <strong>1 ⭐</strong>. Aquí verás las tuyas cuando inicies sesión, y con el botón naranja se compran.'
+      },
+      {
+        sel: '#horarios .horario-wrap',
+        tit: 'Toca el día y la hora',
+        txt: () => 'Elige la clase que quieras de <strong>esta semana</strong> y se marca en naranja. ¿Te arrepentiste? Tócala otra vez y se quita. Las que dicen «Clase Full» o «Sin clase» no se pueden apartar.'
+      },
+      {
+        sel: '#horarios .slots-contador',
+        tit: 'Aquí va la cuenta',
+        txt: () => 'Te muestra <strong>cuántas llevas elegidas</strong> y cuántas Estrellas tienes. No te deja apartar más de las que puedes pagar.'
+      },
+      {
+        sel: '#btn-confirmar',
+        tit: 'Confirma y ya está',
+        txt: () => 'Este botón se enciende en cuanto elijas tu primera clase. Confirmas tu nombre y se descuentan tus Estrellas: <strong>aquí no se paga con tarjeta</strong>.<br><br>¿Te surgió algo? Cancela desde <strong>🎟️ Mis clases</strong>: si avisas <strong>12 horas antes</strong>, tu ⭐ regresa.'
+      },
+    ];
+
+    let paso = 0, vivo = false, elActual = null;
+
+    /* Coloca reflector y globo. Se llama en cada paso Y en cada `resize`: en
+       un teléfono la barra del navegador se esconde al desplazarse y eso
+       dispara un resize que cambia la altura útil — sin recolocar, el globo se
+       quedaba flotando encima de lo que ya no estaba ahí. */
+    function colocar(el){
+      const AIRE = 8, HUECO = 14, ORILLA = 12;
+      const r = el.getBoundingClientRect();
+      const vw = window.innerWidth, vh = window.innerHeight;
+
+      const t = Math.max(4, r.top - AIRE);
+      const l = Math.max(4, r.left - AIRE);
+      const w = Math.min(r.width + AIRE * 2, vw - 8);
+      const h = r.height + AIRE * 2;
+      foco.style.top = t + 'px';  foco.style.left = l + 'px';
+      foco.style.width = w + 'px'; foco.style.height = h + 'px';
+
+      // El globo se mide DESPUÉS de escribirle el texto (arriba, en pintar) y
+      // con la capa ya visible: un elemento en display:none mide 0 y lo
+      // mandaría a la esquina superior izquierda.
+      const ch = caja.offsetHeight, cw = caja.offsetWidth;
+      let ct;
+      if (t + h + HUECO + ch <= vh - 8)      ct = t + h + HUECO;            // debajo
+      else if (t - HUECO - ch >= 8)          ct = t - HUECO - ch;           // arriba
+      else                                   ct = Math.max(8, vh - ch - 8); // al pie
+      const cl = Math.max(ORILLA, Math.min(l + w / 2 - cw / 2, vw - cw - ORILLA));
+      caja.style.top = ct + 'px';
+      caja.style.left = cl + 'px';
+    }
+
+    function recolocar(){ if (vivo && elActual) colocar(elActual); }
+
+    function pintar(i){
+      const p = PASOS[i];
+      const el = document.querySelector(p.sel);
+      // Si la pieza no está o está oculta, no se inventa: se corta el recorrido.
+      // Un reflector apuntando a la nada enseña menos que no enseñar nada.
+      if (!el || !el.offsetParent){ terminar(); return; }
+      elActual = el;
+      /* `behavior:'instant'` va ESCRITO, no omitido. Omitirlo no significa
+         "salto seco": el valor por omisión es 'auto', y 'auto' quiere decir
+         "haz lo que diga el CSS" — y arriba hay un `html { scroll-behavior:
+         smooth }` que aplica a TODA la página. Sin esta palabra el
+         desplazamiento se anima, `colocar()` mide en la línea siguiente (con
+         el elemento todavía a medio camino) y el reflector se dibuja alrededor
+         del lugar por donde el elemento IBA pasando, no donde acabó.
+         El deslizamiento bonito lo pone la transición CSS del propio reflector,
+         que sí es medible porque parte de una posición ya definitiva. */
+      el.scrollIntoView({ block:'center', inline:'nearest', behavior:'instant' });
+      ePaso.textContent = 'Paso ' + (i + 1) + ' de ' + PASOS.length;
+      eTit.textContent  = p.tit;
+      eTxt.innerHTML    = p.txt();
+      const ultimo = (i === PASOS.length - 1);
+      bOk.textContent = ultimo ? '¡Listo!' : 'Siguiente →';
+      // `visibility` y no `display`: el botón sigue ocupando su lugar, así que
+      // "¡Listo!" no brinca a la izquierda en el último paso.
+      bSalir.style.visibility = ultimo ? 'hidden' : '';
+      bg.classList.add('on');
+      document.body.classList.add('tour-on');
+      colocar(el);
+    }
+
+    function avanzar(){
+      paso++;
+      if (paso >= PASOS.length){ terminar(); return; }
+      pintar(paso);
+    }
+
+    // Saltar y terminar hacen LO MISMO con la memoria: los dos marcan visto.
+    // Saltar es una respuesta ("ya entendí, quítamelo"), no un accidente que
+    // haya que compensar repitiendo el tutorial mañana. Para el arrepentido
+    // está el botón 💡 dentro del propio calendario.
+    function terminar(){
+      vivo = false; elActual = null;
+      bg.classList.remove('on');
+      document.body.classList.remove('tour-on');
+      marcarVisto();
+      window.removeEventListener('resize', recolocar);
+      window.removeEventListener('orientationchange', recolocar);
+      document.removeEventListener('keydown', teclas, true);
+    }
+
+    /* En CAPTURA (true) y con stopPropagation: la hoja ya escucha Escape para
+       cerrarse. Sin esto, un Escape a media explicación cerraba el calendario
+       COMPLETO en vez de sólo el recorrido. Al capturar en `document` el
+       evento nunca llega a bajar, así que el oyente de la hoja no se entera. */
+    function teclas(e){
+      if (!vivo) return;
+      if (e.key === 'Escape'){ e.stopPropagation(); terminar(); }
+      else if (e.key === 'Enter' || e.key === 'ArrowRight'){ e.preventDefault(); avanzar(); }
+    }
+
+    bOk.addEventListener('click', avanzar);
+    bSalir.addEventListener('click', terminar);
+    /* Red de seguridad para cerrarVista(). Hoy la hoja NO puede cerrarse con el
+       recorrido encima (la capa se come los toques y Escape queda capturado),
+       pero el recorrido guarda una REFERENCIA a un elemento que la hoja mueve
+       de padre al abrir y cerrar: si algún día algo cierra la hoja por código,
+       ese elemento vuelve a la página —donde `[data-en-hoja]` lo apaga— y el
+       reflector se quedaría apuntando a un rectángulo de 0×0 en la esquina. */
+    window.tourAgendarCerrar = function(){ if (vivo) terminar(); };
+    // Tocar la penumbra NO cierra el recorrido: son cuatro toques seguidos en
+    // una pantalla casi negra y cerrarlo sin querer es facilísimo. Se sale por
+    // "Saltar", por la tecla Escape, o llegando al final.
+
+    // Arranque manual (botón 💡). Siempre corre, lo haya visto o no.
+    window.tourAgendar = function(){
+      if (vivo) return;
+      paso = 0; vivo = true;
+      window.addEventListener('resize', recolocar);
+      window.addEventListener('orientationchange', recolocar);
+      document.addEventListener('keydown', teclas, true);
+      pintar(0);
+    };
+
+    // ¿Hay algo encima que la persona SÍ pidió? Entonces el tutorial se aguanta.
+    // Los diálogos de marca (uiAlert/uiConfirm) se crean al vuelo, así que con
+    // que existan en el DOM ya están en pantalla; los modales fijos viven
+    // siempre y se prenden con display.
+    function hayModalEncima(){
+      if (document.querySelector('.ui-dlg-bg')) return true;
+      const capas = document.querySelectorAll('.onb-bg, .nombre-modal-bg');
+      for (let i = 0; i < capas.length; i++){
+        if (getComputedStyle(capas[i]).display !== 'none') return true;
+      }
+      return false;
+    }
+
+    /* Arranque AUTOMÁTICO, una sola vez, al abrir la pestaña Reservar.
+       La espera no es un adorno ni un "por si acaso": `onOpen` corre ANTES de
+       que abrirVista le ponga .abierto a la hoja, así que en ese instante todo
+       mide 0×0 y el reflector saldría en la esquina señalando nada. De paso le
+       da tiempo a `_miRank` de llegar de Firebase — sin eso, a una instructora
+       se le empezaría a explicar el flujo de alumna mientras su rango sigue en
+       null— y al calendario de terminar de pintarse. */
+    window.tourAgendarQuizas = function(){
+      if (vivo || yaLoVio()) return;
+      setTimeout(() => {
+        if (vivo || yaLoVio()) return;
+        // El staff no reserva por este camino: para ellas tocar una celda abre
+        // "quién apartó", no una selección. Explicarles este flujo sería
+        // describirles algo que a ellas no les pasa. El botón 💡 sigue ahí.
+        if (window._miRank != null && window._miRank <= 2) return;
+        const host = document.getElementById('sheet-host');
+        if (!host || !host.classList.contains('abierto')) return;
+        if (host.dataset.vista !== 'horarios') return;
+        if (host.dataset.pestana !== 'reservar') return;
+        if (hayModalEncima()) return;
+        window.tourAgendar();
+      }, 750);
+    };
+  })();
+
+  /* ══════════════════════════════════════════════════════════════════
      APP-SHELL PWA — POPUP tipo HOJA (sheet) por PORTAL.
      Cada mosaico del home mueve su(s) sección(es) REALES al cuerpo de la
      hoja (preserva TODOS los listeners y binduaciones de Firebase) y las
@@ -10050,7 +10380,15 @@
       horarios:  {
         titulo:'Calendario', icono:'📅',
         pestanas:[
-          { id:'reservar', etiqueta:'📅 Reservar',   seccion:'horarios',        onOpen:()=>window.actualizarBannerReservar&&window.actualizarBannerReservar() },
+          // El recorrido guiado (#62) se engancha AQUÍ y no en el mosaico del
+          // home porque ésta es la única puerta por la que se pasa siempre:
+          // se llega a Reservar desde el mosaico, desde el sidebar y desde
+          // agendarPrueba(). `tourAgendarQuizas` decide solo si toca o no.
+          { id:'reservar', etiqueta:'📅 Reservar',   seccion:'horarios',
+            onOpen:()=>{
+              if (window.actualizarBannerReservar) window.actualizarBannerReservar();
+              if (window.tourAgendarQuizas) window.tourAgendarQuizas();
+            } },
           { id:'mias',     etiqueta:'🎟️ Mis clases', seccion:'mis-clases-view', necesitaSesion:true, onOpen:()=>window.renderMisClasesSemana&&window.renderMisClasesSemana() },
           // Agenda de horas del equipo. Se abre para rank ≤ 3 (asistente
           // incluido) porque el botón "+ Agregar horario" que vive dentro ya
@@ -10209,6 +10547,9 @@
 
     window.cerrarVista = function(){
       if (!host.classList.contains('abierto')) return;
+      // Antes de restaurar: restaurar() devuelve las secciones a la página y
+      // el recorrido guiado apunta a elementos que viven dentro de ellas.
+      if (window.tourAgendarCerrar) window.tourAgendarCerrar();
       restaurar();
       host.classList.remove('abierto');
       host.setAttribute('aria-hidden','true');
