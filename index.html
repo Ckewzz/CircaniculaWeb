@@ -1025,12 +1025,6 @@
         const videosPanel = document.getElementById('videos-panel');
         if (videosPanel) videosPanel.style.display = esStaffClase(rank) ? '' : 'none';
 
-        // Tarjeta "🛠️ Administración" (envuelve panel del Dueño + paneles de
-        // staff): visible para staff de clase (Rank ≤ 2). Los paneles internos
-        // ya se muestran/ocultan por su cuenta según el rango exacto.
-        const adminCard = document.getElementById('perfil-admin-card');
-        if (adminCard) adminCard.style.display = esStaffClase(rank) ? '' : 'none';
-
         // Entradas del SIDEBAR reservadas a staff de clase (hoy: el calendario
         // de horas del staff). Mismo criterio que los paneles de arriba.
         document.querySelectorAll('.sb-solo-staff').forEach(el => {
@@ -4950,8 +4944,9 @@
        Se dejó el segundo (rectángulos verticales, se leen mejor de un vistazo)
        y este se borró junto con su CSS, que ya no lo usaba nadie más. */
 
-    /* ===== MIS CLASES ===== */
-    #seccion-mis-clases { display:none; background:rgba(0,0,0,.45); }
+    #seccion-mis-clases,
+    #perfil-clases,
+    #perfil-admin { display:none; background:rgba(0,0,0,.45); }
 
     /* ===== PERFIL ===== */
     /* El panel de perfil se FUNDE con el popup (mismo tono): sin fondo ni
@@ -7607,31 +7602,6 @@
         </div>
       </details>
 
-      <!-- 2 · MIS CLASES (por semana) · desplegable + trackeable. Agrupa las
-           reservas del alumno por semana viva; la actual va resaltada. -->
-      <details class="admin-acordeon perfil-acordeon" ontoggle="if(this.open){window.renderMisClasesSemana&&window.renderMisClasesSemana();}">
-        <summary>📆 Mis clases y asistencias</summary>
-        <div class="admin-acordeon-body">
-          <p class="admin-hint">Agrupadas por semana; las que ya tomaste salen con <strong>✓</strong>. La semana en curso se limpia sola cada lunes y las anteriores quedan como historial.</p>
-          <div id="mis-clases-semana" data-mis-clases><p style="opacity:.6;">Toca para cargar tus clases…</p></div>
-        </div>
-      </details>
-
-      <!-- 2b · HISTORIAL DE PAGOS · el mismo dato que arriba pero por RESERVA
-           (plan, estado del pago y fecha). Antes vivía suelto al fondo de la
-           sección con el título "Tus reservas": se leía como una repetición de
-           "Mis clases" y además se cargaba en cada login aunque nadie lo viera.
-           Aquí queda plegado y sólo consulta cuando lo abres. -->
-      <details class="admin-acordeon perfil-acordeon" ontoggle="if(this.open){window.cargarMisReservas&&window.cargarMisReservas();}">
-        <summary>🧾 Historial de pagos</summary>
-        <div class="admin-acordeon-body">
-          <p class="admin-hint">El detalle de cada compra: qué plan, en qué estado va el pago y de qué día es. Si buscas <em>a qué clases vas</em>, eso está arriba en «Mis clases y asistencias».</p>
-          <div id="mis-reservas-lista">
-            <p style="opacity:.6;">Toca para cargar tu historial…</p>
-          </div>
-        </div>
-      </details>
-
       <!-- 3 · MI PROGRESO · radar de stats + títulos -->
       <details class="admin-acordeon perfil-acordeon">
         <summary>📊 Mi progreso</summary>
@@ -7661,11 +7631,48 @@
         </div>
       </details>
 
-      <!-- 5 · ADMINISTRACIÓN · paneles de staff/dueño (se muestra por rango) -->
-      <details class="admin-acordeon perfil-acordeon" id="perfil-admin-card" style="display:none;"
-               ontoggle="if(this.open &amp;&amp; window.poblarSelectAlumnas) window.poblarSelectAlumnas()">
-        <summary>🛠️ Administración</summary>
+    </div>
+
+    <div class="comunidad-links">
+      <a href="#" class="btn-pildora" onclick="abrirVista('comunidad');return false;"><span class="btn-pildora-ico">🔎</span> Buscar Perfil</a>
+      <a href="#" class="btn-pildora" onclick="abrirVista('horarios');return false;"><span class="btn-pildora-ico">📅</span> Reservar clase</a>
+    </div>
+  </section>
+
+  <section id="perfil-clases" class="seccion" style="display:none;" data-nav-skip="true">
+    <div class="seccion-header">
+      <span class="seccion-eyebrow">Tu historial</span>
+      <h2 class="seccion-titulo">Mis clases</h2>
+      <div class="titulo-linea"></div>
+    </div>
+    <div class="perfil-panel">
+      <details class="admin-acordeon perfil-acordeon" open>
+        <summary>📆 Mis clases y asistencias</summary>
         <div class="admin-acordeon-body">
+          <p class="admin-hint">Agrupadas por semana; las que ya tomaste salen con <strong>✓</strong>. La semana en curso se limpia sola cada lunes y las anteriores quedan como historial.</p>
+          <div id="mis-clases-semana" data-mis-clases><p style="opacity:.6;">Cargando tus clases…</p></div>
+        </div>
+      </details>
+
+      <details class="admin-acordeon perfil-acordeon" ontoggle="if(this.open){window.cargarMisReservas&&window.cargarMisReservas();}">
+        <summary>🧾 Historial de pagos</summary>
+        <div class="admin-acordeon-body">
+          <p class="admin-hint">El detalle de cada compra: qué plan, en qué estado va el pago y de qué día es. Si buscas <em>a qué clases vas</em>, eso está arriba en «Mis clases y asistencias».</p>
+          <div id="mis-reservas-lista">
+            <p style="opacity:.6;">Toca para cargar tu historial…</p>
+          </div>
+        </div>
+      </details>
+    </div>
+  </section>
+
+  <section id="perfil-admin" class="seccion" style="display:none;" data-nav-skip="true">
+    <div class="seccion-header">
+      <span class="seccion-eyebrow">Solo el equipo</span>
+      <h2 class="seccion-titulo">Administrar</h2>
+      <div class="titulo-linea"></div>
+    </div>
+    <div class="perfil-panel">
 
     <!-- GRUPO 1 · DÍA A DÍA DEL EQUIPO (Rank ≤ 2) -->
     <div class="admin-grupo" id="admin-grupo-equipo">
@@ -7841,17 +7848,6 @@
         </details>
     </div><!-- /grupo Dueño -->
 
-        </div>
-      </details>
-    </div><!-- /perfil-panel -->
-
-    <!-- Los dos botones del fondo llamaban a `abrirVista('academia')`: ninguno
-         llevaba a donde prometía. "Buscar Perfil" abría La Academia (que no
-         tiene buscador) y "Colaboradores" apuntaba a una sección que se sacó
-         del alcance. Ahora los dos van a algo que existe. -->
-    <div class="comunidad-links">
-      <a href="#" class="btn-pildora" onclick="abrirVista('comunidad');return false;"><span class="btn-pildora-ico">🔎</span> Buscar Perfil</a>
-      <a href="#" class="btn-pildora" onclick="abrirVista('horarios');return false;"><span class="btn-pildora-ico">📅</span> Reservar clase</a>
     </div>
   </section>
 
@@ -8309,9 +8305,9 @@
   const labels = {
     inicio:'Inicio', noticias:'Noticias',
     'proximos-eventos':'Eventos', 'eventos-pasados':'Galería',
-    horarios:'Horarios', precios:'Precios',
-    'seccion-mis-clases':'Mis Clases',
-    videos:'Videos', equipo:'Equipo',
+    horarios:'Horarios',
+    'seccion-mis-clases':'Mi Perfil',
+    videos:'Videos',
     'labor-social':'Social', reglas:'Reglas', contacto:'Contacto'
   };
   secs.forEach(sec => {
@@ -10306,7 +10302,19 @@
         ]
       },
       estrellas: { titulo:'Estrellas & Planes',  icono:'⭐', secciones:['paquetes-view'], onOpen:pintarPaquetes },
-      perfil:    { titulo:'Mi Perfil',           icono:'🪽', secciones:['seccion-mis-clases'], necesitaSesion:true },
+      // Mi Perfil cargaba 39 controles y el 46% del texto de toda la app en una
+      // sola pantalla. Se parte con el mismo motor de pestañas del calendario.
+      // "Administrar" usa `rankMax:2` (= esStaffClase) en vez del display:none
+      // que llevaba el desplegable: la pestaña ES la compuerta, y así el staff
+      // se ahorra un nivel de toque para llegar a lo que usa todos los días.
+      perfil: { titulo:'Mi Perfil', icono:'🪽', necesitaSesion:true,
+        pestanas:[
+          { id:'yo',     etiqueta:'🪽 Yo',           seccion:'seccion-mis-clases' },
+          { id:'clases', etiqueta:'📆 Mis clases',   seccion:'perfil-clases',
+            onOpen:()=>window.renderMisClasesSemana&&window.renderMisClasesSemana() },
+          { id:'admin',  etiqueta:'🛠️ Administrar',  seccion:'perfil-admin', rankMax:2,
+            onOpen:()=>window.poblarSelectAlumnas&&window.poblarSelectAlumnas() },
+        ] },
       // 'contacto' iba PRIMERO: lo primero que veías al entrar a La Academia era
       // un formulario pidiéndote escribir, antes de haberte enseñado nada. Ahora
       // cierra la vista: primero se muestra lo que hacemos (noticias, eventos,
