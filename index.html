@@ -2517,21 +2517,6 @@
       </div>`;
     }
 
-    function renderColabCard(d) {
-      const nombre = escapeHtml(d.nombreVisible || d.handle || 'Colaborador');
-      const c = d.colab || {};
-      const tipo = escapeHtml(c.tipo || 'Colaborador');
-      const desc = c.descripcion ? `<p class="dir-card-linea">${escapeHtml(c.descripcion)}</p>` : '';
-      const safe = urlSegura(c.enlace);
-      const btn = safe ? `<a class="dir-card-btn" href="${escapeHtml(safe)}" target="_blank" rel="noopener noreferrer">Ver / Seguir ↗</a>` : '';
-      return `<div class="dir-card">
-        ${fotoCard(d, nombre)}
-        <div class="dir-card-nombre">${nombre}</div>
-        <div class="dir-card-tags"><span class="rol-tag rol-tag-colab">🤝 ${tipo}</span></div>
-        ${desc}${btn}
-      </div>`;
-    }
-
     // Tope de tarjetas por búsqueda. No es un límite de datos (todo sigue en
     // _dirCache): es un límite de PINTADO, para que el navegador no arme cientos
     // de tarjetas de golpe en un teléfono.
@@ -2805,25 +2790,6 @@
         console.error('buscarPerfiles:', e);
         if (vacio) { vacio.textContent='No se pudo cargar la comunidad. Reintenta.'; vacio.style.display='block'; }
       }
-    };
-
-    window.cargarColaboradores = async () => {
-      const cont  = document.getElementById('colab-grid');
-      const vacio = document.getElementById('colab-vacio');
-      if (!usuarioActual) return;
-      try {
-        const snap = await getDocs(collection(db, "usuarios"));
-        const lista = [];
-        snap.forEach(s => {
-          const d = s.data();
-          if (d.cuentaActiva === false) return; // oculta cuentas deshabilitadas
-          if (!d.colaborador) return;
-          if (d.visibilidad && d.visibilidad.perfilPublico === false) return;
-          lista.push(d);
-        });
-        if (cont) cont.innerHTML = lista.map(renderColabCard).join('');
-        if (vacio) vacio.style.display = lista.length ? 'none' : 'block';
-      } catch(e) { console.error('cargarColaboradores:', e); }
     };
 
     // ════════════════════════════════════════════════════════════════
@@ -3242,9 +3208,7 @@
         const fabP = document.getElementById('fab-perfil'); if (fabP) fabP.style.display = 'none';
         if(misClases) misClases.style.display = 'none';
         const comunidad = document.getElementById('comunidad');
-        const colabSec  = document.getElementById('colaboradores');
         if(comunidad) comunidad.style.display = 'none';
-        if(colabSec)  colabSec.style.display  = 'none';
         _dirCache = [];
         const calSec = document.getElementById('calendario');
         if(calSec) calSec.style.display = 'none';
@@ -6329,36 +6293,6 @@
     .video-admin-meta { font-size:.7rem; opacity:.45; margin-bottom:9px; }
     .video-admin-acciones { display:flex; gap:7px; flex-wrap:wrap; }
 
-    /* ===== EQUIPO ===== */
-    #equipo { background:rgba(0,0,0,.35); }
-    .equipo-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:20px; margin-bottom:50px; }
-    .instructor-card {
-      background:rgba(20,20,20,.8);
-      border:1px solid rgba(255,255,255,.07);
-      border-radius:4px; overflow:hidden;
-      transition:border-color .3s, transform .3s;
-    }
-    .instructor-card:hover { border-color:rgba(255,204,0,.35); transform:translateY(-4px); }
-    .instructor-img { width:100%; height:230px; object-fit:cover; display:block; }
-    .instructor-info { padding:16px; }
-    .instructor-nombre { font-family:'Cinzel',serif; font-size:.88rem; font-weight:600; margin-bottom:3px; }
-    .instructor-rol { font-size:.68rem; color:var(--amarillo); letter-spacing:1px; margin-bottom:7px; }
-    .instructor-bio { font-size:.72rem; opacity:.4; line-height:1.6; }
-    .sub-titulo { font-family:'Cinzel',serif; font-size:.62rem; letter-spacing:4px; text-transform:uppercase; color:rgba(240,237,230,.3); margin-bottom:22px; }
-    .colaboradores-grid { display:flex; gap:14px; flex-wrap:wrap; }
-    .colab-card {
-      width:105px; height:65px;
-      background:rgba(20,20,20,.7);
-      border:1px solid rgba(255,255,255,.07);
-      border-radius:4px;
-      display:flex; align-items:center; justify-content:center;
-      font-family:'Cinzel',serif; font-size:.5rem;
-      letter-spacing:1px; color:rgba(255,255,255,.28);
-      text-align:center; cursor:pointer;
-      transition:border-color .3s;
-    }
-    .colab-card:hover { border-color:rgba(255,204,0,.3); }
-
     /* ===== MODAL CONFIRMAR NOMBRE ===== */
     .nombre-modal-bg {
       display:none; position:fixed; inset:0; z-index:9500;
@@ -8108,18 +8042,6 @@
     <p id="dir-vacio" class="dir-vacio">Cargando comunidad…</p>
   </section>
 
-  <!-- COLABORADORES (solo logueadas) -->
-  <section id="colaboradores" class="seccion" style="display:none;" data-nav-skip="true">
-    <div class="seccion-header">
-      <span class="seccion-eyebrow">Aliados de la academia</span>
-      <h2 class="seccion-titulo">Colaboradores</h2>
-      <div class="titulo-linea"></div>
-      <p class="seccion-desc">Fotógrafas, misses invitadas e influencers que crean con nosotras. ¡Conócelas y síguelas!</p>
-    </div>
-    <div id="colab-grid" class="dir-grid"></div>
-    <p id="colab-vacio" class="dir-vacio">Aún no hay colaboradores publicados.</p>
-  </section>
-
   <!-- CALENDARIO DE HORARIOS (staff publica; todas ven) -->
   <section id="calendario" class="seccion" style="display:none;" data-nav-skip="true">
     <div class="seccion-header">
@@ -8171,30 +8093,6 @@
     <div id="videos-tabs" class="videos-tabs"></div>
     <div id="videos-grid-cats">
       <p class="videos-cargando">Cargando videos…</p>
-    </div>
-  </section>
-
-  <!-- EQUIPO — oculto, en construcción -->
-  <section id="equipo" class="seccion" style="display:none;" data-nav-skip="true">
-    <div class="seccion-header">
-      <span class="seccion-eyebrow">Quiénes somos</span>
-      <h2 class="seccion-titulo">Nuestro Equipo</h2>
-      <div class="titulo-linea"></div>
-    </div>
-    <div class="equipo-grid">
-      <div class="instructor-card"><img src="https://picsum.photos/seed/inst1/300/340" alt="" class="instructor-img"><div class="instructor-info"><p class="instructor-nombre">Miss Nombre</p><p class="instructor-rol">Fundadora · Aéreo & Flex</p><p class="instructor-bio">Formación en danza contemporánea. Más de 8 años enseñando.</p></div></div>
-      <div class="instructor-card"><img src="https://picsum.photos/seed/inst2/300/340" alt="" class="instructor-img"><div class="instructor-info"><p class="instructor-nombre">Miss Nombre</p><p class="instructor-rol">Instructora · Kids & Flow</p><p class="instructor-bio">Especialista en acrobacia infantil desde 6 años.</p></div></div>
-      <div class="instructor-card"><img src="https://picsum.photos/seed/inst3/300/340" alt="" class="instructor-img"><div class="instructor-info"><p class="instructor-nombre">Miss Nombre</p><p class="instructor-rol">Instructora · Fit & Flex</p><p class="instructor-bio">Entrenadora funcional, prevención de lesiones.</p></div></div>
-    </div>
-    <div>
-      <p class="sub-titulo">— Colaboradores —</p>
-      <div class="colaboradores-grid">
-        <div class="colab-card">Logo Colab</div>
-        <div class="colab-card">Logo Colab</div>
-        <div class="colab-card">Logo Colab</div>
-        <div class="colab-card">Logo Colab</div>
-        <div class="colab-card">Logo Colab</div>
-      </div>
     </div>
   </section>
 
