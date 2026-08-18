@@ -2247,7 +2247,7 @@
       if (!modal) return;
       modal.dataset.id = id;
       renderAsistenciasManual(id);
-      modal.style.display = 'flex';
+      window.abrirSubhoja('Asistencias', '📋', modal.querySelector('.onb-card'));
     };
     function renderAsistenciasManual(id) {
       const m = _manualCache.find(x=>x._id===id); if (!m) return;
@@ -2299,8 +2299,7 @@
       } catch(e){ console.error('quitarFechaManual:', e); await uiAlert('No se pudo quitar.', {titulo:'Error', peligro:true}); }
     };
     window.cerrarAsistManual = () => {
-      const modal = document.getElementById('manual-asist-modal');
-      if (modal) modal.style.display = 'none';
+      window.cerrarSubhoja();
       if (window.listarAlumnasManual) listarAlumnasManual();  // refresca contadores
     };
 
@@ -2677,8 +2676,8 @@
         ${dupHtml}
         ${statsHtml}
         ${staffStatsHtml}`;
-      const m = document.getElementById('perfil-modal');
-      if (m) m.style.display = 'flex';
+      window.abrirSubhoja(d.nombreVisible || d.handle || 'Perfil', '🪽',
+                          document.getElementById('perfil-modal-card'));
     };
 
     // Stepper MMORPG: ajusta el valor PENDIENTE de un stat en el modal.
@@ -2759,10 +2758,7 @@
         if (btn) { btn.disabled = false; btn.textContent = 'Guardar stats'; }
       }
     };
-    window.cerrarPerfilModal = () => {
-      const m = document.getElementById('perfil-modal');
-      if (m) m.style.display = 'none';
-    };
+    window.cerrarPerfilModal = () => window.cerrarSubhoja();
 
     // Trae de la red todos los perfiles públicos (opt-out con perfilPublico:false).
     window.buscarPerfiles = async () => {
@@ -3021,9 +3017,10 @@
       document.querySelectorAll('#hm-dias input[type=checkbox]').forEach(c=> c.checked=false);
       document.getElementById('hm-tipo').value='clase';
       document.getElementById('hm-rec').value='semanal';
-      document.getElementById('horario-modal').style.display='flex';
+      window.abrirSubhoja('Agendar horario', '🗓️',
+                          document.querySelector('#horario-modal .onb-card'));
     };
-    window.cerrarHorarioModal = () => { const m=document.getElementById('horario-modal'); if(m) m.style.display='none'; };
+    window.cerrarHorarioModal = () => window.cerrarSubhoja();
 
     window.guardarHorario = async () => {
       if (!usuarioActual) return;
@@ -3978,6 +3975,19 @@
       --overlay: rgba(0,0,0,0.70);
       --pendon-w: 0px;
 
+      /* ESCALERA DE CAPAS. Había cuatro sistemas de popup inventados por
+         separado (2000 / 4200 / 9500 / 9999) y nadie podía ver el orden:
+         el detalle de perfil (2000) salía DEBAJO de la hoja (4200), o sea
+         invisible, y el video (9999) tapaba al confirmar de marca (5000).
+         De aquí para abajo el orden se lee de un vistazo y se respeta. */
+      --z-flotante: 900;
+      --z-hoja: 4200;
+      --z-subhoja: 4300;
+      --z-modal: 4400;
+      --z-tour: 4600;
+      --z-dialogo: 5000;
+      --z-aviso: 6000;
+
       /* ===== LIQUID GLASS · paleta NEGRO/NARANJA =====
          Decisión: el NARANJA va al frente (superficies y gradientes) y el
          AMARILLO queda como acento (textos/realces). Por eso NO tocamos
@@ -4081,7 +4091,7 @@
     @media (max-width:900px){ .nav-dots-float { display:none; } }
     /* FAB "Mi Perfil" — botón amarillo flotante abajo a la derecha (colores de marca) */
     .fab-perfil {
-      position:fixed; right:18px; bottom:20px; z-index:9000;
+      position:fixed; right:18px; bottom:20px; z-index:var(--z-flotante);
       display:inline-flex; align-items:center; gap:8px;
       padding:12px 20px; border:none; border-radius:999px; cursor:pointer;
       background:var(--amarillo); color:#111;
@@ -5448,7 +5458,7 @@
 
     /* ===== ONBOARDING MODAL ===== */
     .onb-bg {
-      position:fixed; inset:0; z-index:2000; background:rgba(0,0,0,.8);
+      position:fixed; inset:0; z-index:var(--z-modal); background:rgba(0,0,0,.8);
       display:flex; align-items:center; justify-content:center; padding:20px;
     }
     .onb-card {
@@ -5512,7 +5522,7 @@
        --blanco (nada de blancos planos). Variante .peligro para borrados.
        ════════════════════════════════════════════════════════════════ */
     .ui-dlg-bg {
-      position:fixed; inset:0; z-index:5000; background:rgba(0,0,0,.82);
+      position:fixed; inset:0; z-index:var(--z-dialogo); background:rgba(0,0,0,.82);
       -webkit-backdrop-filter:blur(3px); backdrop-filter:blur(3px);
       display:flex; align-items:center; justify-content:center; padding:20px;
       animation:uiDlgFade .14s ease;
@@ -5780,8 +5790,30 @@
     @media (max-width:1023px) { .nav-burger { display:flex; } }
 
     /* --- Popup HOJA (sheet) nativo --- */
-    #sheet-host { position:fixed; inset:0; z-index:4200; display:none; }
+    #sheet-host { position:fixed; inset:0; z-index:var(--z-hoja); display:none; }
     #sheet-host.abierto { display:block; }
+    /* SUBHOJA · el segundo nivel. Reusa .sheet-card/.sheet-header/.sheet-body
+       tal cual: la idea es que no se sienta otro sistema, sino la MISMA hoja
+       un paso más adentro, con su flecha ‹ para volver. */
+    #subhoja-host { position:fixed; inset:0; z-index:var(--z-subhoja); display:none; }
+    #subhoja-host.abierto { display:block; }
+    @media (min-width:1024px){ #subhoja-host { right:var(--sidebar-w); } }
+    /* Los paneles adoptados venían de tres sistemas distintos y traían su
+       propia caja (fondo, borde, ancho tope, texto centrado). Adentro de la
+       subhoja la caja ya la pone la hoja, así que se neutralizan: si no, se
+       vería una tarjeta dentro de otra. Mismo truco que `.sheet-body > .seccion`. */
+    #subhoja-body > .onb-card,
+    #subhoja-body > .nombre-modal {
+      max-width:none !important; width:auto !important;
+      background:transparent !important; border:none !important;
+      border-radius:0 !important; padding:0 !important;
+      box-shadow:none !important; text-align:left !important;
+      max-height:none !important; overflow:visible !important;
+    }
+    /* El título y el cerrar ya los pone el encabezado de la subhoja. */
+    #subhoja-body > .onb-card > .onb-title,
+    #subhoja-body > .nombre-modal > .nombre-modal-titulo,
+    #subhoja-body > .pm-card > .pm-close { display:none; }
     /* Va DESPUÉS del inset:0 de arriba a propósito: una @media no suma
        especificidad, así que si la pusiéramos antes, el inset:0 la pisaría.
        En escritorio la hoja se corta ANTES del riel (que ahora está a la
@@ -5947,14 +5979,12 @@
        <body>, NO dentro de la hoja: si viviera adentro heredaría el recorte
        de `.sheet-body` (overflow-y:auto) y el globo se cortaría al filo, y
        además chocaría con `.sheet-body > .seccion { display:block !important }`.
-       Z-INDEX 4600, elegido para caer en un hueco concreto:
-         320  sidebar   ·  4200 hoja  ·  4600 TOUR
-         5000 uiAlert/uiConfirm       ·  9500 modal de nombre
+       Su lugar en la escalera (ver --z-* en :root) es --z-tour.
        Arriba de la hoja (si no, el reflector quedaría por debajo de lo que
        está señalando) y ABAJO de los diálogos (si sale un aviso a media
        explicación, tiene que verse encima, no atrás). */
     .tour-bg {
-      position:fixed; inset:0; z-index:4600; display:none;
+      position:fixed; inset:0; z-index:var(--z-tour); display:none;
     }
     .tour-bg.on { display:block; }
     /* El reflector NO es una imagen con un hoyo: es una caja transparente con
@@ -6164,7 +6194,7 @@
     /* Video Modal */
     .video-modal-bg {
       display:none; position:fixed; inset:0;
-      background:rgba(0,0,0,.93); z-index:9999;
+      background:rgba(0,0,0,.93); z-index:var(--z-subhoja);
       align-items:center; justify-content:center;
     }
     .video-modal-bg.visible { display:flex; }
@@ -6290,7 +6320,7 @@
 
     /* ===== MODAL CONFIRMAR NOMBRE ===== */
     .nombre-modal-bg {
-      display:none; position:fixed; inset:0; z-index:9500;
+      display:none; position:fixed; inset:0; z-index:var(--z-modal);
       background:rgba(0,0,0,.8); backdrop-filter:blur(6px);
       align-items:center; justify-content:center; padding:24px;
     }
@@ -6775,7 +6805,7 @@
 <body>
 
 <!-- PWA INSTALL BANNER -->
-<div id="pwa-banner" style="display:none;position:fixed;bottom:20px;left:50%;transform:translateX(-50%);z-index:9000;
+<div id="pwa-banner" style="display:none;position:fixed;bottom:20px;left:50%;transform:translateX(-50%);z-index:var(--z-aviso);
   background:rgba(12,12,12,.97);border:1px solid rgba(255,204,0,.4);border-radius:6px;
   padding:14px 20px;gap:14px;align-items:center;flex-wrap:wrap;max-width:460px;width:90%;
   box-shadow:0 8px 32px rgba(0,0,0,.6);backdrop-filter:blur(10px);">
@@ -6796,7 +6826,7 @@
 </div>
 
 <!-- AVISO: NUEVA VERSIÓN DISPONIBLE (actualización controlada del PWA, estilo Dashboard) -->
-<div id="pwa-update" style="display:none;position:fixed;bottom:20px;left:50%;transform:translateX(-50%);z-index:9100;
+<div id="pwa-update" style="display:none;position:fixed;bottom:20px;left:50%;transform:translateX(-50%);z-index:var(--z-aviso);
   background:rgba(12,12,12,.97);border:1px solid rgba(232,116,0,.55);border-radius:6px;
   padding:14px 20px;gap:14px;align-items:center;flex-wrap:wrap;max-width:460px;width:90%;
   box-shadow:0 8px 32px rgba(0,0,0,.6);backdrop-filter:blur(10px);">
@@ -6817,7 +6847,7 @@
 </div>
 
 <!-- PAGO EXITOSO BANNER -->
-<div id="pago-exitoso-banner" style="display:none;position:fixed;top:80px;left:50%;transform:translateX(-50%);z-index:9000;
+<div id="pago-exitoso-banner" style="display:none;position:fixed;top:80px;left:50%;transform:translateX(-50%);z-index:var(--z-aviso);
   background:rgba(8,40,8,.97);border:1px solid rgba(80,200,80,.4);border-radius:6px;
   padding:16px 28px;align-items:center;gap:14px;
   box-shadow:0 8px 32px rgba(0,0,0,.6);backdrop-filter:blur(10px);">
@@ -7132,6 +7162,24 @@
     </div>
   </div>
 
+  <!-- HOST de la SUBHOJA (segundo nivel). Mismo cuerpo que la hoja, un
+       escalón arriba. Hermano de la hoja y NO adentro: `.sheet-card` lleva
+       un `transform` en escritorio, y un transform vuelve a la tarjeta el
+       marco de referencia de todo `position:fixed` que cuelgue de ella. Un
+       popup que viviera adentro quedaría encerrado en la tarjeta en vez de
+       cubrir la pantalla. Nace vacío: adopta el panel que le pasen. -->
+  <div id="subhoja-host" aria-hidden="true">
+    <div class="sheet-bg" data-subhoja-cerrar></div>
+    <div class="sheet-card" role="dialog" aria-modal="true" aria-labelledby="subhoja-title">
+      <div class="sheet-header">
+        <button type="button" class="sheet-back" data-subhoja-cerrar aria-label="Volver">‹</button>
+        <h2 class="sheet-title" id="subhoja-title"><span class="sheet-ico"></span><span class="sheet-title-txt">—</span></h2>
+        <button type="button" class="sheet-close" data-subhoja-cerrar aria-label="Cerrar">✕</button>
+      </div>
+      <div class="sheet-body" id="subhoja-body"></div>
+    </div>
+  </div>
+
   <!-- RECORRIDO GUIADO · el reflector que acompaña la primera reserva.
        Nace aquí, hermano de la hoja y NO adentro: la hoja se vacía y se
        rearma en cada apertura (moverAlSheet/restaurar), así que cualquier
@@ -7340,7 +7388,7 @@
   <div id="boleto-exitoso-banner" style="display:none; position:fixed; bottom:24px; left:50%;
        transform:translateX(-50%); background:var(--amarillo); color:var(--negro);
        padding:14px 28px; border-radius:6px; font-family:'Cinzel',serif;
-       font-size:.78rem; letter-spacing:2px; z-index:9999; box-shadow:0 4px 20px rgba(0,0,0,.4);">
+       font-size:.78rem; letter-spacing:2px; z-index:var(--z-aviso); box-shadow:0 4px 20px rgba(0,0,0,.4);">
     🎟 ¡Boleto confirmado! Nos vemos en el evento.
   </div>
 
@@ -7369,7 +7417,7 @@
   </section>
 
   <!-- LIGHTBOX HALLWAY -->
-  <div id="lightbox-bg" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.95);z-index:9998;
+  <div id="lightbox-bg" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.95);z-index:var(--z-modal);
     align-items:center;justify-content:center;flex-direction:column;gap:16px;">
     <button id="lightbox-close" style="position:absolute;top:20px;right:28px;background:none;border:none;
       color:var(--blanco);font-size:1.8rem;cursor:pointer;opacity:.6;transition:opacity .2s;z-index:1;"
@@ -7474,34 +7522,6 @@
   </button>
 </div>
 
-<!-- Modal: confirmar nombre antes de pagar -->
-<div id="nombre-modal" class="nombre-modal-bg">
-  <div class="nombre-modal">
-    <h3 class="nombre-modal-titulo">Confirma tu reserva</h3>
-    <p class="nombre-modal-sub">Estás a punto de reservar:</p>
-    <p id="nombre-modal-resumen" class="nombre-modal-resumen">—</p>
-    <label class="nombre-modal-label" for="nombre-modal-input">Tu nombre completo</label>
-    <input id="nombre-modal-input" type="text" class="nombre-modal-input"
-           placeholder="Nombre y apellido" autocomplete="name">
-    <p class="nombre-modal-nota">Tu reserva se agenda con tus Estrellas ⭐ (1 ⭐ por clase). El pago de Estrellas se realiza aparte, desde el botón <strong>⭐ Estrellas</strong> en tu perfil.</p>
-    <div class="nombre-modal-btns">
-      <button class="nombre-modal-cancel" onclick="cerrarNombreModal()">Cancelar</button>
-      <button class="nombre-modal-ok" onclick="continuarAlPago()">Confirmar Reserva →</button>
-    </div>
-  </div>
-</div>
-
-<!-- Modal STAFF: quién apartó esta clase (T3-F) -->
-<div id="reservas-slot-modal" class="nombre-modal-bg">
-  <div class="nombre-modal" style="max-width:460px;">
-    <h3 class="nombre-modal-titulo" id="reservas-slot-titulo">Reservas</h3>
-    <p class="reservas-modal-cap" id="reservas-slot-cap">—</p>
-    <div class="reservas-lista" id="reservas-slot-lista"></div>
-    <div class="nombre-modal-btns">
-      <button class="nombre-modal-ok" onclick="cerrarReservasSlotModal()">Cerrar</button>
-    </div>
-  </div>
-</div>
     </div>
   </section>
 
@@ -7996,13 +8016,47 @@
   </div>
 
 
-  <!-- MODAL: DETALLE DE PERFIL (click en una tarjeta del directorio) -->
-  <div id="perfil-modal" class="onb-bg" style="display:none;" onclick="if(event.target===this)cerrarPerfilModal()">
+  <!-- Modal: confirmar nombre antes de pagar.
+       Vive aquí, a nivel de <body>, y NO dentro de #horarios como antes: esa
+       sección se muda a la hoja, y `.sheet-card` lleva un transform que
+       encierra a cualquier `position:fixed` de adentro. En escritorio este
+       modal salía del tamaño de la tarjeta en vez de cubrir la pantalla. -->
+  <div id="nombre-modal" class="nombre-modal-bg">
+    <div class="nombre-modal">
+      <h3 class="nombre-modal-titulo">Confirma tu reserva</h3>
+      <p class="nombre-modal-sub">Estás a punto de reservar:</p>
+      <p id="nombre-modal-resumen" class="nombre-modal-resumen">—</p>
+      <label class="nombre-modal-label" for="nombre-modal-input">Tu nombre completo</label>
+      <input id="nombre-modal-input" type="text" class="nombre-modal-input"
+             placeholder="Nombre y apellido" autocomplete="name">
+      <p class="nombre-modal-nota">Tu reserva se agenda con tus Estrellas ⭐ (1 ⭐ por clase). El pago de Estrellas se realiza aparte, desde el botón <strong>⭐ Estrellas</strong> en tu perfil.</p>
+      <div class="nombre-modal-btns">
+        <button class="nombre-modal-cancel" onclick="cerrarNombreModal()">Cancelar</button>
+        <button class="nombre-modal-ok" onclick="continuarAlPago()">Confirmar Reserva →</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- SUBHOJA STAFF: quién apartó esta clase (T3-F). El envoltorio es sólo la
+       casa del panel: quien lo enseña es la subhoja, que lo adopta al abrir. -->
+  <div id="reservas-slot-modal" class="nombre-modal-bg">
+    <div class="nombre-modal">
+      <h3 class="nombre-modal-titulo" id="reservas-slot-titulo">Reservas</h3>
+      <p class="reservas-modal-cap" id="reservas-slot-cap">—</p>
+      <div class="reservas-lista" id="reservas-slot-lista"></div>
+      <div class="nombre-modal-btns">
+        <button class="nombre-modal-ok" onclick="cerrarReservasSlotModal()">Cerrar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- SUBHOJA: DETALLE DE PERFIL (click en una tarjeta del directorio) -->
+  <div id="perfil-modal" class="onb-bg" style="display:none;">
     <div id="perfil-modal-card" class="onb-card pm-card"></div>
   </div>
 
-  <!-- MODAL: ASISTENCIAS DE ALUMNA DE MOSTRADOR (efectivo · solo admin) -->
-  <div id="manual-asist-modal" class="onb-bg" style="display:none;" onclick="if(event.target===this)cerrarAsistManual()">
+  <!-- SUBHOJA: ASISTENCIAS DE ALUMNA DE MOSTRADOR (efectivo · solo admin) -->
+  <div id="manual-asist-modal" class="onb-bg" style="display:none;">
     <div class="onb-card">
       <h3 class="onb-title" id="manual-asist-titulo">Asistencias</h3>
       <p class="onb-sub">Agrega o quita las fechas de clase a las que asistió. Tú llevas este registro a mano.</p>
@@ -9344,11 +9398,11 @@
     if (!modal) return;
     _slotAbierto = { sid, hora, dia, tipo };
     // ABRIR ANTES DE PINTAR, y en este orden a propósito. Al revés (pintar y
-    // luego abrir) el modal sólo servía UNA vez por carga: cerrarlo deja
+    // luego abrir) el panel sólo servía UNA vez por carga: cerrarlo deja
     // `style.display='none'` puesto en línea, y `_pintarReservasSlot` se
-    // plantaba en ese mismo valor para no pintar sobre un modal cerrado ⇒ la
+    // plantaba en ese mismo valor para no pintar sobre un panel cerrado ⇒ la
     // segunda clase que tocaras se abría con los datos de la PRIMERA.
-    modal.style.display = 'flex';
+    window.abrirSubhoja('Clase', '🎪', modal.querySelector('.nombre-modal'));
     _pintarReservasSlot();
   }
   // Sanea lo que va a viajar DENTRO de un atributo onclick. Son ids nuestros
@@ -9372,7 +9426,9 @@
     reservas.forEach(r => { const e = r.uid ? marcas[r.uid] : null; if (e === 'asistio') si++; else if (e === 'falta') no++; });
     const pend = Math.max(0, reservas.length - si - no);
 
-    if (tit) tit.textContent = (claseNombres[tipo] || 'Clase') + ' · ' + (DIAS_NOMBRE[dia] || '') + ' · ' + hora;
+    const titulo = (claseNombres[tipo] || 'Clase') + ' · ' + (DIAS_NOMBRE[dia] || '') + ' · ' + hora;
+    if (tit) tit.textContent = titulo;
+    if (window.tituloSubhoja) window.tituloSubhoja(titulo);
     if (cap) {
       cap.innerHTML = reservas.length + ' de ' + CUPO_MAX + ' lugares apartados' +
         (reservas.length >= CUPO_MAX ? ' · <strong style="color:var(--naranja)">Clase Full</strong>' : '') +
@@ -9409,8 +9465,7 @@
     }).join('');
   }
   window.cerrarReservasSlotModal = () => {
-    const m = document.getElementById('reservas-slot-modal');
-    if (m) m.style.display = 'none';
+    if (window.cerrarSubhoja) window.cerrarSubhoja();
     _slotAbierto = null;
   };
   window.toggleFiltroMisClases = () => {
@@ -10475,8 +10530,61 @@
 
     host.querySelectorAll('[data-sheet-cerrar]').forEach(el =>
       el.addEventListener('click', () => window.cerrarVista()));
+
+    /* ── SUBHOJA · segundo nivel ──────────────────────────────────────────
+       Los paneles que se abren DESDE una hoja (detalle de clase, pase de
+       lista, agendar hora, perfil de la comunidad) eran popups sueltos, cada
+       uno con su propia caja y su propio piso. No los rehacemos: la subhoja
+       ADOPTA el panel que ya existe, lo enseña con el cuerpo de la hoja y al
+       cerrar lo devuelve a su casa. Así el HTML y el JS que los llena siguen
+       igual, y lo único que cambia es dónde se pintan.
+       Todos los adoptados son hijos únicos de su envoltorio, por eso al
+       devolverlos basta con volver a colgarlos: no hay posición que guardar. */
+    const _sub = { nodo:null, casa:null };
+    const shost = document.getElementById('subhoja-host');
+
+    window.abrirSubhoja = (titulo, icono, nodo) => {
+      if (typeof nodo === 'string') nodo = document.getElementById(nodo);
+      const sbody = document.getElementById('subhoja-body');
+      if (!shost || !sbody || !nodo) return;
+      window.cerrarSubhoja();
+      _sub.nodo = nodo;
+      _sub.casa = nodo.parentElement;
+      sbody.appendChild(nodo);
+      shost.querySelector('.sheet-title-txt').textContent = titulo || '';
+      shost.querySelector('.sheet-ico').textContent = icono || '';
+      shost.classList.add('abierto');
+      shost.setAttribute('aria-hidden','false');
+      sbody.scrollTop = 0;
+      document.body.style.overflow = 'hidden';
+    };
+
+    window.cerrarSubhoja = () => {
+      if (!shost) return;
+      shost.classList.remove('abierto');
+      shost.setAttribute('aria-hidden','true');
+      if (_sub.nodo && _sub.casa) _sub.casa.appendChild(_sub.nodo);
+      _sub.nodo = _sub.casa = null;
+      // La hoja de abajo puede seguir abierta: el candado del scroll es suyo.
+      if (!host.classList.contains('abierto')) document.body.style.overflow = '';
+    };
+
+    window.subhojaAbierta = () => !!(shost && shost.classList.contains('abierto'));
+    window.hojaAbierta = () => host.classList.contains('abierto');
+
+    // El título de algunos paneles se calcula al pintarlos, después de abrir.
+    window.tituloSubhoja = (txt) => {
+      if (shost) shost.querySelector('.sheet-title-txt').textContent = txt || '';
+    };
+
+    if (shost) shost.querySelectorAll('[data-subhoja-cerrar]').forEach(el =>
+      el.addEventListener('click', () => window.cerrarSubhoja()));
+
     document.addEventListener('keydown', e => {
-      if (e.key === 'Escape' && host.classList.contains('abierto')) window.cerrarVista();
+      if (e.key !== 'Escape') return;
+      // Escape retira UNA capa: primero la de encima.
+      if (window.subhojaAbierta()) { window.cerrarSubhoja(); return; }
+      if (host.classList.contains('abierto')) window.cerrarVista();
     });
 
     // Re-apuntar accesos que antes hacían scroll a secciones ya ocultas.
@@ -10641,10 +10749,15 @@
     document.body.style.overflow = 'hidden';
   });
 
+  /* El candado del scroll es UNO y lo comparten la hoja, la subhoja y esta
+     visor. Soltarlo siempre —y correr al cerrar aunque el visor ya estuviera
+     cerrado— hacía que CUALQUIER Escape devolviera el scroll a la página con
+     la hoja todavía abierta. */
   function cerrarLightbox() {
+    if (lb.style.display !== 'flex') return;
     lb.style.display = 'none';
     lbImg.src = '';
-    document.body.style.overflow = '';
+    if (!window.hojaAbierta() && !window.subhojaAbierta()) document.body.style.overflow = '';
   }
 
   document.getElementById('lightbox-close').addEventListener('click', cerrarLightbox);
