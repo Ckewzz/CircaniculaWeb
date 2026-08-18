@@ -9449,8 +9449,13 @@
     const modal = document.getElementById('reservas-slot-modal');
     if (!modal) return;
     _slotAbierto = { sid, hora, dia, tipo };
-    _pintarReservasSlot();
+    // ABRIR ANTES DE PINTAR, y en este orden a propósito. Al revés (pintar y
+    // luego abrir) el modal sólo servía UNA vez por carga: cerrarlo deja
+    // `style.display='none'` puesto en línea, y `_pintarReservasSlot` se
+    // plantaba en ese mismo valor para no pintar sobre un modal cerrado ⇒ la
+    // segunda clase que tocaras se abría con los datos de la PRIMERA.
     modal.style.display = 'flex';
+    _pintarReservasSlot();
   }
   // Sanea lo que va a viajar DENTRO de un atributo onclick. Son ids nuestros
   // (uid de Firebase, slotId generado aquí), pero un id con comilla rompería el
@@ -9463,7 +9468,10 @@
     const tit   = document.getElementById('reservas-slot-titulo');
     const cap   = document.getElementById('reservas-slot-cap');
     const lista = document.getElementById('reservas-slot-lista');
-    if (!modal || !lista || modal.style.display === 'none') return;
+    // Quién dice si el modal está abierto es `_slotAbierto` (arriba), NO el
+    // `display`. Preguntarle al CSS por el estado de la app es lo que rompió
+    // esto: un valor que existe para PINTAR terminó decidiendo LÓGICA.
+    if (!modal || !lista) return;
     const reservas = _reservasPorSlot[sid] || [];
     const marcas   = _asistPorSlot[sid] || {};
     let si = 0, no = 0;

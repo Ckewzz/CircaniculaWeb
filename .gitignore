@@ -3,3 +3,16 @@ Images_backup/
 
 # Herramientas locales de desarrollo/validación (servidor estático, preview)
 .claude/
+
+# SECRETOS — nunca deben salir de esta máquina.
+# Este repo se publica tal cual en GitHub Pages: lo que se commitea queda
+# descargable desde circanicula.com. Una llave de servicio aquí = la base de
+# datos entera abierta a quien pase. Esto es una RED DE SEGURIDAD, no un
+# permiso: los secretos NO se guardan en la carpeta del proyecto.
+*firebase-adminsdk*.json
+*service-account*.json
+*serviceAccountKey*.json
+.env
+.env.*
+*.pem
+*.key
