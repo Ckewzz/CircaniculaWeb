@@ -1,6 +1,5 @@
 const CACHE_NAME = 'circanicula-v14';
 
-// Recursos a cachear para uso offline
 const STATIC_ASSETS = [
   '/',
   '/index.html',
@@ -21,17 +20,11 @@ const STATIC_ASSETS = [
 ];
 
 self.addEventListener('install', event => {
-  // OJO: ya NO llamamos self.skipWaiting() aquí. Así, cuando hay una versión
-  // nueva, el SW queda "esperando" (waiting) y la app le muestra a la persona
-  // el aviso "Nueva versión disponible". Solo se activa cuando ella toca
-  // "Actualizar" (mensaje SKIP_WAITING de abajo). En la PRIMERA instalación
-  // —sin SW previo— igual se activa de inmediato: no hay a quién esperar.
   event.waitUntil(
     caches.open(CACHE_NAME).then(cache => cache.addAll(STATIC_ASSETS))
   );
 });
 
-// La app pide activar la versión nueva cuando la persona toca "Actualizar".
 self.addEventListener('message', event => {
   if (event.data && event.data.type === 'SKIP_WAITING') self.skipWaiting();
 });
@@ -49,7 +42,6 @@ self.addEventListener('activate', event => {
 self.addEventListener('fetch', event => {
   const url = new URL(event.request.url);
 
-  // Nunca cachear Firebase, Stripe, Formspree, YouTube
   const skipCache = [
     'firebaseapp.com', 'googleapis.com', 'gstatic.com',
     'stripe.com', 'formspree.io', 'youtube.com'
@@ -59,9 +51,6 @@ self.addEventListener('fetch', event => {
     return;
   }
 
-  // El HTML (navegación) va por RED PRIMERO: siempre la última versión cuando
-  // hay internet; si no hay, cae al index.html cacheado. Esto evita que la PWA
-  // se quede pegada en una versión vieja.
   const esNavegacion =
     event.request.mode === 'navigate' ||
     event.request.destination === 'document';
@@ -79,7 +68,6 @@ self.addEventListener('fetch', event => {
     return;
   }
 
-  // Resto de assets estáticos (imágenes, manifest): CACHE PRIMERO.
   event.respondWith(
     caches.match(event.request).then(cached => {
       if (cached) return cached;

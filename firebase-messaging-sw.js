@@ -1,10 +1,3 @@
-// firebase-messaging-sw.js — Service Worker dedicado a Firebase Cloud Messaging (FCM).
-// Recibe y muestra notificaciones push cuando la pestaña está en segundo plano o cerrada.
-// Usa el SDK "compat" porque los service workers no soportan imports ESM.
-// Se registra con scope propio (/firebase-cloud-messaging-push-scope) para NO
-// chocar con el service worker de la PWA (sw.js, scope "/").
-// NOTA: el ENVÍO remoto de notificaciones llega con el backend (n8n/VPS, Fase 4);
-// este archivo solo RECIBE lo que ese backend mande vía FCM.
 importScripts('https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js');
 importScripts('https://www.gstatic.com/firebasejs/10.12.0/firebase-messaging-compat.js');
 
@@ -19,7 +12,6 @@ firebase.initializeApp({
 
 const messaging = firebase.messaging();
 
-// Mensajes recibidos con la app en segundo plano / cerrada.
 messaging.onBackgroundMessage((payload) => {
   const n = payload.notification || {};
   self.registration.showNotification(n.title || 'Circanícula', {
@@ -30,7 +22,6 @@ messaging.onBackgroundMessage((payload) => {
   });
 });
 
-// Al hacer click en la notificación: enfoca una pestaña abierta o abre el sitio.
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
   const url = (event.notification.data && event.notification.data.url) || '/';

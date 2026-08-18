@@ -94,7 +94,6 @@
 
 <div class="wrap">
 
-  <!-- IDENTIDAD -->
   <div class="card">
     <h2>1 · Identidad y marca</h2>
     <p class="hint">El <em>id</em> es un slug interno (sin espacios ni acentos). El dominio es el sitio real de la academia.</p>
@@ -112,7 +111,6 @@
     </div>
   </div>
 
-  <!-- CONTACTO -->
   <div class="card">
     <h2>2 · Contacto</h2>
     <p class="hint">Link de Google Calendar para la clase de prueba y el endpoint de Formspree del formulario.</p>
@@ -120,7 +118,6 @@
     <div class="field"><label>Endpoint Formspree</label><input type="url" id="f-formspree" placeholder="https://formspree.io/f/xxxxxxx"></div>
   </div>
 
-  <!-- FIREBASE -->
   <div class="card">
     <h2>3 · Firebase</h2>
     <p class="hint">Pega aquí el objeto <code>firebaseConfig</code> que te da la consola de Firebase y pulsa “Rellenar”. O completa los campos a mano.</p>
@@ -139,7 +136,6 @@
     </div>
   </div>
 
-  <!-- STRIPE -->
   <div class="card">
     <h2>4 · Stripe Payment Links</h2>
     <p class="hint">Los 4 links de pago (uno por plan). Pueden quedar vacíos si la academia aún no los tiene.</p>
@@ -151,7 +147,6 @@
     </div>
   </div>
 
-  <!-- SUPER ADMIN -->
   <div class="card">
     <h2>5 · Super-admin (Rank 0)</h2>
     <p class="hint">Correo del dueño de la academia. Es quien tendrá control total y la ÚNICA línea a cambiar en las reglas.</p>
@@ -163,7 +158,6 @@
     <div class="err" id="err"></div>
   </div>
 
-  <!-- SALIDA -->
   <div class="salida" id="salida">
     <div class="card">
       <h2>A · Bloque TENANT</h2>
@@ -195,7 +189,6 @@
 <div class="toast" id="toast">Copiado ✓</div>
 
 <script>
-  // Sincroniza los color pickers con sus inputs de texto
   function syncColor(pick, txt){
     const p=document.getElementById(pick), t=document.getElementById(txt);
     p.addEventListener('input',()=>t.value=p.value);
@@ -204,14 +197,12 @@
   syncColor('f-colorprim','f-colorprim-tx');
   syncColor('f-colorfondo','f-colorfondo-tx');
 
-  // Sugerir dominioAlumno a partir del id
   document.getElementById('f-id').addEventListener('blur', ()=>{
     const id=document.getElementById('f-id').value.trim().toLowerCase().replace(/[^a-z0-9]/g,'');
     const da=document.getElementById('f-dominioalumno');
     if(id && !da.value) da.value='@alumno.'+id+'.app';
   });
 
-  // Parsear un firebaseConfig pegado
   function parsearFirebase(){
     const txt=document.getElementById('f-fbpaste').value;
     const map={apiKey:'f-apikey',authDomain:'f-authdomain',projectId:'f-projectid',
