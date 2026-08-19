@@ -69,6 +69,39 @@ service cloud.firestore {
     function isAdmin()      { return isDueno()  || myRank() == 1; }                // + Administración
     function isStaffClase() { return isAdmin()  || myRank() == 2; }               // + Instructoras
 
+    // ── EL CANDADO DE VERDAD ─────────────────────────────────────────
+    // Un video marcado esDePaga NO puede llevar 'url' en su documento
+    // público. Si la llevara, el candado sería puro dibujo: cualquiera
+    // abre la consola, lee el doc y se copia el enlace. El enlace vive en
+    // videos/{id}/privado/fuente, que sí está cerrado.
+    // Esto se valida AQUÍ, en las reglas, y no en el panel de admin: el
+    // panel es JavaScript en la máquina del visitante y no prueba nada.
+    // Compatible con lo ya subido: si el doc no trae 'esDePaga', se toma
+    // como gratis y no le pedimos nada.
+    function esDePagaNuevo() {
+      return request.resource.data.get('esDePaga', false) == true;
+    }
+    function urlFueraSiEsDePaga() {
+      return !esDePagaNuevo() || request.resource.data.get('url', '') == '';
+    }
+    // Un video GRATIS sí tiene que traer su enlace (como siempre); uno de
+    // paga tiene que NO traerlo. Las dos mitades del mismo candado.
+    function urlCoherente() {
+      return esDePagaNuevo()
+             ? request.resource.data.get('url', '') == ''
+             : request.resource.data.url is string;
+    }
+
+    // ── BIBLIOTECA DE VIDEO (compras) ────────────────────────────────
+    // ¿Esta persona compró este video? La constancia de compra vive en
+    // usuarios/{uid}/biblioteca/{videoId} y SOLO la escribe el webhook
+    // (Admin SDK, que se salta estas reglas). Desde el cliente es de solo
+    // lectura: si se pudiera escribir, cualquiera se autoregalaría el curso.
+    function tieneEnBiblioteca(videoId) {
+      return signedIn() && exists(
+        /databases/$(database)/documents/usuarios/$(request.auth.uid)/biblioteca/$(videoId));
+    }
+
     // ¿Puedo editar el CALENDARIO de cierta persona (uid) con rank targetRank?
     //   • El Dueño (Rank 0) puede con cualquiera.
     //   • Cualquier staff (Rank ≤ 3) puede con SU PROPIO calendario.
@@ -181,6 +214,19 @@ service cloud.firestore {
       // (eso requiere Admin SDK); para "quitar" a un tercero usa cuentaActiva:false
       // (deshabilitar), que sí controla el Dueño vía las reglas update de arriba.
       allow delete: if isOwner(uid);
+
+      // ── BIBLIOTECA: qué videos/cursos compró esta persona ───────────
+      //  usuarios/{uid}/biblioteca/{videoId} = { videoId, cursoId, origen,
+      //    compradoEn, expiraEn, stripeSessionId, precioCentavos }
+      //  LECTURA: la dueña (para ver sus candados abiertos) y el staff de
+      //   clase (soporte: "no me abre el video 3").
+      //  ESCRITURA: NADIE desde el cliente. Solo el webhook con Admin SDK,
+      //   que se salta las reglas. Si esto fuera escribible, cualquiera se
+      //   regalaría el curso completo con una línea en la consola.
+      match /biblioteca/{videoId} {
+        allow read: if isOwner(uid) || isStaffClase();
+        allow write: if false;
+      }
     }
 
     // ── DATOS PRIVADOS (teléfono) ─────────────────────────────────────
@@ -375,20 +421,67 @@ service cloud.firestore {
     }
 
     // ── VIDEOS ("Aprende con Nosotros" + destacado del home) ──────────
-    //  videos/{id} = { url, fuente, categoria, disciplina, titulo, destacado,
-    //                  publico, orden, createdAt, createdBy, creadoPorNombre, tenantId }
-    //  LECTURA: con sesión (biblioteca para alumnas registradas). Los marcados
-    //   publico:true (p. ej. "Nuestro video más reciente" del home) los ve
-    //   CUALQUIERA, incluso sin cuenta — es el teaser público del inicio.
-    //   ⚠️ Para leer sin sesión, la consulta debe filtrar where('publico','==',true).
-    //  ESCRITURA: solo el staff de clase (Rank ≤ 2) desde su panel de perfil.
-    //   'createdBy' debe ser quien lo crea (no se puede falsear el autor).
+    //  videos/{id} = { fuente, categoria, disciplina, cursoId, titulo, destacado,
+    //                  publico, esDePaga, precioCentavos, orden, createdAt,
+    //                  createdBy, creadoPorNombre, tenantId, url? }
+    //
+    //  ⚠️  POR QUÉ ESTÁ PARTIDO EN DOS (esto es lo importante):
+    //    El catálogo tiene que poder LISTARSE completo — la alumna necesita ver
+    //    la tarjeta del video 5 con su candado y su precio ANTES de comprarlo.
+    //    Pero en Firestore, si una consulta devuelve UN solo documento que la
+    //    regla niega, se cae la CONSULTA ENTERA. O sea: si escondiéramos los
+    //    videos de paga negando su lectura, la alumna no vería NADA, ni los
+    //    gratis. Por eso los metadatos quedan legibles y lo que se protege es
+    //    el enlace reproducible, que vive aparte en la subcolección 'privado'.
+    //
+    //  LECTURA (metadatos): publico:true lo ve cualquiera (teaser del home);
+    //   el resto del catálogo, quien tenga sesión. Aquí NO hay nada que robar:
+    //   título, precio y candado son justamente lo que queremos enseñar.
+    //  ESCRITURA: solo el staff de clase (Rank ≤ 2) desde su panel.
     match /videos/{id} {
       allow read: if (resource.data.publico == true) || signedIn();
       allow create: if isStaffClase()
         && request.resource.data.createdBy == request.auth.uid
-        && request.resource.data.url is string
-        && request.resource.data.categoria is string;
+        && request.resource.data.categoria is string
+        && urlCoherente();
+      allow update: if isStaffClase() && urlFueraSiEsDePaga();
+      allow delete: if isStaffClase();
+
+      // ── EL ENLACE REPRODUCIBLE (lo único que de verdad se vende) ────
+      //  videos/{id}/privado/fuente = { url, bunnyVideoId, bunnyLibraryId }
+      //  Solo lo lee quien COMPRÓ el video o el staff. Un video gratis no
+      //  necesita esta subcolección: su url va en el doc público.
+      match /privado/{doc} {
+        allow read: if isStaffClase() || tieneEnBiblioteca(id);
+        allow write: if isStaffClase();
+      }
+    }
+
+    // ── CURSOS (p. ej. "Calentamiento en Piso": 2 gratis + 7 con candado) ──
+    //  cursos/{id} = { titulo, disciplina, descripcion, portada, orden,
+    //                  precioCompletoCentavos, estrellasIncluidas, mesesVigencia,
+    //                  publico, tenantId, createdBy, createdAt }
+    //  El escaparate es público a propósito: el precio y la comparativa
+    //  "video por video vs. curso completo" son el anzuelo de venta, no un
+    //  secreto. Lo que se protege es el enlace, no la vitrina.
+    match /cursos/{id} {
+      allow read: if (resource.data.publico == true) || signedIn();
+      allow create: if isStaffClase()
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.titulo is string;
+      allow update, delete: if isStaffClase();
+    }
+
+    // ── RUTAS (tipo Platzi: cruzan cursos de varias disciplinas) ──────
+    //  rutas/{id} = { titulo, descripcion, pasos[], orden, publico,
+    //                 tenantId, createdBy, createdAt }
+    //  'pasos' es una LISTA de datos, no HTML: [{tipo:'curso'|'video', ref}].
+    //  Así Lourdes arma "Ruta de Aerialista Experto" sin tocar código.
+    match /rutas/{id} {
+      allow read: if (resource.data.publico == true) || signedIn();
+      allow create: if isStaffClase()
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.titulo is string;
       allow update, delete: if isStaffClase();
     }
 
